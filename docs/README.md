@@ -6,32 +6,29 @@
 </div>
 
 ## 每次日报
-- 最新运行日期：2026-06-11
-- 运行时间：2026-06-11 22:06:54 UTC
+- 最新运行日期：2026-06-12
+- 运行时间：2026-06-12 21:52:14 UTC
 - 运行状态：成功
-- 本次总论文数：4
-- 精读区：3
-- 速读区：1
+- 本次总论文数：2
+- 精读区：0
+- 速读区：2
 
 ### 今日简报（AI）
-今日研读聚焦on-policy蒸馏的几何基础与鲁棒内化，并探索环境反馈的自我蒸馏方法。其中两篇9分论文深入分析了策略蒸馏中的几何特性与内化机制，是今日最值得关注的方向。建议优先从几何视角理解蒸馏中的梯度行为，并关注利用环境反馈增强自我蒸馏效率的实践。
-- 详情：[/202606/11/README](/202606/11/README)
+1) 今日速读两篇6分论文，聚焦蒸馏技术新路径：非路由器教师指导MoE学生，以及世界模型自蒸馏训练。  
+2) 值得关注：路径对齐解压缩蒸馏（PADD）解决异构模型知识迁移难题；世界模型自蒸馏为通用任务学习提供新范式。  
+3) 建议读者优先关注PADD在MoE轻量化部署的潜力，以及自蒸馏方法对强化学习泛化能力的提升。
+- 详情：[/202606/12/README](/202606/12/README)
 
 ### 精读区论文标签
-1. [On the Geometry of On-Policy Distillation](/202606/11/2606.07082v2-on-the-geometry-of-on-policy-distillation)  
-   标签：评分：9.0/10、query:policy-dist
-   evidence：直接研究在线策略蒸馏
-2. [When Context Returns: Toward Robust Internalization in On-Policy Distillation](/202606/11/2606.11627v1-when-context-returns-toward-robust-internalization-in-on-policy-distillation)  
-   标签：评分：9.0/10、query:policy-dist
-   evidence：研究LLM中在线策略蒸馏内化的稳健性
-3. [RLCSD: Reinforcement Learning with Contrastive On-Policy Self-Distillation](/202606/11/2606.11709v1-rlcsd-reinforcement-learning-with-contrastive-on-policy-self-distillation)  
-   标签：评分：9.0/10、query:policy-dist
-   evidence：用于推理模型的对比在线策略自蒸馏
+- 本次无精读推荐。
 
 ### 速读区论文标签
-1. [HERO: Hindsight-Enhanced Reflection from Environment Observations for Agentic Self-Distillation](/202606/11/2606.11559v1-hero-hindsight-enhanced-reflection-from-environment-observations-for-agentic-self-distillation)  
-   标签：评分：7.0/10、query:policy-dist
-   evidence：结合事后增强的多轮智能体在线策略自蒸馏
+1. [PADD: Path-Aligned Decompression Distillation for Non-Router Teacher to Guide MoE Student Learning](/202606/12/2606.10369v1-padd-path-aligned-decompression-distillation-for-non-router-teacher-to-guide-moe-student-learning)  
+   标签：评分：6.0/10、query:policy-dist
+   evidence：提出带策略优化的蒸馏方法用于MoE学生学习
+2. [World Model Self-Distillation: Training World Models to Solve General Tasks](/202606/12/2606.12072v1-world-model-self-distillation-training-world-models-to-solve-general-tasks)  
+   标签：评分：6.0/10、query:policy-dist
+   evidence：结合自蒸馏和强化学习训练世界模型
 
 
 <div class="dpr-home-promo-card">
