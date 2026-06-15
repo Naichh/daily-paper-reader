@@ -1,0 +1,1843 @@
+Title: Diffusion Policy Optimization without Drifting Apart
+
+URL Source: https://arxiv.org/pdf/2606.13795v1
+
+Published Time: Mon, 15 Jun 2026 00:06:39 GMT
+
+Number of Pages: 26
+
+Markdown Content:
+# Diffusion Policy Optimization without Drifting Apart 
+
+Haozhe Jiang 1,2 ∗ Haiwen Feng 1,2 † Pieter Abbeel 1
+
+Jiantao Jiao 1,3 Angjoo Kanazawa 1‡ Nika Haghtalab 1‡ 
+
+Abstract 
+
+RL post-training has become increasingly pivotal for improving diffusion policies, but existing diffusion policy-gradient methods are often unstable and cannot achieve reliable policy improvement. We identify the cause as the double-drift phenomenon: optimizing a variational surrogate can let the ELBO separate from the true log-likelihood, which then makes the resulting proxy policy gradient misaligned with the true policy gradient of expected return. We propose DiPOD , a diffusion policy optimization framework that maintains tight-bound behavior throughout training by interleaving self-distillation with policy-improving gradient updates. This leads to a simple and practical algorithm: augmenting each diffusion policy-gradient update with an on-policy ELBO regularizer. Across diffusion language model post-training and continuous-control diffusion policies, DiPOD substantially stabilizes training and reaches higher rewards than previous methods. 
+
+1 Introduction 
+
+Diffusion models are emerging as a powerful paradigm for discrete generation in language, code, and mathematical reasoning, while diffusion and flow models more broadly support strong performance in continuous domains such as images [Ho et al., 2020, Song et al., 2020, Song and Ermon, 2019], videos [Ho et al., 2022b,a], and robotic control [Black et al., Bjorck et al., 2025]. This promise is especially compelling for reasoning with diffusion LLMs (dLLMs) [Nie et al., 2025, Xie et al., 2025, Song et al., 2025], which offer fast parallel sampling and flexible non-autoregressive decod-ing [Jiang et al., 2025, Ermon, 2026, Chen et al., 2026]. Yet post-training diffusion policies with reinforcement learning remains fundamentally difficult: standard policy-gradient methods rely on the log-likelihood log πθ (a|o), while for diffusion models this quantity is generally not tractable. Recent methods [Zhao et al., 2025, McAllister et al., 2025, Wang et al., 2025] have therefore introduced a range of more tractable proxies for the likelihood, but these approaches still do not provide a systematic understanding of when proxy-based policy-gradient updates remain reliable. This gap is particularly consequential for dLLMs, where unstable RL post-training causes reasoning gains to lag far behind those of autoregressive counterparts. In this work, we propose DiPOD —Di ffusion Policy optimization with Out Drifting apart—a principled framework for reliable policy-gradient updates that is native to diffusion and flow policies . When applied to dLLM post-training, DiPOD substantially stabilizes learning and improves reasoning performance on benchmarks such as GSM8K, MATH500, Countdown, and Sudoku, including being the first method to saturate Sudoku in the zero-shot setting (Section 4.2 and Table 1). As an RL post-training method native to diffusion policies, DiPOD is designed to satisfy two desiderata. First, (A) policy-gradient updates should improve the downstream objective as this is the              
+
+> ∗ericjiang@berkeley.edu
+> †haiwen.feng@berkeley.edu
+> Affiliations: 1UC Berkeley; 2Impossible, Inc.; 3NVIDIA.
+> ‡Equal advising. Preprint.
+> arXiv:2606.13795v1 [cs.LG] 11 Jun 2026 𝑎
+> ln 𝜋
+> ELBO
+> 𝑎
+> ln 𝜋
+> ELBO
+> 𝑎
+> ln 𝜋
+> ELBO
+> Policy Gradient Self -Distillation
+> Trajectory of DiPOD
+> Policies with Tight ELBO
+> Trajectory of Unstable
+> Prior Algorithms
+> 𝑥
+> 𝑦 𝑧
+> 𝑥 𝑦 𝑧
+
+Figure 1: Illustration of DiPOD using an expected-return landscape over the parameter space of the policy. We want the policy to both guarantee policy improvement and have a tight ELBO, as illustrated by the colored curves in the figure. Prior proxy-based algorithms (the plotted reward curve comes from a real FPO [McAllister et al., 2025] experiment on GSM8K [Cobbe et al., 2021]; see Figure 3) can initially achieve policy improvements, but later become unstable as the ELBOs are no longer tight. In contrast, DiPOD interleaves self-distillation steps and adequate gradient updates, as illustrated by the blue arrows. Gradient updates guarantee policy improvements locally, and self-distillation brings the parameter to where the ELBO is tight while keeping the expected reward unchanged. main goal of post-training. However, reward improvement alone is not enough for improving diffusion models, especially when the probabilistic structure that makes the policy a coherent diffusion model is destroyed in the process. Hence, in addition, we require (B) fine-tuning to preserve the diffusion-model structure by keeping the proxy objective tight . DiPOD meets both criteria. As illustrated in Figure 1, DiPOD prevents proxy updates from drifting away from the intended policy-improvement direction by interleaving (i) a policy-preserving self-distillation step that ensures minimal discrepancy between the likelihood and its proxies, with (ii) adequate policy-gradient updates 3 that improve expected return. From this framework, we derive a surprisingly simple drop-in implementation: add a per-update ELBO regularization term to the diffusion policy-gradient update (Algorithm 2). 
+
+Variational-Inference Approaches to RL Post-training. Why is updating diffusion with pol-icy gradient hard in the first place? Treating the denoising chain as an MDP makes likelihoods tractable [Black et al., 2023, Ren et al., 2024], but it ties training to a sampler and is a poor fit for dLLMs, whose post-training should preserve flexible decoding orders and inference budgets. Recent 
+
+non-MDP dLLM methods therefore approximate likelihoods directly, using mean-field or one-step estimators, partial dependency restorations, or imposed autoregressive orders [Zhao et al., 2025, Xie et al., 2025]; these can alter the optimized policy from the executed diffusion policy. Variational-inference (VI) approaches instead replace log πθ with evidence bounds such as ELBO [McAllister et al., 2025] or EUBO [Wang et al., 2025], preserving diffusion’s native sampling flexibility while connecting naturally to pretraining objectives. The key caveat is that this faithfulness is only local. Variational diffusion-RL methods can work well 
+
+initially : near a well-pretrained initialization where the evidence bound is tight, ELBO remains a good local proxy for the true log-likelihood. However, RL updates do not preserve this tight-bound regime. As optimization proceeds, the discrepancy between ELBO and log-likelihood can grow, and our analysis pinpoints the Achilles heel: once ELBO drifts from log-likelihood, policy-gradient fidelity drifts with it. We refer to this coupled effect as the double drift phenomenon. 
+
+> 3This is a technical term (see Definition 2.1) for a common type of policy-gradient update that is accurate in the absence of large discrepancy between likelihood and its proxies.
+
+2DiPOD addresses this by making tight-bound behavior an explicit design constraint. Our key observation is that many VI-based estimators are adequate (Definition 2.1): if the diffusion model were perfectly trained so that the evidence bound is tight, the proxy gradient matches the true log-likelihood gradient, and a policy-gradient step based on the proxy coincides with the true policy gradient. DiPOD makes use of this by repeatedly pulling the model back toward a tight-bound regime via self-distillation—which tightens the evidence bound under a reference rollout distribution without changing the policy distribution—and only then taking policy-gradient steps. In the idealized interleaved form shown in Figure 1, gradient updates guarantee local policy improvement, while self-distillation restores tightness without changing the policy output distribution. Practically, we implement a simple approximation of this interleaving: for each batch of rollouts, we update parameters using the usual diffusion policy gradient estimator plus an ELBO maximization term on the same rollout data. This additional ELBO term acts as a regularizer that reduces variational discrepancy on-policy, improving alignment between the proxy gradient and the true policy gradient. Empirically, this simple DiPOD implementation is surprisingly effective: it substantially stabilizes training and improves reward optimization across both discrete dLLM post-training tasks (e.g., GSM8K Cobbe et al. [2021], MATH500 Lightman et al. [2023], Sudoku Arel, Countdown Pan et al. [2025]) and continuous-control flow policies (e.g., motion tracking for humanoid robots; details in Section 4). In summary, we make three contributions: • We identify a fundamental failure mode in variational diffusion RL: double drift . As RL updates loosen the evidence bound, ELBO drifts from log-likelihood, which in turn causes proxy policy-gradient updates to drift from the intended policy-gradient direction (Section 3.1). • We propose DiPOD , a principled framework for reliable diffusion policy optimization that makes staying in the tight-bound regime an explicit design objective, achieved by interleaving policy-gradient updates with policy-preserving self-distillation (Section 3.2). • We derive a simple, drop-in practical algorithm that instantiates this principle by adding a per-update ELBO regularizer, substantially improving the stability and reward optimization of diffusion RL in practice (Algorithm 2 and Section 4). 
+
+1.1 Related Work Diffusion models. Diffusion models are a powerful class of generative models, with applications in image generation [Ho et al., 2020, Song et al., 2020, Song and Ermon, 2019], video generation [Ho et al., 2022b,a], and robotics [Black et al., Bjorck et al., 2025]. More recently, diffusion language models have emerged as a promising alternative to autoregressive models for fast and flexible decoding [Nie et al., 2025, Xie et al., 2025, Song et al., 2025]. We study diffusion policies through the variational-inference perspective [Kingma and Gao, 2023, Sohl-Dickstein et al., 2015], which is the lens used by DiPOD to reason about likelihood proxies and evidence bounds. 
+
+Policy gradients. Policy-gradient methods directly optimize a parameterized policy for expected return [Williams, 1992, Schulman et al., 2017], and have been central to high-dimensional con-trol [Schulman et al., 2016], locomotion [Rudin et al., 2022], manipulation [Schwarke et al., 2023], and modern language-model post-training [Shao et al., 2024]. DiPOD targets this online policy-optimization setting for diffusion policies. 
+
+RL with diffusion policies. The main obstacle to applying policy gradients to diffusion policies is that the exact log-likelihood is intractable. Prior work either treats the denoising process itself as an MDP [Black et al., 2023, Ren et al., 2024], replaces likelihoods with variational evidence bounds [McAllister et al., 2025, Wang et al., 2025], or simplifies dependencies in diffusion language models to obtain tractable likelihood surrogates [Zhao et al., 2025, Yang et al., 2025, Xie et al., 2025, Tang et al., 2025]. These approaches trade off tractability, sampler flexibility, and alignment between the optimized proxy and the executed diffusion policy. DiPOD focuses on the variational line and stabilizes it by keeping the evidence bound aligned with the true likelihood during policy optimization. A fuller discussion of related work appears in Section A. 32 Preliminaries 
+
+Policy Gradient Method. The goal of reinforcement learning (RL) is to learn a policy πθ that maximizes the expected return in an environment. Here θ denotes the parameters of the policy. At timestep t, the policy takes an observation ot from the environment, then executes action at ∼
+
+πθ (·| ot), and the environment provides reward rt as feedback. The return is defined as the cumulative reward until the environment reaches a terminal state. A policy gradient algorithm updates the policy parameters θ using an estimator of the gradient of the expected return. Most policy gradient methods can be viewed as using a variant of the following gradient estimator 
+
+Eθ
+
+h
+
+∇θ log πθ (at|ot) ˆAt(ot, a t)
+
+i
+
+, (1) where ˆAt is the estimated advantage function at timestep t. The expectation is taken over the randomness of the environment and the policy. Here Eθ means that at is generated according to 
+
+πθ (·| ot). Well-known practical algorithms such as PPO [Schulman et al., 2017] and GRPO [Shao et al., 2024] can be understood as introducing modifications to this update in order to improve stability and sample efficiency. Estimating Equation (1) becomes intractable when πθ is parameterized by a diffusion or flow model, motivating a range of proxy objectives, including those based on variational bounds. 
+
+Variational Bounds. The evidence lower bound (ELBO) satisfies ELBO θ (at|ot) = log πθ (at|ot) − D L 
+
+> θ
+
+(ot, a t) (2) where DL 
+
+> θ
+
+is a non-negative discrepancy term that measures the gap between the ELBO and true log-likelihood. Furthermore, with appropriate and well-trained θ, DL 
+
+> θ
+
+(ot, a t) = 0 for all ot and at.4
+
+This means that ELBO is a tight lower bound of the true log-likelihood. Outside the reinforcement learning context, generative models are usually trained by maximizing 
+
+Eot,a t∼pdata [ELBO θ (at|ot)] (3) where pdata is the distribution that the model tries to learn. Such surrogate objectives are useful because they avoid direct likelihood computation. For diffusion models, under idealized assumptions, perfect training makes the ELBO tight, so ELBO θ (at|ot) = log πθ (at|ot). For flow models trained by conditional flow matching (CFM), the analogous idealized optimum has zero CFM loss, so the learned vector field matches the target conditional vector field. Sometimes it is also useful to consider the corresponding upper bound on log likelihood. The evidence upper bound (EUBO) satisfies EUBO θ (at|ot) = log πθ (at|ot) + DU 
+
+> θ
+
+(ot, a t)
+
+where DU 
+
+> θ
+
+is a non-negative discrepancy term that can reach zero with appropriate θ as well. While 
+
+DL 
+
+> θ
+
+can be interpreted as a KL discrepancy between posterior distributions, DU 
+
+> θ
+
+is characterized by a Renyi-type posterior discrepancy. Furthermore, if ELBO θ (at|ot) = log πθ (at|ot) for pair (ot, a t),EUBO also satisfies EUBO θ (at|ot) = log πθ (at|ot). Hence, if a diffusion model is perfectly trained, we have ELBO θ (at|ot) = EUBO θ (at|ot) = log πθ (at|ot) for all ot and at. As opposed to the ELBO, however, EUBO itself is not tractable for diffusion models and must be approximated in practice. 
+
+Adequate Gradient Estimators. Variational bounds provide attractive surrogates for the intractable log-likelihood because they can be tight. As we will see in the following sections, some variational-inference-based (VI-based) gradient estimators satisfy a useful property in this tight regime: once the surrogate coincides with the true log-likelihood, the estimator also coincides with the policy-gradient integrand in Equation (1). We call such estimators adequate. 
+
+Definition 2.1 (Adequate estimator) . A gradient estimator gθ (ot, a t) is called adequate if, for any 
+
+(ot, a t), whenever the evidence bound is tight so that ELBO θ (at|ot) = log πθ (at|ot), it satisfies 
+
+gθ (ot, a t) = ˆAt(ot, a t)∇θ log πθ (at|ot).  
+
+> 4Here we assume that θhas enough representation power to cover the zero discrepancy case.
+
+43 Method 
+
+As discussed in the previous section, diffusion policies allow efficient sampling but make the exact log-likelihood log πθ (at|ot) (and its gradient) intractable, forcing RL for diffusion models to rely on proxy objectives/estimators. Our introduction diagnosed a double drift mechanism that is particularly acute for variational-inference (VI) based diffusion RL: (i) the ELBO can drift from the true log-likelihood as the variational discrepancy grows, and consequently (ii) the proxy policy gradient will drift apart from the true policy gradient of expected return. In this section, we first use this double-drift lens to clarify limitations of representative diffusion-RL algorithms (Section 3.1). We then develop a principled framework that prevents drifting by keeping the evidence bound tight on-policy, which in turn keeps policy-gradient updates aligned with the true policy gradient. Finally, we derive a simple practical algorithm that implements this principle as a drop-in regularization term. 
+
+3.1 The Double-Drift Phenomenon 
+
+Many diffusion-RL methods differ in formulation, but the key question under our lens is: does the proxy remain faithful to log πθ , and does its induced gradient remain faithful to the true policy gradient? For VI-based approaches, the core issue is that an evidence bound update can change both the likelihood term and the variational gap, and once the gap grows, the proxy gradient inevitably deviates from ∇θ log πθ .
+
+FPO [McAllister et al., 2025]. FPO replaces the intractable likelihood score in the policy-gradient update with an ELBO score. Formally, FPO uses the gradient estimator 
+
+gFPO  
+
+> θ
+
+(ot, a t) = ∇θ ELBO θ (at|ot) ˆAt(ot, a t), (4) up to PPO-style clipping for stability. The intuition is that the ELBO acts as a tractable proxy for the log-likelihood score: in particular, increasing the ELBO on positive-advantage samples should both increase the likelihood of desirable actions and push the diffusion model closer to a tight-bound regime. However, since ELBO decomposes as the true log-likelihood minus a nonnegative discrepancy term (cf. Equation (2)), ELBO changes generally do not uniquely determine how log πθ (at|ot) changes. This creates the first drift: ELBO–likelihood inconsistency. Concretely: • The ELBO may increase even if log πθ (at|ot) decreases, provided the discrepancy decreases more. This ambiguity is especially problematic for negative-advantage updates: the ELBO can be reduced by increasing the discrepancy, i.e., “cheating” by destabilizing the diffusion model rather than reliably decreasing the true likelihood of undesirable actions. • Once the discrepancy is non-negligible, the second drift follows automatically: the proxy gradient used in FPO is ∇θ ELBO θ (at|ot), but ∇θ ELBO θ = ∇θ log πθ − ∇ θ DL 
+
+> θ
+
+. Thus, the update direction can become partially spent on changing the variational gap rather than following ∇θ log πθ , and the induced policy-gradient step may not align with the true policy gradient in Equation (1). These issues help explain why ELBO-based diffusion RL can be unstable in practice: once ELBO drifts from likelihood, the proxy gradient can drift from the true policy gradient as well. 
+
+SPG [Wang et al., 2025]. SPG explicitly targets an objective that mirrors the policy-gradient structure by using ELBO for positive advantages and EUBO for negative advantages. Formally, SPG uses the gradient estimator 
+
+gSPG  
+
+> θ
+
+(ot, a t) = 1 ˆA> 0∇θ ELBO θ (at|ot) ˆA + 1 ˆA< 0∇θ EUBO θ (at|ot) ˆA, (5) where ˆA abbreviates ˆAt(ot, a t). The objective corresponding to the SPG update (Equation (5)) is a lower bound on the original objective: 
+
+Eθ
+
+h
+
+1 ˆA> 0ELBO θ (at|ot) ˆA + 1 ˆA< 0EUBO θ (at|ot) ˆA
+
+i
+
+(6) because ELBO is a lower bound and EUBO is an upper bound on the true log-likelihood. Moreover, SPG has a nice property: when the objective is maximized, ELBO and EUBO equal the log-likelihood, and the expected return is maximized as well. However, under the double-drift lens it still has drawbacks: 5• Similar to the exact likelihood, EUBO is not tractable. The SPG implementation adopts an approximation to EUBO such that Equation (6) remains a true lower bound. This lower-bound property often stabilizes training, but the approximation can break the exact link to the idealized objective-level argument and is currently specialized to certain settings. • Most importantly for our purposes: an objective-level guarantee does not imply gradient consistency. Even if an objective becomes exact at convergence, there is no guarantee that intermediate gradient ascent steps computed from variational bounds align with the true policy gradient in Equation (1) when the bound is not tight (i.e., when the discrepancy is non-negligible). 
+
+3.2 Preventing Double Drift through Self-Distillation 
+
+We now make the core principle precise: to prevent the second drift (proxy-gradient drift), we must prevent the first drift (ELBO–likelihood drift) from accumulating along the training trajectory. Concretely, when the diffusion model is perfectly trained (or close to it), the evidence bound is tight and gradients of variational bounds coincide with gradients of the true log-likelihood. Let us take ELBO as an example. Recall from Equation (2) that ELBO is a tight lower bound of the true likelihood and the discrepancy DL 
+
+> θ
+
+(ot, a t) is minimized at zero. Assuming DL 
+
+> θ
+
+(ot, a t) is smooth in θ, at a tight-bound point we have ∇θ DL 
+
+> θ
+
+(ot, a t) = 0 , and thus ELBO θ (at|ot) = log πθ (at|ot), ⇒ ∇ θ ELBO θ (at|ot) = ∇θ log πθ (at|ot).
+
+Hence, gFPO  
+
+> θ
+
+is adequate, and if we start from a well-trained diffusion model (e.g., optimized un-der Equation (3)), the initial ELBO-based update direction in FPO aligns with the true policy gradient in Equation (1), and it remains a good approximation as long as training stays near the tight-bound regime. A similar logic applies to SPG. When the diffusion model is perfectly trained, DL 
+
+> θ
+
+(ot, a t) = 
+
+DU 
+
+> θ
+
+(ot, a t) = 0 , and hence 
+
+∇θ ELBO θ (at|ot) = ∇θ EUBO θ (at|ot) = ∇θ log πθ (at|ot),
+
+meaning that gSPG  
+
+> θ
+
+is adequate, and this justifies the strong empirical performance of VI-based RL methods for diffusion models when initialized from a pretrained model: their gradients are adequate 
+
+at initialization. The core issue is that RL updates can move the model away from this tight-bound regime, allowing the discrepancy to grow; once that happens, ELBO drifts from likelihood and the proxy gradient drifts from the true policy gradient. 
+
+Key idea: repeatedly tighten the bound on-policy. We propose to interleave policy-gradient up-dates (using an adequate estimator) with a policy-preserving self-distillation step that tightens ELBO under a reference rollout distribution . Intuitively, self-distillation directly counters the diffusion-side drift by reducing the discrepancy on-policy; this in turn restores the local tightness that makes the proxy gradient a faithful substitute for ∇θ log πθ , preventing the RL-side drift. 
+
+Algorithm 1 DiPOD (Interleave)                                                
+
+> Input: An adequate gradient estimator g, a policy parameterized by diffu-sion model πθ,n∈N+, learning rate η∈R+
+> Output: Policy πθ
+> 1: Initialize policy πθ
+> 2: Set πref ←πθ
+> 3: while πθhas not converged do
+> 4: Maximize Eref [ELBO θ(at|ot)] .▷Self-distillation 5: for i= 1 , . . . , n do
+> 6: θ←θ+ηEθ[gθ(ot, a t)] .▷Policy update 7: end for
+> 8: Set πref ←πθ
+> 9: end while
+> 10: return πθ
+
+Algorithm 1 alternates between (i) tightening the evidence bound under rollouts from the latest reference pol-icy (Eref means at ∼ πref (·| ot)), and (ii) taking policy updates using an adequate estimator. In the idealized limit where the self-distillation step is optimized to convergence, it pro-duces a diffusion model with (approx-imately) zero discrepancy on the ref-erence rollout distribution while pre-serving the reference policy’s output distribution; the subsequent policy up-date is then well-aligned with the true policy-gradient direction. Crucially, we refresh πref to be the most recent policy, so the self-distillation step continually patches on-policy drift rather than distilling toward a stale reference. 6In particular, under standard smoothness, realizability and optimization assumptions, we can theoreti-cally prove the following theorem. 
+
+Theorem 3.1 (Informal) . Assume every self-distillation step returns a model that is within ε of the optimal ELBO value on the current reference distribution. Choosing a sufficiently small learning rate 
+
+η ensures that each DiPOD policy update improves the expected return, unless the current policy gradient is already O(√ε). If the procedure stops after an ε-optimal on-policy self-distillation step at 
+
+θ⋆, then both ∥∇ θ J (θ⋆)∥ = O(√ε) and the ELBO discrepancy under the final reference distribution is small: E(o,a )∼ρθ⋆ [DL 
+
+> θ⋆
+
+(o, a )] ≤ ε.
+
+We defer the formal statement and proof to the appendix. 
+
+3.3 A Simple and Practical Implementation 
+
+Although Algorithm 1 directly addresses double drift, a literal implementation can be inefficient if self-distillation is run to convergence before every policy update. We therefore introduce a simple approximation that is efficient, easy to implement, and effective in practice. In a typical diffusion RL algorithm (such as FPO and SPG), each gradient step uses a batch of rollouts 
+
+B = (oi, a i) i=1 ,...,m and updates parameters as 
+
+θ ← θ + η · 1
+
+m
+
+> m
+
+X
+
+> i=1
+
+gθ (oi, a i).
+
+We absorb self-distillation into each update by augmenting the policy-update direction with an ELBO maximization term computed on the same rollout batch: 
+
+θ ← θ + η · 1
+
+m
+
+> m
+
+X
+
+> i=1
+
+gθ (oi, a i) + β∇θ ELBO θ (ai|oi) , (7) where β ∈ R+ controls the strength of the on-policy ELBO tightening. Equation (7) can be viewed as a first-order approximation to performing (i) a small amount of self-distillation and (ii) a policy-gradient update per rollout batch, sharing the same samples for efficiency. Equivalently, the added ELBO term acts as a regularizer that reduces the variational discrepancy DL
+
+> θ
+
+over on-policy rollouts, tightening the likelihood approximation and thereby mitigating the first drift 
+
+(ELBO–likelihood drift). As a consequence, the proxy gradient used in gθ remains better aligned with ∇θ log πθ , mitigating the second drift (proxy-gradient drift). We summarize the resulting procedure in Algorithm 2. Relative to a standard VI-based diffusion RL pipeline, the only modification is the extra ELBO term in the θ update, making the method a simple drop-in enhancement for a broad class of variational-bound-based diffusion RL algorithms. 
+
+Algorithm 2 DiPOD (Practical Implementation)                                  
+
+> Input: An adequate gradient estimator g, a policy parameterized by diffu-sion model πθ,β∈R+, learning rate η∈R+, rollout size m∈N+
+> Output: Policy πθ
+> 1: Initialize policy πθ
+> 2: while πθhas not converged do
+> 3: Sample rollouts B=(oi, a i)i=1 ,...,m
+> ▷Rollouts may be sampled from the current policy. 4: Update θusing Equation (7) with B.5: end while
+> 6: return πθ
+
+Although we present our method in the context of diffusion policies, the proposed principle is not specific to diffusion models. At a high level, our algorithm only requires (i) a tractable variational lower bound of the form 
+
+ELBO θ (x|c) and (ii) an RL objective that depends on an intractable like-lihood only through policy-gradient-style updates. Consequently, the same “tighten-the-bound to prevent gradi-ent drift” strategy applies to a broad class of generative policies trained with ELBO objectives, including latent-variable models such as VAEs and other variational generative models. 
+
+4 Experiment 
+
+Code is released at Astro-Eric/DiPOD-release. In this section, we illustrate the effectiveness and versatility of Algorithm 2 across both discrete and continuous diffusion-policy domains. We first use a 7Two-Token post-training experiment as a controlled diagnostic that makes ELBO drift directly visible. We then evaluate DiPOD on two substantially different practical settings: RL post-training of diffusion language models on challenging reasoning benchmarks, and high-dimensional continuous-control motion tracking for a humanoid robot. 
+
+4.1 Two-Token Post-training 0 200 400 600 800 1000 1200 1400 
+
+> Training step
+> 0.000
+> 0.025
+> 0.050
+> 0.075
+> 0.100
+> 0.125
+> 0.150
+> 0.175
+> log  (AA)  ELBO (AA)
+> Discrepancy on AA
+> FPO
+> SPG
+> FPO+DiPOD
+> SPG+DiPOD
+
+Figure 2: Variational gap DL 
+
+> θ
+
+during FPO, SPG, and DiPOD training. 
+
+Setup. We use a two-token discrete diffusion model fol-lowing the toy post-training setting of SPG [Wang et al., 2025]. The model generates x = ( x1, x 2) with each token in {A, B}, starting from the masked state MM and decoding in a uniformly random order. Because the state space is fully enumerable, we can analytically compute log π, ELBO, and the variational gap DL 
+
+> θ
+
+throughout training, which makes the drift directly visible. We defer the full parameterization, rewards, and implementation details to Section D. 
+
+Results. We summarize the results in Figure 2. For FPO, the variational gap grows substantially as training proceeds. For SPG, while staying more controlled, the gap is still substantial. Applying DiPOD to both algorithms effectively controls the gap. 
+
+4.2 Reasoning Tasks with Diffusion Language Models Setup. We follow the basic experimental setups in d1 [Zhao et al., 2025] and SPG [Wang et al., 2025]. We start from LLaDA-8B-Instruct [Nie et al., 2025], an open-source pretrained diffusion large language model, and conduct RL experiments on it. We include four tasks: GSM8K [Cobbe et al., 2021], MATH500 [Lightman et al., 2023], Countdown [Pan et al., 2025], and Sudoku [Arel]. 
+
+Baselines and Hyperparameters. We evaluate the performance of Algorithm 2 with the FPO gradient estimator and with the SPG gradient estimator separately. For FPO experiments, we compare d1, FPO, and DiPOD (Algorithm 2) with the FPO gradient estimator. We implement FPO by replacing the log likelihoods in d1 with ELBOs, resulting in a GRPO version of FPO, while keeping the hyperparameters unchanged. We also keep the hyperparameters in DiPOD the same as d1. Similarly, for SPG experiments, we compare d1, SPG, and Algorithm 2 with the SPG gradient estimator. We use SPG with Mixture, which performs the best among all variants in the SPG paper. For DiPOD, we keep the hyperparameters the same as SPG. For all language experiments, we fix 
+
+β = 0 .05 in Equation (7), highlighting the consistent improvements of DiPOD over baseline algorithms. We include an ablation study on β and additional results with more sequence lengths in the appendix. We fix the sequence length of the diffusion language model to be 256, and the number of decoding steps to be 128. For all benchmarks, we evaluate the performance in the zero-shot setting. 
+
+Results. We summarize results in Table 1, and show reward dynamics in Figure 3. The table and figures show that FPO+DiPOD consistently improves the performance over FPO. Compared to SPG, the state-of-the-art algorithm in diffusion language model RL, SPG+DiPOD, shows competitive performance in math reasoning tasks, including GSM8K and MATH500, and achieves a significant leap in logical reasoning tasks, including Countdown and Sudoku. For mathematical reasoning, we conjecture that the fixed context window of diffusion language models is the primary bottleneck for solving harder problems, which fundamentally require longer chains of thought. Consequently, we observe only marginal improvements on GSM8K and MATH500. We notice that the performance of the algorithms can differ substantially for different random seeds. To ensure the fairness of the comparison, we keep the random seeds the same as in the SPG codebase. 
+
+4.3 Motion Tracking with Diffusion Policies Setup. We further evaluate DiPOD on continuous-control diffusion policies through the motion-tracking task from FPO++ [Yi et al., 2026], a variant of FPO that gives an adequate gradient estimator. 8Table 1: Blue numbers denote improvements over the corresponding baseline (e.g., FPO+DiPOD vs. FPO, SPG+DiPOD vs. SPG). Evaluation follows the protocol of SPG [Wang et al., 2025]. We adopt the reported results for d1 from the SPG paper, except for Sudoku, where we report results from the d1 paper Zhao et al. [2025]. Method GSM8K MATH500 Countdown Sudoku d1 80.60 36.00 30.90 22.10 FPO 81.50 36.60 12.50 6.88 FPO+DiPOD 83.24 (+1.74) 37.00 (+0.40) 75.39 (+62.89) 25.78 (+18.90) SPG 84.23 37.80 51.95 25.12 SPG+DiPOD 84.91 (+0.68) 40.00 (+2.20) 80.08 (+28.13) 97.56 (+72.44) 0 1000 2000 3000 4000 5000 6000                     
+
+> Training step
+> 0.0
+> 0.5
+> 1.0
+> 1.5
+> 2.0
+> 2.5
+> Reward
+> GSM8K
+> FPO
+> SPG
+> FPO+DiPOD
+> SPG+DiPOD 01000 2000 3000 4000 5000 6000
+> Training step
+> 0.2
+> 0.4
+> 0.6
+> 0.8
+> 1.0
+> 1.2
+> 1.4
+> 1.6
+> Reward
+> MATH500 01000 2000 3000 4000 5000 6000
+> Training step
+> 0.0
+> 0.1
+> 0.2
+> 0.3
+> 0.4
+> 0.5
+> 0.6
+> 0.7
+> 0.8
+> Reward
+> Countdown 0250 500 750 1000 1250 1500 1750 2000
+> Training step
+> 0.0
+> 0.2
+> 0.4
+> 0.6
+> 0.8
+> Reward
+> Sudoku
+
+Figure 3: Reward dynamics on reasoning tasks. DiPOD stabilizes FPO and SPG training and achieves competitive or better final performance. This is a high-dimensional robot-control problem: the policy controls a Unitree G1 humanoid to track reference motions from the LAFAN dataset [Harvey et al., 2020]. Unlike the language experiments, this setting is not a post-training benchmark: the flow policy is trained for motion tracking from the beginning. 
+
+Baselines and Hyperparameters. We reuse the FPO++ motion-tracking hyperparameters. For DiPOD, we use a single initial self-distillation stage before the standard FPO++ policy-gradient training. This tightens the ELBO–likelihood gap while preserving the initial policy distribution, placing subsequent updates closer to the tight-bound regime predicted by our theory. We choose this minimal instantiation because policy-preserving self-distillation during high-dimensional motion-control training is itself a nontrivial algorithmic component; developing fully interleaved schedules for motion tracking is an interesting direction for future work. 
+
+Results. Figure 4 shows mean reward and episode length for dance_1_subject_2 and 
+
+run_1_subject_2 . DiPOD improves reward dynamics and tracking duration over reproduced FPO++, supporting the same principle beyond diffusion language models. Additional details are in the appendix. 0 200 400 600 800 1000                
+
+> Training iteration
+> 0.0
+> 2.5
+> 5.0
+> 7.5
+> 10.0
+> 12.5
+> 15.0
+> Mean reward
+> dance1 subject2: Mean reward 0200 400 600 800 1000
+> Training iteration
+> 0
+> 50
+> 100
+> 150
+> 200
+> 250
+> 300
+> 350
+> Mean episode length
+> dance1 subject2: Mean episode length 0200 400 600 800 1000
+> Training iteration
+> 0
+> 5
+> 10
+> 15
+> 20
+> 25
+> Mean reward
+> run1 subject2: Mean reward 0200 400 600 800 1000
+> Training iteration
+> 0
+> 100
+> 200
+> 300
+> 400
+> Mean episode length
+> run1 subject2: Mean episode length
+
+FPO++ DiPOD 
+
+Figure 4: Motion-tracking reward and episode-length curves on dance_1_subject_2 and 
+
+run_1_subject_2 .
+
+5 Conclusion 
+
+We identify a double drift issue in diffusion reinforcement learning: loose variational bounds induce proxy gradients that drift from the true policy gradient, undermining policy improvement. DiPOD preserves gradient consistency by maintaining on-policy bound tightness. Its most notable empirical 9outcome is substantially improved reasoning capability and training stability for diffusion language models, with additional gains in continuous control. Future work should optimize the interleaving schedule and study alternatives to ELBO regularization. 
+
+Acknowledgment 
+
+We thank Banghua Zhu, Chenyu Wang, David McAllister, Hongsuk Choi, Brent Yi, and Yen-Jen Wang for helpful conversations. 
+
+References 
+
+Lars Ankile, Anthony Simeonov, Idan Shenfeld, Marcel Torne, and Pulkit Agrawal. From imitation to refinement-residual rl for precise assembly. In 2025 IEEE International Conference on Robotics and Automation (ICRA) , pages 01–08. IEEE, 2025. Arel. Arel’s sudoku generator. URL https://www.ocf.berkeley.edu/~arel/sudoku/main. html .Johan Bjorck, Fernando Castañeda, Nikita Cherniadev, Xingye Da, Runyu Ding, Linxi Fan, Yu Fang, Dieter Fox, Fengyuan Hu, Spencer Huang, et al. Gr00t n1: An open foundation model for generalist humanoid robots. arXiv preprint arXiv:2503.14734 , 2025. Kevin Black, Noah Brown, Danny Driess, Adnan Esmail, Michael Equi, Chelsea Finn, Niccolo Fusai, Lachy Groom, Karol Hausman, Brian Ichter, et al. π0: A vision-language-action flow model for general robot control. corr, abs/2410.24164, 2024. doi: 10.48550. arXiv preprint ARXIV.2410.24164 .Kevin Black, Michael Janner, Yilun Du, Ilya Kostrikov, and Sergey Levine. Training diffusion models with reinforcement learning. arXiv preprint arXiv:2305.13301 , 2023. Jian Chen, Yesheng Liang, and Zhijian Liu. Dflash: Block diffusion for flash speculative decoding. 
+
+arXiv preprint arXiv:2602.06036 , 2026. Karl Cobbe, Vineet Kosaraju, Mohammad Bavarian, Mark Chen, Heewoo Jun, Lukasz Kaiser, Matthias Plappert, Jerry Tworek, Jacob Hilton, Reiichiro Nakano, et al. Training verifiers to solve math word problems. arXiv preprint arXiv:2110.14168 , 2021. Shutong Ding, Ke Hu, Zhenhao Zhang, Kan Ren, Weinan Zhang, Jingyi Yu, Jingya Wang, and Ye Shi. Diffusion-based reinforcement learning via q-weighted variational policy optimization. Advances in Neural Information Processing Systems , 37:53945–53968, 2024. Carles Domingo-Enrich, Michal Drozdzal, Brian Karrer, and Ricky TQ Chen. Adjoint matching: Fine-tuning flow and diffusion generative models with memoryless stochastic optimal control. In 
+
+The Thirteenth International Conference on Learning Representations , 2024. Perry Dong, Qiyang Li, Dorsa Sadigh, and Chelsea Finn. Expo: Stable reinforcement learning with expressive policies. arXiv preprint arXiv:2507.07986 , 2025. Yilun Du, Conor Durkan, Robin Strudel, Joshua B Tenenbaum, Sander Dieleman, Rob Fergus, Jascha Sohl-Dickstein, Arnaud Doucet, and Will Sussman Grathwohl. Reduce, reuse, recycle: Composi-tional generation with energy-based diffusion models and mcmc. In International conference on machine learning , pages 8489–8510. PMLR, 2023. Stefano Ermon. Introducing mercury 2. https://www.inceptionlabs.ai/blog/ introducing-mercury-2 , 2026. Inception blog, accessed May 7, 2026. Linjiajie Fang, Ruoxue Liu, Jing Zhang, Wenjia Wang, and Bingyi Jing. Diffusion actor-critic: Formulating constrained policy iteration as diffusion noise regression for offline reinforcement learning. In The Thirteenth International Conference on Learning Representations , 2025. Evan Greensmith, Peter L Bartlett, and Jonathan Baxter. Variance reduction techniques for gradient estimates in reinforcement learning. Journal of Machine Learning Research , 5(Nov):1471–1530, 2004. 10 Philippe Hansen-Estruch, Ilya Kostrikov, Michael Janner, Jakub Grudzien Kuba, and Sergey Levine. Idql: Implicit q-learning as an actor-critic method with diffusion policies. arXiv preprint arXiv:2304.10573 , 2023. Félix G Harvey, Mike Yurick, Derek Nowrouzezahrai, and Christopher Pal. Robust motion in-betweening. ACM Transactions on Graphics (TOG) , 39(4):60–1, 2020. Jonathan Ho, Ajay Jain, and Pieter Abbeel. Denoising diffusion probabilistic models. Advances in neural information processing systems , 33:6840–6851, 2020. Jonathan Ho, William Chan, Chitwan Saharia, Jay Whang, Ruiqi Gao, Alexey Gritsenko, Diederik P Kingma, Ben Poole, Mohammad Norouzi, David J Fleet, et al. Imagen video: High definition video generation with diffusion models. arXiv preprint arXiv:2210.02303 , 2022a. Jonathan Ho, Tim Salimans, Alexey Gritsenko, William Chan, Mohammad Norouzi, and David J Fleet. Video diffusion models. Advances in neural information processing systems , 35:8633–8646, 2022b. Haozhe Jiang, Nika Haghtalab, and Lijie Chen. Diffusion language models are provably optimal parallel samplers. arXiv preprint arXiv:2512.25014 , 2025. Tero Karras, Miika Aittala, Tuomas Kynkäänniemi, Jaakko Lehtinen, Timo Aila, and Samuli Laine. Guiding a diffusion model with a bad version of itself. Advances in Neural Information Processing Systems , 37:52996–53021, 2024. Diederik Kingma and Ruiqi Gao. Understanding diffusion objectives as the elbo with simple data augmentation. Advances in Neural Information Processing Systems , 36:65484–65516, 2023. Qiyang Li and Sergey Levine. Q-learning with adjoint matching. arXiv preprint arXiv:2601.14234 ,2026. Qiyang Li, Zhiyuan Zhou, and Sergey Levine. Reinforcement learning with action chunking. arXiv preprint arXiv:2507.07969 , 2025. Hunter Lightman, Vineet Kosaraju, Yuri Burda, Harrison Edwards, Bowen Baker, Teddy Lee, Jan Leike, John Schulman, Ilya Sutskever, and Karl Cobbe. Let’s verify step by step. In The Twelfth International Conference on Learning Representations , 2023. Max Sobol Mark, Tian Gao, Georgia Gabriela Sampaio, Mohan Kumar Srirama, Archit Sharma, Chelsea Finn, and Aviral Kumar. Policy agnostic rl: Offline rl and online rl fine-tuning of any class and backbone. arXiv preprint arXiv:2412.06685 , 2024. David McAllister, Songwei Ge, Brent Yi, Chung Min Kim, Ethan Weber, Hongsuk Choi, Haiwen Feng, and Angjoo Kanazawa. Flow matching policy gradients. arXiv preprint arXiv:2507.21053 ,2025. Shen Nie, Fengqi Zhu, Zebin You, Xiaolu Zhang, Jingyang Ou, Jun Hu, Jun Zhou, Yankai Lin, Ji-Rong Wen, and Chongxuan Li. Large language diffusion models. arXiv preprint arXiv:2502.09992 ,2025. Jiayi Pan, Junjie Zhang, Xingyao Wang, Lifan Yuan, Hao Peng, and Alane Suhr. Tinyzero, 2025. Rafael Rafailov, Archit Sharma, Eric Mitchell, Christopher D Manning, Stefano Ermon, and Chelsea Finn. Direct preference optimization: Your language model is secretly a reward model. Advances in neural information processing systems , 36:53728–53741, 2023. Allen Z Ren, Justin Lidard, Lars L Ankile, Anthony Simeonov, Pulkit Agrawal, Anirudha Majumdar, Benjamin Burchfiel, Hongkai Dai, and Max Simchowitz. Diffusion policy policy optimization. 
+
+arXiv preprint arXiv:2409.00588 , 2024. Nikita Rudin, David Hoeller, Philipp Reist, and Marco Hutter. Learning to walk in minutes using massively parallel deep reinforcement learning. In Conference on robot learning , pages 91–100. PMLR, 2022. 11 John Schulman, Philipp Moritz, Sergey Levine, Michael Jordan, and Pieter Abbeel. High-dimensional continuous control using generalized advantage estimation. In Proceedings of the International Conference on Learning Representations (ICLR) , 2016. John Schulman, Filip Wolski, Prafulla Dhariwal, Alec Radford, and Oleg Klimov. Proximal policy optimization algorithms. arXiv preprint arXiv:1707.06347 , 2017. Clemens Schwarke, Victor Klemm, Matthijs Van der Boon, Marko Bjelonic, and Marco Hutter. Curiosity-driven learning of joint locomotion and manipulation tasks. In Proceedings of the 7th Conference on Robot Learning , volume 229, pages 2594–2610. PMLR, 2023. Zhihong Shao, Peiyi Wang, Qihao Zhu, Runxin Xu, Junxiao Song, Xiao Bi, Haowei Zhang, Mingchuan Zhang, YK Li, Yang Wu, et al. Deepseekmath: Pushing the limits of mathemat-ical reasoning in open language models. arXiv preprint arXiv:2402.03300 , 2024. Avi Singh, Huihan Liu, Gaoyue Zhou, Albert Yu, Nicholas Rhinehart, and Sergey Levine. Parrot: Data-driven behavioral priors for reinforcement learning. arXiv preprint arXiv:2011.10024 , 2020. Jascha Sohl-Dickstein, Eric Weiss, Niru Maheswaranathan, and Surya Ganguli. Deep unsupervised learning using nonequilibrium thermodynamics. In International conference on machine learning ,pages 2256–2265. pmlr, 2015. Jiaming Song, Chenlin Meng, and Stefano Ermon. Denoising diffusion implicit models. arXiv preprint arXiv:2010.02502 , 2020. Yang Song and Stefano Ermon. Generative modeling by estimating gradients of the data distribution. 
+
+Advances in neural information processing systems , 32, 2019. Yuxuan Song, Zheng Zhang, Cheng Luo, Pengyang Gao, Fan Xia, Hao Luo, Zheng Li, Yuehang Yang, Hongli Yu, Xingwei Qu, et al. Seed diffusion: A large-scale diffusion language model with high-speed inference. arXiv preprint arXiv:2508.02193 , 2025. Xiaohang Tang, Rares Dolga, Sangwoong Yoon, and Ilija Bogunovic. wd1: Weighted policy optimization for reasoning in diffusion language models. arXiv preprint arXiv:2507.08838 , 2025. Andrew Wagenmaker, Yunchu Zhang, Mitsuhiko Nakamoto, Seohong Park, Waleed Yagoub, Anusha Nagabandi, Abhishek Gupta, and Sergey Levine. Steering your diffusion policy with latent space reinforcement learning. In Conference on Robot Learning , pages 258–282. PMLR, 2025. Chenyu Wang, Paria Rashidinejad, DiJia Su, Song Jiang, Sid Wang, Siyan Zhao, Cai Zhou, Shan-non Zejiang Shen, Feiyu Chen, Tommi Jaakkola, et al. Spg: Sandwiched policy gradient for masked diffusion language models. arXiv preprint arXiv:2510.09541 , 2025. Ronald J Williams. Simple statistical gradient-following algorithms for connectionist reinforcement learning. Machine learning , 8(3):229–256, 1992. Zhihui Xie, Jiacheng Ye, Lin Zheng, Jiahui Gao, Jingwei Dong, Zirui Wu, Xueliang Zhao, Shansan Gong, Xin Jiang, Zhenguo Li, et al. Dream-coder 7b: An open diffusion language model for code. 
+
+arXiv preprint arXiv:2509.01142 , 2025. Ling Yang, Ye Tian, Bowen Li, Xinchen Zhang, Ke Shen, Yunhai Tong, and Mengdi Wang. Mmada: Multimodal large diffusion language models. arXiv preprint arXiv:2505.15809 , 2025. Brent Yi, Hongsuk Choi, Himanshu Gaurav Singh, Xiaoyu Huang, Takara E Truong, Carmelo Sferrazza, Yi Ma, Rocky Duan, Pieter Abbeel, Guanya Shi, et al. Flow policy gradients for robot control. arXiv preprint arXiv:2602.02481 , 2026. Xiu Yuan, Tongzhou Mu, Stone Tao, Yunhao Fang, Mengke Zhang, and Hao Su. Policy decora-tor: Model-agnostic online refinement for large policy model. In The Thirteenth International Conference on Learning Representations , 2025. Siyan Zhao, Devaansh Gupta, Qinqing Zheng, and Aditya Grover. d1: Scaling reasoning in diffusion large language models via reinforcement learning. arXiv preprint arXiv:2504.12216 , 2025. 12 A Additional Related Work 
+
+Diffusion models. Diffusion models are a powerful class of generative models, with wide applica-tions including image generation [Ho et al., 2020, Song et al., 2020, Song and Ermon, 2019], video generation [Ho et al., 2022b,a], and robotics [Black et al., Bjorck et al., 2025]. More recently, diffu-sion language models have emerged as a strong alternative to autoregressive models for fast inference and flexible decoding [Nie et al., 2025, Xie et al., 2025, Song et al., 2025]. Diffusion models can be derived from several viewpoints; in this paper, we use the variational-inference perspective [Kingma and Gao, 2023, Sohl-Dickstein et al., 2015], which connects the intractable likelihood to tractable evidence bounds. 
+
+Policy gradients. In reinforcement learning, policy-gradient methods optimize a parameterized policy by directly differentiating its expected cumulative return [Williams, 1992, Schulman et al., 2017]. They have led to strong results in high-dimensional control [Schulman et al., 2016], locomo-tion [Rudin et al., 2022], manipulation [Schwarke et al., 2023], and related sequential decision-making problems. Policy-gradient-style methods also play a central role in the post-training of large language models [Shao et al., 2024, Rafailov et al., 2023], making their extension to diffusion language models an important algorithmic question. 
+
+RL with diffusion policies. Classical policy-gradient methods cannot be directly applied to dif-fusion models because the exact likelihood is intractable. One line of work tackles this problem by treating the denoising process as a Markov Decision Process [Black et al., 2023, Ren et al., 2024]. This makes training tractable, but ties the optimization procedure to a particular denoising sampler. Another line of work uses variational objectives, such as diffusion or flow-matching evidence bounds, to bypass exact likelihood computation while preserving the native diffusion sampling process [McAl-lister et al., 2025, Wang et al., 2025]. In language domains, several methods instead approximate likelihoods by simplifying or partially restoring inter-token dependencies [Zhao et al., 2025, Yang et al., 2025, Xie et al., 2025, Tang et al., 2025]. DiPOD is closest to the variational line: it identifies how evidence-bound looseness can corrupt policy-gradient updates, and introduces self-distillation as a mechanism for keeping the proxy aligned with the true policy. 
+
+Other diffusion-policy RL and control methods. Beyond online policy-gradient methods, there is a rich literature on critic-based or residual-control methods for diffusion policies. Some works leave a pretrained diffusion policy unchanged and post-process generated actions using a learned critic [Hansen-Estruch et al., 2023, Mark et al., 2024, Li et al., 2025, Dong et al., 2025]. Others learn a residual policy that modifies the generated action in noise space [Wagenmaker et al., 2025, Singh et al., 2020] or action space [Yuan et al., 2025, Ankile et al., 2025]. A related set of off-policy methods uses a critic to supervise the score or denoising function directly [Fang et al., 2025, Ding et al., 2024, Li and Levine, 2026]. These methods address complementary settings, while DiPOD focuses on stabilizing online policy-gradient updates when the diffusion-policy likelihood must be replaced by a variational proxy. 
+
+Guidance and stochastic-control perspectives. Guidance is also related to RL with diffusion policies, since the guided sampler can be interpreted as tilting a base distribution according to reward or energy. Early guidance approaches can suffer from bias in the resulting sampling distribution [Du et al., 2023, Karras et al., 2024]. Adjoint Matching [Domingo-Enrich et al., 2024] takes a stochastic optimal-control perspective and derives an efficient fine-tuning objective that converges to the desired tilted distribution under its assumptions. DiPOD instead studies the policy-gradient setting where rewards may be non-differentiable and where the central challenge is maintaining alignment between the evidence-bound proxy and the true diffusion-policy likelihood. 
+
+B Background on Reinforcement Learning and Diffusion Models 
+
+B.1 Reinforcement Learning 
+
+This section provides a concise introduction to the RL algorithms relevant to this paper. 13 Markov Decision Process. A Markov Decision Process (MDP) consists of a state space S, an action space A, a state transition kernel P , and a reward function r. A policy is defined as a function 
+
+π(·| s) that outputs a distribution on A given a state s from S. In the MDP, an agent with policy π starts from a designated state s0 ∈ S at timestep t = 0 . At each timestep t, the policy receives the current state st and takes an action at ∼ π(·| st). The environment transitions to state st+1 ∼ P (·| st, a t), and gives the agent a reward rt = r(st, a t). The episode terminates when the agent reaches a terminal state s∗ ∈ S . An RL algorithm aims to optimize the cumulative reward, defined as 
+
+J (θ) = Eat∼π(·| st),s t+1 ∼P (·| st,a t)
+
+X
+
+> t≥0
+
+γtrt
+
+
+
+where γ ∈ (0 , 1) is a discount factor. The value function is defined as the expected cumulative reward starting from a state s. Formally: 
+
+V πt (s) = Eπ
+
+X 
+
+> τ≥t
+
+γτ −trτ |st = s
+
+
+
+where Eπ means that the actions are sampled from policy π. The Q-function is defined as the expected cumulative reward starting from state s and action a. Formally: 
+
+Qπt (s, a ) = Eπ
+
+X 
+
+> τ≥t
+
+γτ −trτ |st = s, a t = a
+
+
+
+Policy Gradient Algorithms. The policy gradient theorem states that 
+
+∇θ J (θ) = Eat∼πθ (·| st),s t∼dπθ [∇θ log πθ (at|st)Qπθ 
+
+> t
+
+(st, a t)] 
+
+where dπ is the state distribution under policy π. GAE [Schulman et al., 2016, Greensmith et al., 2004] introduces an alternative form of the policy gradient that admits lower estimation variance: 
+
+∇θ J (θ) = Eθ [∇θ log πθ (at|st)Aπθ 
+
+> t
+
+(st, a t)] 
+
+where the advantage function is defined as Aπt (s, a ) = Qπt (s, a ) − V πt (s) and we abbreviate the expectation subscript for simplicity. In the off-policy setting, where a behavior policy πref is used to collect data, the algorithm aims to optimize a slightly different objective defined as 
+
+J ′(θ) = Est∼dπref [V πθ 
+
+> t
+
+(st)] .
+
+In this setting, the following policy gradient update: 
+
+Eref 
+
+ ∇θ πθ (at|st)
+
+πref (at|st) Aπθ 
+
+> t
+
+(st, a t)
+
+
+
+guarantees policy improvement on J ′(θ). In practice, Aπθ 
+
+> t
+
+(st, a t) is often estimated through a combination of rewards from the samples and a learned value function. 
+
+Proximal Policy Optimization (PPO). PPO is an instantiation of the off-policy gradient update introduced above. It performs gradient updates through 
+
+∇θ Eref 
+
+h
+
+min 
+
+n
+
+r(θ) ˆAt, clip (r(θ), 1 ± ε) ˆAt
+
+oi 
+
+where we abbreviate 
+
+r(θ) = πθ (at|st)
+
+πref (at|st)
+
+and ˆAt is an estimation of Aπθ 
+
+> t
+
+(st, a t). ε is a hyperparameter between 0 and 1 that controls the strength of regularization to the policy update. The training data is sampled from πref , and πref is synced with πθ every few gradient steps. FPO [McAllister et al., 2025] builds on the PPO framework by substituting the log likelihoods of πθ and πref as their corresponding ELBOs. 14 Group Relative Policy Optimization. GRPO is a variant of PPO for autoregressive language models. In language models, a prompt q, consisting of a sequence of tokens, serves as the input. The language model then generates another sequence of tokens o as the output. This process can be framed as an MDP. At each timestep t, the state is the token sequence q|o≤t that has been generated so far. Here o≤t means the first t tokens of o. The action ot+1 is the next token to be output. In many scenarios the reward is given only when o is fully generated, and the reward is often based only on the last few tokens, while the intermediate tokens can be thought of as reasoning traces. In GRPO, for each prompt q, we sample g outputs o1, . . . , o g using πref , and receive rewards r1, . . . , r g . We estimate the advantage as 
+
+ˆAit = ri − mean (r1: g )
+
+std (r1: g ) .
+
+and estimate the policy-gradient objective for q as 
+
+1
+
+g
+
+> G
+
+X
+
+> i=1
+
+1
+
+|oi|
+
+> |oi|
+
+X
+
+> t=1
+
+min 
+
+n
+
+r(θ)it ˆAit, clip (r(θ)it, 1 ± ε) ˆAit
+
+o
+
+where 
+
+r(θ)it = πθ (oit|q, o i<t )
+
+πref (oit|q, o i<t ) .
+
+Compared to PPO, GRPO uses relative advantages inside a group of rollouts instead of the true advantage, eliminating the need to train a value function or calculate different value functions for different timesteps. Dream-Coder [Xie et al., 2025] uses exactly the same algorithm for diffusion language models, ignoring that likelihoods cannot be decomposed in the same way as autoregressive models. Diffu -GRPO [Zhao et al., 2025], wd1 [Tang et al., 2025], and UniGRPO [Yang et al., 2025] account for this factor, but still partially ignore inter-token dependencies for tractability. 
+
+FPO/FPO++. FPO++ [Yi et al., 2026] is an improved flow-policy-gradient algorithm that replaces the single action-level FPO ratio with per-sample ratios and uses an asymmetric trust region. In our notation, if \ELBO (i) 
+
+> θ
+
+(at|ot) denotes the negative conditional-flow-matching loss for the i-th Monte Carlo sample, its per-sample ratio is 
+
+ˆρ(i)FPO++ (θ) = exp 
+
+
+
+\ELBO (i) 
+
+> θ
+
+(at|ot) − \ELBO (i) 
+
+> θold
+
+(at|ot)
+
+
+
+.
+
+FPO++ then applies PPO clipping for ˆAt ≥ 0 and an SPO-style quadratic trust region for ˆAt < 0.This gives an asymmetric interpretation. For positive-advantage samples, FPO++ keeps the original FPO intuition: it treats an ELBO lift as if it were a log-likelihood lift, so decreasing the conditional-flow-matching loss is taken to increase the likelihood of desirable actions. This is exact in the tight-bound regime, and otherwise is the same local approximation underlying FPO. For negative-advantage samples, the SPO branch has a more explicit adaptive-regularization form. Recall that 
+
+ψSPO (ρ, ˆAt) = ρ ˆAt − | ˆAt|
+
+2εclip (ρ − 1) 2, ∇θ ˆρ(i)FPO++ = ˆ ρ(i)FPO++ ∇θ \ELBO (i) 
+
+> θ
+
+(at|ot).
+
+Therefore, for ˆAt < 0,
+
+∇θ ψSPO 
+
+
+
+ˆρ(i)FPO++ , ˆAt
+
+
+
+=
+
+"
+
+ˆρ(i)FPO++ ˆAt − | ˆAt|
+
+εclip ˆρ(i)FPO++ 
+
+
+
+ˆρ(i)FPO++ − 1
+
+#
+
+∇θ \ELBO (i) 
+
+> θ
+
+(at|ot),
+
+which is the usual ratio-weighted policy-gradient term plus an adaptive DiPOD-like ELBO term 
+
+β(i) 
+
+> −
+
+∇θ \ELBO (i) 
+
+> θ
+
+(at|ot) with signed coefficient 
+
+β(i) 
+
+> −
+
+(θ, ˆAt) = − | ˆAt|
+
+εclip ˆρ(i)FPO++ 
+
+
+
+ˆρ(i)FPO++ − 1
+
+
+
+,
+
+15 where the sign is for gradient ascent on ψSPO ; equivalently, the sign flips if one writes the imple-mentation as minimizing −ψSPO . Up to this sign convention and the multiplicative ratio factor, this is exactly a coefficient proportional to | ˆAt|(ˆ ρ(i)FPO++ − 1) /ε clip . The term vanishes on-policy and grows with the ratio deviation, pulling negative-advantage ratios back toward 1. This es-timator is adequate in the sense of Definition 2.1: when the bound is tight and the reference policy is synchronized with the current policy, ˆρ(i)FPO++ = 1 , the adaptive term vanishes, and 
+
+Ei[∇θ \ELBO (i) 
+
+> θ
+
+(at|ot)] = ∇θ ELBO θ (at|ot) = ∇θ log πθ (at|ot). Averaging over Monte Carlo samples therefore recovers the policy-gradient integrand ˆAt∇θ log πθ (at|ot).
+
+B.2 Diffusion Models 
+
+This section provides a brief introduction to diffusion models from a variational inference perspective. We refer interested readers to Wang et al. [2025] for more details regarding diffusion language models. 
+
+Variational Inference. A central goal in generative modeling is to learn a parameterized distribution 
+
+pθ that assigns high probability to observed data. Given a dataset drawn from an unknown data distribution pdata , the standard training objective is maximum likelihood estimation (MLE), 
+
+max  
+
+> θ
+
+Ex0∼pdata [log pθ (x0)] .
+
+This objective applies broadly, independent of the specific model family. In many modern generative models, including diffusion models, it is natural to introduce latent variables to describe a multi-step sampling procedure: one may first sample a latent variable z, then sample the data x0 conditional on 
+
+z. This leads to a latent-variable model of the form 
+
+pθ (x0) = 
+
+Z
+
+pθ (x0, z )d z, 
+
+where z can be high-dimensional (and in diffusion, typically corresponds to an entire trajectory of intermediate variables). While MLE still aims to maximize log pθ (x0), the marginalization over z
+
+often makes log pθ (x0) intractable to evaluate and differentiate. Variational inference addresses this intractability by introducing an auxiliary distribution q(z|x0),often called a variational posterior, that approximates the true posterior pθ (z|x0). For any choice of 
+
+q(z|x0), Jensen’s inequality gives 
+
+log pθ (x0)= log 
+
+Z
+
+q(z|x0) pθ (x0, z )
+
+q(z|x0) dz (8) 
+
+≥Eq(z|x0) [log pθ (x0, z ) − log q(z|x0)] (9) 
+
+=: ELBO θ (x0). (10) The quantity ELBO θ (x0) is the evidence lower bound. Maximizing the ELBO provides a tractable surrogate for maximizing log pθ (x0), because it replaces the log of an integral with an expectation under q(z|x0).Equivalently, using pθ (z|x0) = pθ (x0, z )/p θ (x0),
+
+log pθ (x0) = ELBO θ (x0) + KL ( q(z|x0)∥pθ (z|x0)) , (11) so the bound is tight if and only if q(z|x0) = pθ (z|x0). Here the KL divergence is defined as 
+
+KL( q∥p) := Eq
+
+h
+
+log qp
+
+i
+
+, corresponding to the DL 
+
+> θ
+
+in Section 2 which is nonnegative and equals 0 iff 
+
+q = p. In diffusion models, a carefully chosen q makes the ELBO decompose into simple local terms, yielding a practical learning objective while still targeting maximum likelihood. 
+
+Diffusion as structured variational inference. Diffusion models instantiate the generic latent variable as an entire noising trajectory, 
+
+z ≡ x1: T := ( x1, . . . , x T ), (12) 16 and define a fixed forward (variational) process 
+
+q(z|x0) = q(x1: T |x0) = 
+
+> T
+
+Y
+
+> t=1
+
+q(xt|xt−1), (13) where each q(xt|xt−1) is a simple corruption kernel. The generative model uses a simple prior p(xT )
+
+and learned reverse transitions: 
+
+pθ (x0, z ) = pθ (x0: T )=pθ (x0|x1)
+
+> T
+
+Y
+
+> t=2
+
+pθ (xt−1|xt)p(xT ). (14) Substituting Equation (13)–Equation (14) into Equation (10) yields a sum of tractable terms: ELBO θ (x0)=Eq(x1|x0)[log pθ (x0|x1)] − KL( q(xT |x0)∥p(xT )) 
+
+−
+
+> T
+
+X
+
+> t=2
+
+Eq(xt|x0)[KL( q(xt−1|xt, x 0)∥pθ (xt−1|xt))] , (15) where q(xt−1|xt, x 0) is the exact posterior of the fixed forward process (obtained from Bayes’ rule). This expression highlights that maximizing ELBO θ (x0) amounts to fitting each reverse kernel 
+
+pθ (xt−1|xt) to the corresponding diffusion posterior under q.
+
+EUBO (evidence upper bound). Using the same latent-variable setup, define the (nonnegative) importance weight 
+
+wθ (z; x0) := pθ (x0, z )
+
+q(z|x0) . (16) Then the evidence satisfies pθ (x0) = Eq(z|x0)[wθ (z; x0)] . For any β ≥ 1, Jensen (applied to the convex map u 7 → uβ ) gives 
+
+log pθ (x0) = log Eq [wθ ]
+
+≤ 1
+
+β log Eq(z|x0)
+
+wθ (z; x0)β  =: EUBO θ,β (x0), (17) so EUBO θ,β (x0) is an upper bound on the log-evidence (tight when q(z|x0) = pθ (z|x0)). The looseness of this upper bound is naturally characterized by a Renyi divergence. In particular, EUBO θ,β (x0) − log pθ (x0)= 1
+
+β log Eq(z|x0)
+
+" pθ (z|x0)
+
+q(z|x0)
+
+β #
+
+= β − 1
+
+β Dβ (pθ (z|x0)∥q(z|x0)) .
+
+Here Dβ (p∥q) := 1 
+
+> β−1
+
+log Eq
+
+ pq
+
+β 
+
+is the Renyi divergence of order β, corresponding to the DU
+
+> θ
+
+in Section 2. This quantity is nonnegative and equals 0 iff pθ (z|x0) = q(z|x0), so the EUBO is tight exactly when the variational posterior matches the true posterior. In diffusion, the latent variable is the noising trajectory z ≡ x1: T with fixed forward process 
+
+q(x1: T |x0), and pθ (x0, z ) = pθ (x0: T ) is defined by the learned reverse transitions. Thus, EUBO θ,β (x0) = 1
+
+β log Eq(x1: T |x0)
+
+" pθ (x0: T )
+
+q(x1: T |x0)
+
+β #
+
+, (18) which is typically much harder to optimize than the ELBO because it involves a log-moment over entire forward paths and does not decompose into a simple sum of per-timestep KL terms. 17 Directly maximizing the likelihood log pθ (x0) = log R pθ (x0, z )d z is generally intractable because it requires marginalizing over high-dimensional latents z (in diffusion, entire trajectories). Likewise, EUBO θ,β (x0) is typically intractable since it involves a log-moment log Eq [wβθ ] over the same latent space, which does not admit a simple additive decomposition. In contrast, the diffusion ELBO is tractable because it moves the logarithm inside an expectation under the fixed forward process q,yielding terms that can be estimated by sampling z ∼ q(·| x0) (often reducing to per-timestep losses). SPG [Wang et al., 2025] obtains a practical EUBO surrogate for masked dLLMs by exploiting the special absorbing-mask forward process. Let x1: n be a token sequence, where xi is the token at position i, and let m denote the mask token. In this paragraph, t indexes the diffusion noising step, while i indexes the sequence position. We write zt = ( zt, 1, . . . , z t,n ) for the corrupted sequence at diffusion time t, so zt,i is the i-th token of the corrupted sequence at that time. The absorbing-mask forward process uses a monotone schedule αt with, in the discrete-time convention, α1 = 1 and 
+
+αT = 0 . At time t, each coordinate remains clean with probability αt and is masked with probability 
+
+1 − αt:
+
+q(zt,i = xi|xi) = αt, q(zt,i = m|xi) = 1 − αt.
+
+Thus each coordinate is either unchanged or masked, and once a coordinate becomes m it stays masked under the forward process. For this process, the only nontrivial reverse-model term for coordinate i occurs when zt+1 ,i = m and the model predicts the clean token xi from the corrupted sequence zt+1 . The factor (αt − αt+1 )/(1 − αt+1 ) below is the posterior probability that coordinate 
+
+i was still clean at time t given that it is masked at time t + 1 .If we directly instantiate the Renyi EUBO in Equation (17) for this masked diffusion model, we obtain a path-level log-moment: 
+
+EUBO path  
+
+> θ,β
+
+(x1: n) = 1
+
+β log Ez1: T ∼q(·| x1: n)
+
+"T −1Y
+
+> t=1
+> n
+
+Y
+
+> i=1
+
+ pθ (zt,i |zt+1 )
+
+q(zt,i |zt+1 , x 1: n)
+
+β #
+
+. (19) This is the literal, unapproximated EUBO for the masked diffusion model, but it is not in the same form as the usual masked-diffusion ELBO training loss: it contains a product over all diffusion times and token positions inside a single outer logarithm. By contrast, the masked-diffusion ELBO moves the logarithm inside the expectation and reduces to weighted masked-token prediction terms, 
+
+LELBO (x1: n; θ) = 
+
+> n
+
+X
+
+> i=1
+
+Et,z t [w(t)1{zt,i = m} log πθ (xi|zt)] ,
+
+up to schedule-dependent constants. SPG’s approximation sits between these two objects: it keeps an upper-bound structure derived from the path-level EUBO, but uses the absorbing-mask structure to obtain a per-coordinate log-moment that can be estimated with masked-token prediction probabilities. Applying the Renyi variational bound and decomposing over coordinates yields the discrete-time upper-bound surrogate 
+
+LSPG EUBO (x1: n; θ) = 1
+
+β
+
+> n
+
+X
+
+> i=1
+
+log  
+
+> T−1
+
+X
+
+> t=1
+
+Ezt+1 ∼q(·| x1: n)
+
+"
+
+αt − αt+1 
+
+1 − αt+1 
+
+1{zt+1 ,i = m}
+
+πθ (xi|zt+1 )β
+
+#! 
+
++ C(T ), (20) where C(T ) is independent of θ and therefore does not affect policy-gradient updates. In the continuous-time implementation, this is written in the equivalent form 
+
+eLSPG EUBO (x1: n; θ) = 1
+
+β
+
+> n
+
+X
+
+> i=1
+
+log Et,z t
+
+w(t)1{zt,i = m}πθ (xi|zt)β  , (21) with w(t) collecting the continuous-time analogue of the schedule-dependent masking weight above, including any density correction for how t is sampled. The logarithm remains outside the expectation, so single-sample Monte Carlo estimates of this quantity are generally biased; nevertheless, its gradient can be estimated by differentiating the sampled log-moment. This construction is specific to the categorical absorbing-mask structure of dLLMs, which is why the SPG EUBO approximation does not directly provide a general-purpose EUBO estimator for arbitrary diffusion or flow policies. 18 C Theoretical Analysis of DiPOD 
+
+In this section, we formally analyze the convergence of DiPOD. In particular, we formalize and prove Theorem 3.1. 
+
+C.1 Setup and Assumptions 
+
+Throughout this section, we work in the fully observable MDP setting described in Section B, so observations are states. To keep the notation aligned with the main body, we write o for this observation/state variable rather than switching to s. Let dπθ be the on-policy observation distribution induced by πθ in the same sense used by the policy-gradient theorem (for example, the discounted occupancy measure in the episodic case or the stationary distribution in the continuing case), and define 
+
+ρθ (o, a ) := dπθ (o)πθ (a|o).
+
+For any reference distribution μ over observation-action pairs, define the self-distillation objective 
+
+Fμ(θ) := Eμ [ELBO θ (a|o)] 
+
+and the expected ELBO and EUBO discrepancies 
+
+DL 
+
+> μ
+
+(θ) := E(o,a )∼μ
+
+DL 
+
+> θ
+
+(o, a ) = Eμ [log πθ (a|o) − ELBO θ (a|o)] ,DU 
+
+> μ
+
+(θ) := E(o,a )∼μ
+
+DU 
+
+> θ
+
+(o, a ) = Eμ [EUBO θ (a|o) − log πθ (a|o)] .
+
+For a gradient estimator gθ (o, a ), write its on-policy expected update as 
+
+Gg (θ) := E(o,a )∼ρθ [gθ (o, a )] .
+
+We are going to build our analysis on the following standard assumptions. 
+
+Assumption C.1 (Smooth Policy-Gradient Dynamics) . The policy-gradient theorem holds for J on the region of parameter space visited by the algorithm, and J is LJ -smooth: 
+
+J (θ′) ≥ J (θ) + ⟨∇J (θ), θ ′ − θ⟩ − LJ
+
+2 ∥θ′ − θ∥2.
+
+Assumption C.2 (Lipschitzness of Gradient Estimator) . The estimator gθ is adequate in the sense of Definition 2.1. Moreover, there exists an adequacy coefficient cg < ∞ such that whenever the current on-policy ELBO discrepancy is at most ε,
+
+DL 
+
+> ρθ
+
+(θ) ≤ ε =⇒ ∥Gg (θ) − ∇J (θ)∥ ≤ cg
+
+√ε. 
+
+This is the quantitative form of adequacy used in the theorem: near a tight on-policy ELBO, the expected adequate-gradient update is Lipschitz-close to the true policy gradient. 
+
+Assumption C.3 (Realizability) . For every reference policy πref considered by the algorithm, with reference distribution μ(o, a ) = dref (o)πref (a|o), there exists a parameter θ† such that πθ† (·| o) = 
+
+πref (·| o) for dref -almost every o and DL 
+
+> θ†
+
+(o, a ) = 0 for μ-almost every (o, a ). Equivalently, the policy class can represent the reference policy with a tight ELBO on the reference distribution. 
+
+Assumption C.4 (On-policy Self-Distillation Oracle) . At each self-distillation step, DiPOD chooses the current on-policy reference distribution μ = ρθref . The self-distillation oracle returns a parameter 
+
+¯θ, and hence a policy π¯θ , whose on-reference ELBO value is within ε of the best achievable value: 
+
+Fμ(¯θ) ≥ sup 
+
+> θ
+
+Fμ(θ) − ε. 
+
+Equivalently, the returned policy/model is ε-suboptimal for the on-reference ELBO maximization problem. This suboptimality may come from either policy mismatch with the reference distribution or from a nonzero ELBO discrepancy. 
+
+Remark C.5 (Reference versus returned-policy distributions) . The oracle assumption controls ELBO optimality under the reference distribution used for self-distillation. An approximate oracle can still return a policy whose own occupancy distribution differs from the reference occupancy distribution. For this reason, the performance theorem below keeps track of both the reference-distribution discrepancy guaranteed by self-distillation and the returned policy’s own on-policy discrepancy, which is the quantity needed to control the next policy-gradient update. 19 Before proceeding to the performance guarantee, we first show that both FPO and SPG satisfy As-sumption C.2 under standard bounded-advantage and smoothness conditions. The same self-bounding argument can also be extended to other adequate-gradient estimators whose bias is controlled by smooth nonnegative variational discrepancies. 
+
+Proposition C.6 (FPO and SPG instantiate Lipschitzness) . Assume |Aπθ (o, a )| ≤ Amax .1. FPO. Let 
+
+gFPO  
+
+> θ
+
+(o, a ) = Aπθ (o, a )∇θ ELBO θ (a|o).
+
+If DL 
+
+> θ
+
+(o, a ) is nonnegative and LL-smooth in θ for each (o, a ), then 
+
+GgFPO (θ) − ∇J (θ) ≤ Amax 
+
+q
+
+2LLDL 
+
+> ρθ
+
+(θ).
+
+Thus FPO satisfies Assumption C.2 with cg = Amax 
+
+√2LL.2. SPG. Let 
+
+gSPG  
+
+> θ
+
+(o, a ) = 1A> 0A∇θ ELBO θ (a|o) + 1A< 0A∇θ EUBO θ (a|o),
+
+where A abbreviates Aπθ (o, a ). If DL 
+
+> θ
+
+and DU 
+
+> θ
+
+are nonnegative and respectively LL- and 
+
+LU-smooth, then 
+
+GgSPG (θ) − ∇J (θ) ≤ Amax 
+
+q
+
+2LLDL 
+
+> ρθ
+
+(θ) + Amax 
+
+q
+
+2LUDU 
+
+> ρθ
+
+(θ).
+
+Consequently, if the EUBO discrepancy is also tight in the self-distilled region, e.g. 
+
+DU 
+
+> ρθ
+
+(θ) ≤ CUDL 
+
+> ρθ
+
+(θ), then SPG satisfies Assumption C.2 with cg = Amax (√2LL +
+
+√2LUCU).Proof. We use the self-bounding property of nonnegative smooth functions. If f (θ) ≥ 0 and f is 
+
+L-smooth, then 
+
+∥∇ f (θ)∥2 ≤ 2Lf (θ). (22) Indeed, smoothness at θ′ = θ − 1 
+
+> L
+
+∇f (θ) gives 
+
+0 ≤ f (θ′) ≤ f (θ) − 12L ∥∇ f (θ)∥2.
+
+For FPO, the policy-gradient theorem gives 
+
+∇J (θ) = Eρθ [Aπθ (o, a )∇θ log πθ (a|o)] .
+
+Using ELBO θ = log πθ − D L 
+
+> θ
+
+,
+
+GgFPO (θ) − ∇J (θ) = −Eρθ
+
+Aπθ (o, a )∇θ DL 
+
+> θ
+
+(o, a ) .
+
+Therefore, 
+
+GgFPO (θ) − ∇J (θ) ≤ Amax Eρθ
+
+ ∇θ DL 
+
+> θ
+
+(o, a ) 
+
+≤ Amax 
+
+r
+
+Eρθ
+
+h
+
+∇θ DL 
+
+> θ
+
+(o, a ) 2i
+
+≤ Amax 
+
+q
+
+2LLDL 
+
+> ρθ
+
+(θ),
+
+where the last step uses Equation (22). For SPG, use EUBO θ = log πθ + DU 
+
+> θ
+
+in addition to the ELBO decomposition: 
+
+GgSPG (θ) − ∇J (θ) = −Eρθ
+
+1A> 0A∇θ DL 
+
+> θ
+
+(o, a ) + Eρθ
+
+1A< 0A∇θ DU 
+
+> θ
+
+(o, a ) .
+
+The triangle inequality, bounded advantages, Cauchy-Schwarz, and Equation (22) give 
+
+GgSPG (θ) − ∇J (θ) ≤ Amax 
+
+q
+
+2LLDL 
+
+> ρθ
+
+(θ) + Amax 
+
+q
+
+2LUDU 
+
+> ρθ
+
+(θ).
+
+The final statement follows by substituting DU 
+
+> ρθ
+
+(θ) ≤ CUDL 
+
+> ρθ
+
+(θ).20 C.2 Performance Guarantee Lemma C.7 (Guarantee for Self-Distillation Steps) . Let μ(o, a ) = dref (o)πref (a|o) be a reference state-action distribution satisfying Assumption C.3. If an ELBO oracle returns ¯θ satisfying 
+
+Fμ(¯θ) ≥ sup 
+
+> θ
+
+Fμ(θ) − ε, 
+
+then 
+
+Eo∼dref [KL( πref (·| o) ∥ π¯θ (·| o))] + DL 
+
+> μ
+
+(¯θ) ≤ ε. (23) 
+
+Proof. We proceed in three steps. 
+
+Step 1: upper bound the best possible self-distillation objective. For any candidate parameter θ,the ELBO decomposition in Equation (2) gives 
+
+Fμ(θ) = Eμ [log πθ (a|o)] − DL 
+
+> μ
+
+(θ).
+
+Since DL 
+
+> μ
+
+(θ) ≥ 0,
+
+Fμ(θ) ≤ Eo∼dref , a ∼πref (·| o) [log πθ (a|o)] .
+
+Rewriting the right-hand side relative to πref ,
+
+Eo∼dref , a ∼πref (·| o) [log πθ (a|o)] = Eμ [log πref (a|o)] − Eo∼dref [KL( πref (·| o) ∥ πθ (·| o))] 
+
+≤ Eμ [log πref (a|o)] .
+
+Thus, 
+
+Fμ(θ) ≤ Eμ [log πref (a|o)] . (24) 
+
+Step 2: show that the upper bound is attainable. By realizability, Fμ(θ†) = Eμ[log πref (a|o)] .Together with Equation (24), this implies 
+
+sup 
+
+> θ
+
+Fμ(θ) = Eμ [log πref (a|o)] .
+
+Step 3: use oracle optimality. The ε-optimality of ¯θ gives 
+
+Fμ(¯θ) ≥ Eμ [log πref (a|o)] − ε. 
+
+Expanding Fμ(¯θ) as in Step 1 gives 
+
+Fμ(¯θ) = Eμ [log πref (a|o)] − Eo∼dref [KL( πref (·| o) ∥ π¯θ (·| o))] − DL 
+
+> μ
+
+(¯θ).
+
+Combining the previous two displays yields Equation (23). 
+
+Theorem C.8 (DiPOD improves return under on-policy tightness) . Suppose Assumptions C.1 to C.4 hold. Consider one idealized DiPOD cycle with current parameter θk. The self-distillation oracle uses ρθk as reference and returns ¯θk. Then Lemma C.7 gives the reference-distribution decomposition 
+
+Eo∼dπθk
+
+KL  πθk (·| o) ∥ π¯θk (·| o) + DL
+
+> ρθk
+
+(¯θk) ≤ ε. (25) 
+
+As emphasized in Remark C.5, this is a guarantee on the reference distribution ρθk . Now let 
+
+¯εk := DL
+
+> ρ¯θk
+
+(¯θk) be the discrepancy on the returned policy’s own on-policy distribution, and perform the policy update 
+
+θk+1 = ¯θk + ηG g (¯θk).
+
+If 0 < η ≤ 1/L J , then 
+
+J (θk+1 ) ≥ J (¯θk) + η
+
+2
+
+h
+
+∇J (¯θk) 2 − c2 
+
+> g
+
+¯εk
+
+i
+
+. (26) 21 Therefore, whenever ∥∇J (¯θk)∥ > c g
+
+√¯εk, the policy update strictly improves the true return relative to the returned policy ¯θk. If the oracle is exact ( ε = 0 ), or more generally returns a policy-preserving model so that ρ¯θk = ρθk , then ¯εk ≤ ε and J (¯θk) = J (θk); in this case the full DiPOD cycle strictly improves J whenever ∥∇J (¯θk)∥ > c g
+
+√ε.Moreover, suppose the iterates converge to a stable post-distillation policy θ⋆ for which the final on-policy self-distillation step is ε-optimal and returns θ⋆. Here stable means that the subsequent idealized update 
+
+θ+ 
+
+> ⋆
+
+= θ⋆ + ηG g (θ⋆)
+
+with 0 < η ≤ 1/L J does not strictly improve J . Then 
+
+∥∇J (θ⋆)∥ ≤ cg
+
+√ε, DL 
+
+> ρθ⋆
+
+(θ⋆) ≤ ε. 
+
+Thus the final policy is approximately stationary for the true return and has a tight ELBO on its own final on-policy distribution. Proof. The oracle decomposition Equation (25) follows directly by applying Lemma C.7 with 
+
+μ = ρθk .By definition of ¯εk and the Lipschitzness of the estimator, 
+
+Gg (¯θk) − ∇J (¯θk) ≤ cg
+
+√¯εk.
+
+Let 
+
+v := ∇J (¯θk), e := Gg (¯θk) − v. 
+
+Then ∥e∥ ≤ cg
+
+√¯εk. Using LJ -smoothness with θk+1 = ¯θk + η(v + e),
+
+J (θk+1 ) ≥ J (¯θk) + η⟨v, v + e⟩ − LJ η2
+
+2 ∥v + e∥2.
+
+When η ≤ 1/L J ,
+
+J (θk+1 ) ≥ J (¯θk) + η⟨v, v + e⟩ − η
+
+2 ∥v + e∥2
+
+= J (¯θk) + η
+
+2
+
+∥v∥2 − ∥ e∥2
+
+≥ J (¯θk) + η
+
+2
+
+h
+
+∇J (¯θk) 2 − c2 
+
+> g
+
+¯εk
+
+i
+
+.
+
+This proves Equation (26). Strict improvement follows whenever ∥∇J (¯θk)∥ > c g
+
+√¯εk. If the oracle is policy preserving, then ρ¯θk = ρθk , so Equation (25) implies ¯εk = DL
+
+> ρθk
+
+(¯θk) ≤ ε, and policy preservation also gives J (¯θk) = J (θk). When ε = 0 , the oracle decomposition gives zero expected KL from πθk to π¯θk on dπθk and zero reference-distribution ELBO discrepancy; under the same MDP dynamics this is the exact policy-preserving case. For the final claim, apply the oracle decomposition to the final self-distillation step with reference 
+
+ρθ⋆ and returned parameter θ⋆. The KL term is zero, so DL 
+
+> ρθ⋆
+
+(θ⋆) ≤ ε. If ∥∇J (θ⋆)∥ > c g
+
+√ε, the improvement bound applied to θ+ 
+
+> ⋆
+
+would give a strict increase in J , contradicting stability. Thus 
+
+∥∇J (θ⋆)∥ ≤ cg
+
+√ε.
+
+D Additional Details for Two-Token Post-Training 
+
+We use the same toy experiment as the one in Appendix C.3 of SPG [Wang et al., 2025]. In the toy experiment, the discrete diffusion model generates a distribution on two discrete tokens x = ( x1, x 2).Both x1 and x2 take values from V = {A, B}. In the generation process, x1 and x2 can also be a special mask token M. The generation starts from x = MM , and tokens are decoded according to a uniformly random order. The model is parameterized by six real numbers: 
+
+a = logit (π(x1 = A |x = MA)) , b = logit (π(x1 = A |x = MM)) , c = logit (π(x2 = A |x = AM)) ,d = logit (π(x2 = A |x = MM)) , e = logit (π(x1 = A |x = MB)) , f = logit (π(x2 = A |x = BM)) ,
+
+22 GSM8K MATH500 Countdown Sudoku Method 128 256 512 128 256 512 128 256 512 128 256 512 LLaDA-8B-Instruct 69.5 77.2 79.8 28.2 32.4 34.6 18.8 16.8 16.8 11.7 6.7 5.5 d1 72.2 80.6 81.3 31.4 36.0 39.4 30.9 30.9 34.4 22.1 16.7 9.5 wd1 74.6 80.8 82.3 31.0 34.4 39.0 48.8 51.2 46.1 N/A 76.4 62.8 SPG 81.05 84.23 83.40 33.40 37.80 41.80 68.80 51.95 70.30 44.40 25.12 40.62 SPG+DiPOD 81.65 84.91 85.29 36.00 40.00 41.40 44.53 80.08 55.47 25.02 97.56 36.42 
+
+Table 2: Results across generation sequence lengths. For GSM8K, MATH500, and Countdown, the LLaDA-8B-Instruct and d1 baselines are copied from SPG. For Sudoku, we report zero-shot baselines from d1 and wd1 rather than the 3-shot numbers in SPG. For wd1, sequence length 128 is taken from SPG’s reproduced wd1 row for GSM8K, MATH500, and Countdown, since the original wd1 paper only reports zero-shot results at lengths 256 and 512 ; the Sudoku 128 entry is therefore unavailable. where the logit function is defined as logit (p) = ln p
+
+1 − p . One can explicitly calculate log π, ELBO and DL using these parameters to monitor the drift. As an explicit example, the log-likelihood and ELBO for AA can be calculated as 
+
+log π(AA ) = log 
+
+ 12 S(b)S(c) + 12 S(a)S(d)
+
+
+
+,
+
+ELBO (AA ) = 12 (log S(a) + log S(b) + log S(c) + log S(d)) .
+
+Here S(x) = 11 + e−x is the sigmoid function, the inverse function of the logit function, which recovers probabilities from logits. The parameters are all initialized to be 0.5 so that ELBO equals log-likelihood for all outputs, resulting in a pretrained diffusion model. We set the reward function to be 
+
+r(AA) = 0 .8, r (AB) = 1 , r (BA) = 0 .7, r (BB) = 1 .
+
+The reward function is chosen for clarity of exposition and is without loss of generality. 
+
+Algorithm implementation. We implement FPO by updating the model parameters according to Equation (4), and SPG by updating the model parameters according to Equation (5). In the SPG implementation, a surrogate for EUBO (the LEUBO in Wang et al. [2025]) is used to tackle the intractability issue, and we follow their implementation in our experiment. In this toy setting, we directly calculate the policy gradient without invoking Monte Carlo samples for gradient estimation. We implement Algorithm 2 with FPO and SPG gradient estimators for comparison as well. We set the learning rate to be 0.1, the beta parameter in EUBO to be 1.5, β in DiPOD to be 0.2, and run these algorithms for 1500 policy-gradient steps. 
+
+E Additional Experiments for Diffusion Language Models 
+
+E.1 Experiments with More Sequence Lengths 
+
+We additionally report results at generation sequence lengths 128 , 256 , and 512 for SPG and SPG+DiPOD. We use the same setup as in Section 4.2, and set the DiPOD coefficient to β = 0 .05 
+
+for all settings except Sudoku with sequence lengths 128 and 512 , where we use β = 0 .02 . We summarize all tasks and sequence lengths in a single table. For GSM8K, MATH500, and Countdown, we copy the LLaDA-8B-Instruct and d1 baselines from SPG [Wang et al., 2025]. For Sudoku, we do 
+
+not use the 3-shot numbers reported in SPG; instead, we report the zero-shot LLaDA-8B-Instruct and d1 results from d1 [Zhao et al., 2025], and the wd1 baseline from wd1 [Tang et al., 2025]. The wd1 paper reports zero-shot results only at sequence lengths 256 and 512 ; for GSM8K, MATH500, and Countdown at sequence length 128 , we therefore use the reproduced wd1 numbers in SPG [Wang et al., 2025], while the Sudoku 128 entry remains unavailable because the SPG Sudoku setting is 3-shot. Compared with SPG, SPG+DiPOD gives consistent gains on GSM8K and MATH500 across sequence lengths. On Countdown, the best performance shifts to sequence length 256 , where SPG+DiPOD 23 substantially outperforms SPG, while SPG remains stronger at 128 and 512 . Sudoku exhibits a discrete training behavior, with runs tending to settle around roughly 25% , 40% , or near 100% 
+
+accuracy. Although SPG+DiPOD does not show a clear improvement at sequence lengths 128 and 
+
+512 , it is the only setting that reaches the near-100% regime in the zero-shot setting. 
+
+E.2 Ablation on the DiPOD Coefficient β
+
+We ablate the DiPOD coefficient β in Equation (7). Due to computational constraints, we conduct this study only on Countdown. This choice is also motivated by task characteristics: on GSM8K and MATH500, the gains are relatively small in our main results, while on Sudoku, single-run outcomes can exhibit discrete phase-transition-like behavior, which may lead to misleading conclusions in a limited ablation. Therefore, Countdown provides the cleanest setting for isolating the effect of β.Consistent with the fairness protocol used in the main experiments, we keep the random seed fixed across all ablation runs. Table 3: Ablation of the DiPOD coefficient β on Countdown. We report final accuracy under the same setup as Section 4.2. 
+
+β Performance 0 51.95 0.01 53.91 0.03 55.47 0.05 80.08 0.055 76.56 0.06 71.09 0.07 52.73 0.10 55.86 
+
+Table 3 shows that the choice of β has a clear effect on performance. A moderate regularization strength works best, with β = 0 .05 achieving the strongest result. When β is too small, the additional ELBO tightening is not strong enough to sufficiently control the drift during policy optimization; when β is too large, the optimization appears to overemphasize the regularization term, which can weaken the policy-improving update. Overall, these results support the use of a moderate on-policy ELBO regularization strength and validate our default choice of β = 0 .05 in the main language-model experiments. 
+
+E.3 Experiment on Sudoku in the Three-Shot Setting 0 200 400 600 800 1000 
+
+> Training step
+> 0.2
+> 0.3
+> 0.4
+> 0.5
+> 0.6
+> 0.7
+> 0.8
+> 0.9
+> 1.0
+> Reward
+> Sudoku (3-Shot)
+> SPG
+> SPG+DiPOD
+
+Figure 5: Reward dynamics of SPG and SPG+DiPOD in the 3-shot setting. In the three-shot setting, SPG [Wang et al., 2025] has already saturated the performance. Here we show the reward dynamics of SPG+DiPOD compared to SPG in Figure 5, with β = 0 .05 . We can see that DiPOD converges faster to the optimal performance than SPG. 24 F Additional Experiments for Motion Tracking 
+
+F.1 Motion Tracking Experiment 
+
+We provide additional details for the motion-tracking experiment discussed in the main text. We follow the motion-tracking setup of FPO++ [Yi et al., 2026]: a diffusion policy controls the Unitree G1 humanoid to track reference motions from LAFAN [Harvey et al., 2020]. All downstream FPO++ hyperparameters follow the original motion-tracking setup. The only added component is an initial self-distillation stage before normal FPO++ policy-gradient training. We use this single-stage version because policy-preserving self-distillation during high-dimensional motion-control training is itself a nontrivial algorithmic component; designing a fully interleaved self-distillation schedule for this setting is left to future work. 
+
+Self-distillation procedure. The self-distillation stage instantiates the self-distillation step in the original interleaved DiPOD procedure Algorithm 1. At the beginning of training, we clone the randomly initialized actor into a frozen teacher. We then collect rollouts using teacher actions: the frozen teacher samples actions, and we store the resulting observation and teacher action pairs. The student actor is trained on this growing dataset by maximizing the empirical average of the evidence lower bound. This phase is not reward learning: the critic, advantages, and surrogate policy-gradient loss are used only after self-distillation is complete. Thus the initial distillation step preserves the initial policy distribution while tightening the gap between ELBO and log-likelihood before the subsequent policy-gradient stage. 
+
+Algorithm 3 Initial self-distillation for motion tracking 
+
+Input: initial actor πθ , vectorized environments, distillation iterations K 
+
+> 1:
+
+Clone the actor into a frozen teacher ¯π 
+
+> 2:
+
+Initialize replay buffer D ← ∅  
+
+> 3:
+
+for k = 1 , . . . , K do  
+
+> 4:
+
+Collect teacher rollouts in the live environments and append sampled observation-action pairs 
+
+(o, a ) to D 
+
+> 5:
+
+Sample a minibatch {(oi, a i)}Bi=1 from D 
+
+> 6:
+
+Update only the student actor by maximizing 1
+
+> B
+
+PBi=1 ELBO θ (ai|oi) 
+
+> 7:
+
+end for  
+
+> 8:
+
+Reset the optimizer state and continue with the FPO++ policy-gradient stage In our runs, self-distillation uses 100 iterations, 8 rollout steps per iteration, minibatch size 16384 ,AdamW with learning rate 3 · 10 −4 and weight decay 10 −4, and actor gradient clipping at 1.0. The frozen teacher uses 64 sampling steps. The tracking tasks use 4096 parallel environments. 
+
+Computational cost. We run the experiments on a single NVIDIA L40S GPU. For 
+
+dance_1_subject_1 , the self-distillation stage takes 95 .5s in total, or about 0.96 s per self-distillation iteration. A policy-gradient iteration takes about 15 s, so the 1000 -iteration training runs shown in the figures take roughly 4.2 hours. Thus, the initial self-distillation stage adds only about 1.5 minutes of computation, which is negligible relative to the full training process. 
+
+Results. We report the full set of motion-tracking curves in Figures 6 and 7. Across all six LAFAN tracking tasks, DiPOD improves sample efficiency over the reproduced FPO++ baseline: the reward curves rise faster and the episode-length curves indicate more sustained successful tracking. The consistency across dance_1_subject_1 , dance_1_subject_2 , fight_1_subject_2 , jumps_1_subject_1 ,
+
+run_1_subject_2 , and walk_1_subject_1 suggests that the initial self-distillation step provides a general benefit rather than a task-specific gain. 25 0 200 400 600 800 1000 
+
+Training iteration 
+
+0
+
+2
+
+4
+
+6
+
+8
+
+10 
+
+12 
+
+14 
+
+> Mean reward
+
+dance1 subject1: Mean reward 
+
+FPO++ 
+
+DiPOD (a) dance_1_subject_1 0 200 400 600 800 1000 
+
+Training iteration 
+
+0.0 
+
+2.5 
+
+5.0 
+
+7.5 
+
+10.0 
+
+12.5 
+
+15.0 
+
+> Mean reward
+
+dance1 subject2: Mean reward 
+
+FPO++ 
+
+DiPOD (b) dance_1_subject_2 0 200 400 600 800 1000 
+
+Training iteration 
+
+0
+
+2
+
+4
+
+6
+
+8
+
+10 
+
+12 
+
+> Mean reward
+
+fight1 subject2: Mean reward 
+
+FPO++ 
+
+DiPOD (c) fight_1_subject_2 0 200 400 600 800 1000 
+
+Training iteration 
+
+0
+
+2
+
+4
+
+6
+
+8
+
+10 
+
+12 
+
+> Mean reward
+
+jumps1 subject1: Mean reward 
+
+FPO++ 
+
+DiPOD 
+
+(d) jumps_1_subject_1 0 200 400 600 800 1000 
+
+Training iteration 
+
+0
+
+5
+
+10 
+
+15 
+
+20 
+
+25 
+
+> Mean reward
+
+run1 subject2: Mean reward 
+
+FPO++ 
+
+DiPOD (e) run_1_subject_2 0 200 400 600 800 1000 
+
+Training iteration 
+
+0
+
+5
+
+10 
+
+15 
+
+20 
+
+25 
+
+30 
+
+35 
+
+> Mean reward
+
+walk1 subject1: Mean reward 
+
+FPO++ 
+
+DiPOD (f) walk_1_subject_1 
+
+Figure 6: Mean reward curves for all six LAFAN motion-tracking tasks on the G1 humanoid. 0 200 400 600 800 1000 
+
+Training iteration 
+
+0
+
+50 
+
+100 
+
+150 
+
+200 
+
+> Mean episode length
+
+dance1 subject1: Mean episode length 
+
+FPO++ 
+
+DiPOD 
+
+(a) dance_1_subject_1 0 200 400 600 800 1000 
+
+Training iteration 
+
+0
+
+50 
+
+100 
+
+150 
+
+200 
+
+250 
+
+300 
+
+350 
+
+> Mean episode length
+
+dance1 subject2: Mean episode length 
+
+FPO++ 
+
+DiPOD (b) dance_1_subject_2 0 200 400 600 800 1000 
+
+Training iteration 
+
+0
+
+50 
+
+100 
+
+150 
+
+200 
+
+250 
+
+> Mean episode length
+
+fight1 subject2: Mean episode length 
+
+FPO++ 
+
+DiPOD (c) fight_1_subject_2 0 200 400 600 800 1000 
+
+Training iteration 
+
+0
+
+50 
+
+100 
+
+150 
+
+200 
+
+> Mean episode length
+
+jumps1 subject1: Mean episode length 
+
+FPO++ 
+
+DiPOD 
+
+(d) jumps_1_subject_1 0 200 400 600 800 1000 
+
+Training iteration 
+
+0
+
+100 
+
+200 
+
+300 
+
+400 
+
+> Mean episode length
+
+run1 subject2: Mean episode length 
+
+FPO++ 
+
+DiPOD (e) run_1_subject_2 0 200 400 600 800 1000 
+
+Training iteration 
+
+0
+
+100 
+
+200 
+
+300 
+
+400 
+
+500 
+
+> Mean episode length
+
+walk1 subject1: Mean episode length 
+
+FPO++ 
+
+DiPOD (f) walk_1_subject_1 
+
+Figure 7: Mean episode length curves for all six LAFAN motion-tracking tasks on the G1 humanoid. 26

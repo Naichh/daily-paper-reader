@@ -6,32 +6,30 @@
 </div>
 
 ## 每次日报
-- 最新运行日期：2026-06-14
-- 运行时间：2026-06-14 20:48:20 UTC
+- 最新运行日期：2026-06-15
+- 运行时间：2026-06-15 22:08:44 UTC
 - 运行状态：成功
-- 本次总论文数：4
+- 本次总论文数：3
 - 精读区：3
-- 速读区：1
+- 速读区：0
 
 ### 今日简报（AI）
-今日精读3篇、速读1篇，重点聚焦策略梯度蒸馏技术与检索增强类比推理。两篇高分精读均围绕高阶蒸馏与稀疏机制展开，建议优先关注《Dense Supervision, Sparse Updates》中提出的蒸馏几何与稀疏性洞察；后续可尝试将开篇的检索增强框架与蒸馏方法结合，提升复杂推理任务的效率。
-- 详情：[/202606/14/README](/202606/14/README)
+今日精读2篇高分论文，分别聚焦在线策略蒸馏的稀疏性与扩散策略优化的无漂移技术。最值得关注的是密集监督下的稀疏更新几何分析，以及避免策略漂移的扩散优化新方法。建议深入理解这两个方向的理论基础，并尝试将稀疏更新与无漂移机制结合应用到实际强化学习任务中。
+- 详情：[/202606/15/README](/202606/15/README)
 
 ### 精读区论文标签
-1. [Dense Supervision, Sparse Updates: On the Sparsity and Geometry of On-Policy Distillation](/202606/14/2606.13657v1-dense-supervision-sparse-updates-on-the-sparsity-and-geometry-of-on-policy-distillation)  
+1. [Dense Supervision, Sparse Updates: On the Sparsity and Geometry of On-Policy Distillation](/202606/15/2606.13657v2-dense-supervision-sparse-updates-on-the-sparsity-and-geometry-of-on-policy-distillation)  
    标签：评分：10.0/10、query:policy-dist
-   evidence：直接研究后训练中的在策略蒸馏
-2. [Thinking Without Images: Internalizing Visual Manipulation with On-Policy Self-Distillation](/202606/14/2606.08719v1-thinking-without-images-internalizing-visual-manipulation-with-on-policy-self-distillation)  
-   标签：评分：8.0/10、query:policy-dist
-   evidence：在线策略自我蒸馏与需求直接匹配
-3. [Keep Policy Gradient in Charge: Sibling-Guided Credit Distillation for Long-Horizon Tool-Use Agents](/202606/14/2606.12634v1-keep-policy-gradient-in-charge-sibling-guided-credit-distillation-for-long-horizon-tool-use-agents)  
-   标签：评分：8.0/10、query:policy-dist
-   evidence：面向RL智能体的信用蒸馏方法
+   evidence：直接研究用于后训练的on-policy蒸馏（OPD）
+2. [Diffusion Policy Optimization without Drifting Apart](/202606/15/2606.13795v1-diffusion-policy-optimization-without-drifting-apart)  
+   标签：评分：9.0/10、query:policy-dist
+   evidence：扩散策略的强化学习后训练结合在线自蒸馏
+3. [Be My Tutor: On-Policy Co-Distillation for Mutual LLM Improvement via Peer Feedback](/202606/15/2606.14368v1-be-my-tutor-on-policy-co-distillation-for-mutual-llm-improvement-via-peer-feedback)  
+   标签：评分：9.0/10、query:policy-dist
+   evidence：在线协作蒸馏实现模型互相改进
 
 ### 速读区论文标签
-1. [Learning to Reason by Analogy via Retrieval-Augmented Reinforcement Fine-Tuning](/202606/14/2606.13680v1-learning-to-reason-by-analogy-via-retrieval-augmented-reinforcement-fine-tuning)  
-   标签：评分：7.0/10、query:policy-dist
-   evidence：使用金相关蒸馏和强化微调进行后训练
+- 本次无速读推荐。
 
 
 <div class="dpr-home-promo-card">
