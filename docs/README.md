@@ -6,27 +6,27 @@
 </div>
 
 ## 每次日报
-- 最新运行日期：2026-06-15
-- 运行时间：2026-06-15 22:08:44 UTC
+- 最新运行日期：2026-06-16
+- 运行时间：2026-06-16 22:55:24 UTC
 - 运行状态：成功
 - 本次总论文数：3
 - 精读区：3
 - 速读区：0
 
 ### 今日简报（AI）
-今日精读2篇高分论文，分别聚焦在线策略蒸馏的稀疏性与扩散策略优化的无漂移技术。最值得关注的是密集监督下的稀疏更新几何分析，以及避免策略漂移的扩散优化新方法。建议深入理解这两个方向的理论基础，并尝试将稀疏更新与无漂移机制结合应用到实际强化学习任务中。
-- 详情：[/202606/15/README](/202606/15/README)
+今日精读两篇9分前沿研究，聚焦混合Mamba-Transformer高效推理模型与路径条件自蒸馏推理优化方法。最值得关注的是Nemotron 3 Ultra在代理推理任务中实现开源高效混合架构，同时自蒸馏技术通过梯度局部化提升LLM推理可信度。建议普通读者优先阅读Nemotron 3 Ultra的工程实现细节，以了解如何平衡效率与推理能力。
+- 详情：[/202606/16/README](/202606/16/README)
 
 ### 精读区论文标签
-1. [Dense Supervision, Sparse Updates: On the Sparsity and Geometry of On-Policy Distillation](/202606/15/2606.13657v2-dense-supervision-sparse-updates-on-the-sparsity-and-geometry-of-on-policy-distillation)  
-   标签：评分：10.0/10、query:policy-dist
-   evidence：直接研究用于后训练的on-policy蒸馏（OPD）
-2. [Diffusion Policy Optimization without Drifting Apart](/202606/15/2606.13795v1-diffusion-policy-optimization-without-drifting-apart)  
+1. [Nemotron 3 Ultra: Open, Efficient Mixture-of-Experts Hybrid Mamba-Transformer Model for Agentic Reasoning](/202606/16/2606.15007v1-nemotron-3-ultra-open-efficient-mixture-of-experts-hybrid-mamba-transformer-model-for-agentic-reasoning)  
    标签：评分：9.0/10、query:policy-dist
-   evidence：扩散策略的强化学习后训练结合在线自蒸馏
-3. [Be My Tutor: On-Policy Co-Distillation for Mutual LLM Improvement via Peer Feedback](/202606/15/2606.14368v1-be-my-tutor-on-policy-co-distillation-for-mutual-llm-improvement-via-peer-feedback)  
+   evidence：在后训练中使用多教师在线策略蒸馏（MOPD）
+2. [Localizing Credit at the Divergence: Path-Conditioned Self-Distillation for LLM Reasoning](/202606/16/2606.15576v1-localizing-credit-at-the-divergence-path-conditioned-self-distillation-for-llm-reasoning)  
    标签：评分：9.0/10、query:policy-dist
-   evidence：在线协作蒸馏实现模型互相改进
+   evidence：用于LLM推理的在线策略自蒸馏
+3. [On-Policy Distillation with Curriculum Turn-level Guidance for Multi-turn Agents](/202606/16/2606.15912v1-on-policy-distillation-with-curriculum-turn-level-guidance-for-multi-turn-agents)  
+   标签：评分：9.0/10、query:policy-dist
+   evidence：直接提出用于多轮智能体的在线策略蒸馏方法
 
 ### 速读区论文标签
 - 本次无速读推荐。
