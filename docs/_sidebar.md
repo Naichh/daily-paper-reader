@@ -1,6 +1,9 @@
 * <a class="dpr-sidebar-root-link" href="#/">首页</a>
 * <a class="dpr-sidebar-root-link dpr-sidebar-noactive-link" href="javascript:void(0)" data-dpr-hash="#/tutorial/README">使用教程</a>
 * Daily Papers
+  * 2026-06-21 <!--dpr-date:20260621-->
+    * 速读区
+      * <a class="dpr-sidebar-item-link dpr-sidebar-item-structured" href="#/202606/21/2606.19632v1-formal-verification-of-learned-multi-agent-communication-policies-via-decision-tree-distillation" data-sidebar-item="{&quot;title&quot;: &quot;Formal Verification of Learned Multi-Agent Communication Policies via Decision Tree Distillation&quot;, &quot;link&quot;: &quot;https://arxiv.org/abs/2606.19632v1-formal-verification-of-learned-multi-agent-communication-policies-via-decision-tree-distillation&quot;, &quot;score&quot;: &quot;6.0&quot;, &quot;tags&quot;: [{&quot;kind&quot;: &quot;query&quot;, &quot;label&quot;: &quot;policy-dist&quot;}], &quot;evidence&quot;: &quot;将神经策略蒸馏为决策树以进行形式化验证&quot;}">Formal Verification of Learned Multi-Agent Communication Policies via Decision Tree Distillation</a>
   * 2026-06-20 <!--dpr-date:20260620-->
     * 精读区
       * <a class="dpr-sidebar-item-link dpr-sidebar-item-structured" href="#/202606/20/2606.15007v1-nemotron-3-ultra-open-efficient-mixture-of-experts-hybrid-mamba-transformer-model-for-agentic-reasoning" data-sidebar-item="{&quot;title&quot;: &quot;Nemotron 3 Ultra: Open, Efficient Mixture-of-Experts Hybrid Mamba-Transformer Model for Agentic Reasoning&quot;, &quot;link&quot;: &quot;https://arxiv.org/abs/2606.15007v1-nemotron-3-ultra-open-efficient-mixture-of-experts-hybrid-mamba-transformer-model-for-agentic-reasoning&quot;, &quot;score&quot;: &quot;8.0&quot;, &quot;tags&quot;: [{&quot;kind&quot;: &quot;query&quot;, &quot;label&quot;: &quot;policy-dist&quot;}], &quot;evidence&quot;: &quot;在后训练中使用多教师在策略蒸馏（MOPD），结合强化学习&quot;}">Nemotron 3 Ultra: Open, Efficient Mixture-of-Experts Hybrid Mamba-Transformer Model for Agentic Reasoning</a>
