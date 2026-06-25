@@ -6,35 +6,34 @@
 </div>
 
 ## 每次日报
-- 最新运行日期：2026-06-24
-- 运行时间：2026-06-24 21:31:33 UTC
+- 最新运行日期：2026-06-25
+- 运行时间：2026-06-25 21:29:35 UTC
 - 运行状态：成功
-- 本次总论文数：5
-- 精读区：4
-- 速读区：1
+- 本次总论文数：3
+- 精读区：3
+- 速读区：0
 
 ### 今日简报（AI）
-今日精读4篇速读1篇，聚焦策略引导的LLM推理优化与在线蒸馏的位置偏差研究。最值得关注的是满分论文《Beyond Trajectory Imitation》提出的策略引导策略优化方法，以及9分论文揭示的蒸馏中位置偏差问题。建议重点研读这两篇，探索如何结合策略引导与偏差修正提升推理模型效果。
-- 详情：[/202606/24/README](/202606/24/README)
+今日聚焦两篇9.0高分的在线策略蒸馏研究，探索无标注蒸馏与多样性控制新范式。
+
+V-Zero通过对比证据门控实现免标注细粒度视觉推理，另一篇用示范样本采样降低输出多样性，两者均从不同维度提升蒸馏效果。
+
+建议关注无标注蒸馏方法以减少标注成本，同时注意平衡输出多样性，可结合这两篇思路设计更鲁棒的蒸馏框架。
+- 详情：[/202606/25/README](/202606/25/README)
 
 ### 精读区论文标签
-1. [Beyond Trajectory Imitation: Strategy-Guided Policy Optimization for LLM Reasoning](/202606/24/2606.24064v1-beyond-trajectory-imitation-strategy-guided-policy-optimization-for-llm-reasoning)  
-   标签：评分：10.0/10、query:policy-dist
-   evidence：大语言模型推理后训练中的在线策略蒸馏
-2. [On the Position Bias of On-Policy Distillation](/202606/24/2606.22600v2-on-the-position-bias-of-on-policy-distillation)  
+1. [V-Zero: Answer-Label-Free On-Policy Distillation with Contrastive Evidence Gating for Fine-Grained Visual Reasoning](/202606/25/2606.25319v1-v-zero-answer-label-free-on-policy-distillation-with-contrastive-evidence-gating-for-fine-grained-visual-reasoning)  
    标签：评分：9.0/10、query:policy-dist
-   evidence：研究在线策略蒸馏的位置偏差
-3. [Blockwise Policy-Drift Gating for On-Policy Distillation](/202606/24/2606.24084v1-blockwise-policy-drift-gating-for-on-policy-distillation)  
+   evidence：多模态大语言模型中基于on-policy蒸馏的视觉推理
+2. [On-Policy Self-Distillation with Sampled Demonstrations Reduces Output Diversity](/202606/25/2606.26091v1-on-policy-self-distillation-with-sampled-demonstrations-reduces-output-diversity)  
    标签：评分：9.0/10、query:policy-dist
-   evidence：面向在线蒸馏的块级策略漂移门控
-4. [AsyncOPD: How Stale Can On-Policy Distillation Be?](/202606/24/2606.24143v1-asyncopd-how-stale-can-on-policy-distillation-be)  
-   标签：评分：9.0/10、query:policy-dist
-   evidence：首次系统研究异步on-policy蒸馏中数据陈旧性对LLM后训练的影响
+   evidence：带有采样示范的在线自蒸馏
+3. [PolicyAlign: Direct Policy-Based Safety Alignment for Large Language Models](/202606/25/2606.25442v1-policyalign-direct-policy-based-safety-alignment-for-large-language-models)  
+   标签：评分：8.0/10、query:policy-dist
+   evidence：在线自蒸馏用于安全对齐
 
 ### 速读区论文标签
-1. [Escaping the Self-Confirmation Trap: An Execute-Distill-Verify Paradigm for Agentic Experience Learning](/202606/24/2606.24428v1-escaping-the-self-confirmation-trap-an-execute-distill-verify-paradigm-for-agentic-experience-learning)  
-   标签：评分：7.0/10、query:policy-dist
-   evidence：执行-蒸馏-验证框架中的蒸馏阶段
+- 本次无速读推荐。
 
 
 <div class="dpr-home-promo-card">
