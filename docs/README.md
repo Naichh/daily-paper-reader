@@ -6,34 +6,28 @@
 </div>
 
 ## 每次日报
-- 最新运行日期：2026-06-25
-- 运行时间：2026-06-25 21:29:35 UTC
+- 最新运行日期：2026-06-26
+- 运行时间：2026-06-26 21:48:33 UTC
 - 运行状态：成功
-- 本次总论文数：3
-- 精读区：3
-- 速读区：0
+- 本次总论文数：2
+- 精读区：1
+- 速读区：1
 
 ### 今日简报（AI）
-今日聚焦两篇9.0高分的在线策略蒸馏研究，探索无标注蒸馏与多样性控制新范式。
-
-V-Zero通过对比证据门控实现免标注细粒度视觉推理，另一篇用示范样本采样降低输出多样性，两者均从不同维度提升蒸馏效果。
-
-建议关注无标注蒸馏方法以减少标注成本，同时注意平衡输出多样性，可结合这两篇思路设计更鲁棒的蒸馏框架。
-- 详情：[/202606/25/README](/202606/25/README)
+1) 今日精读智能体强化学习技能蒸馏高分论文，速读大语言模型强化学习流水线优化新方法。
+2) 最值得看：OPID在线策略技能蒸馏可提升智能体学习效率；RolloutPipe通过流水线重叠加速训练。
+3) 建议尝试将OPID应用到具体智能体任务，并关注RolloutPipe实现细节以优化大规模LLM训练。
+- 详情：[/202606/26/README](/202606/26/README)
 
 ### 精读区论文标签
-1. [V-Zero: Answer-Label-Free On-Policy Distillation with Contrastive Evidence Gating for Fine-Grained Visual Reasoning](/202606/25/2606.25319v1-v-zero-answer-label-free-on-policy-distillation-with-contrastive-evidence-gating-for-fine-grained-visual-reasoning)  
+1. [OPID: On-Policy Skill Distillation for Agentic Reinforcement Learning](/202606/26/2606.26790v1-opid-on-policy-skill-distillation-for-agentic-reinforcement-learning)  
    标签：评分：9.0/10、query:policy-dist
-   evidence：多模态大语言模型中基于on-policy蒸馏的视觉推理
-2. [On-Policy Self-Distillation with Sampled Demonstrations Reduces Output Diversity](/202606/25/2606.26091v1-on-policy-self-distillation-with-sampled-demonstrations-reduces-output-diversity)  
-   标签：评分：9.0/10、query:policy-dist
-   evidence：带有采样示范的在线自蒸馏
-3. [PolicyAlign: Direct Policy-Based Safety Alignment for Large Language Models](/202606/25/2606.25442v1-policyalign-direct-policy-based-safety-alignment-for-large-language-models)  
-   标签：评分：8.0/10、query:policy-dist
-   evidence：在线自蒸馏用于安全对齐
+   evidence：提出面向智能体强化学习的在线策略技能蒸馏
 
 ### 速读区论文标签
-- 本次无速读推荐。
+1. [RolloutPipe: Overlapping Pipelined Rollout and Training in Disaggregated On-Policy LLM Reinforcement Learning](/202606/26/2606.26997v1-rolloutpipe-overlapping-pipelined-rollout-and-training-in-disaggregated-on-policy-llm-reinforcement-learning)  
+   标签：评分：7.0/10、query:policy-dist
+   evidence：针对后训练中在线策略LLM强化学习的流水线优化
 
 
 <div class="dpr-home-promo-card">
