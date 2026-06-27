@@ -1,0 +1,774 @@
+Title: FORCE: Efficient VLA Reinforcement Fine-Tuning via Value-Calibrated Warm-up and Self-Distillation
+
+URL Source: https://arxiv.org/pdf/2606.26006v1
+
+Published Time: Thu, 25 Jun 2026 01:20:56 GMT
+
+Number of Pages: 14
+
+Markdown Content:
+# FORCE: Efficient VLA Reinforcement Fine-Tuning via Value-Calibrated Warm-up and Self-Distillation 
+
+Shuyi Zhang * 1 2 Yunfan Lou * 2 Hongyang Cheng * 2 Yichen Guo 3 Chuyao Fu 2 Yaoxu Lyu 2 3 Xiaojie Zhang 2
+
+Haoran Li 1 Pengwei Wang 2 Zhongyuan Wang 2 Shanghang Zhang B 2 3 
+
+## Abstract 
+
+Vision-Language-Action (VLA) models are often constrained by the ’imitation ceiling’ imposed by sub-optimal data. While Reinforcement Learning (RL) fine-tuning can surpass this limit, it is noto-riously sample inefficient. This challenge arises from two core issues: (1) catastrophic initial un-learning due to an unstable Q-function and (2) inefficient policy updates caused by low-quality exploration data, often forcing a reliance on costly human interventions. We introduce FORCE , a 3-stage framework that stabilizes fine-tuning by tackling both issues. FORCE first incorporates a Value-Calibrated Warm-Up phase, utilizing on-policy rollouts to mitigate the distributional shift of the Q-function. Subsequently, during the online stage, this calibrated Q-function acts as a filter for both the policy’s own action proposals and expert data, ensuring only high-value actions are used for the policy update. We evaluate FORCE on vari-ous simulation and real-world tasks, and the result shows that FORCE achieves a 79% absolute im-provement in success rates and outperform prior RL methods by 10%, while accelerating training by 32.5%. Critically, it mitigates the common success rate drop and achieves this robust per-formance without human intervention, marking a significant step towards deploying capable and autonomous robotic agents. 
+
+## 1. Introduction 
+
+Vision-Language-Action models have demonstrated remark-able potential in executing general-purpose robotic tasks 
+
+> *
+
+Equal contribution B Corresponding author 1Institute of Au-tomation, Chinese Academy of Sciences, Beijing, China 2Beijing Academy of Artificial Intelligence, Beijing, China 3State Key Labo-ratory of Multimedia Information Processing, School of Computer Science, Peking University, Beijing, China. Correspondence to: Shanghang Zhang <shanghang@pku.edu.cn >.
+
+Preprint. June 25, 2026. 
+
+(Kim et al., 2024; Zitkovich et al., 2023; Ghosh et al., 2024). These models are typically pre-trained through Imitation Learning (IL), enabling robots to understand complex in-structions and map them to physical actions (Black et al., 2024; 2025). However, pure imitation learning (such as Su-pervised Fine-Tuning, SFT) faces a fundamental bottleneck: the policy’s performance is constrained by the quality of the demonstration data, known as the ”imitation ceiling” (Ross et al., 2011). This is not merely an empirical observation but a fundamental statistical limitation, as imitation learning suffers from error compounding that scales quadratically with task horizon (Rajaraman et al., 2020). Since human demonstration data inevitably contains sub-optimal and even inconsistent actions (Hester et al., 2018; Chen et al., 2021), which standard IL struggles to learn from without additional information like trajectory rankings (Guhur et al., 2023), the performance ceiling of VLA models is firmly capped. Reinforcement learning offers a clear path for VLA models to surpass the limitations of demonstration data through online interaction with the environment, thereby breaking the ”imitation ceiling” (Vecerik et al., 2017; Kalashnikov et al., 2018). Indeed, recent works have shown that even a small amount of online fine-tuning can dramatically improve the performance of large-scale, pre-trained IL policies (Li et al., 2025; Hu et al., 2025; Lei et al., 2025). Despite this promise, applying RL directly to the online fine-tuning of VLA models faces severe challenges. The most prominent issue is that RL fine-tuning is notoriously sample inefficient in real-world physical interactions (Haarnoja et al., 2018). This sample inefficiency remains the primary bottleneck, even as recent reinforced fine-tuning (RFT) frameworks have shown impressive gains with just minutes of online interaction (Chen et al., 2025; Team, 2024). The root of this inefficiency can be traced to two core diffi-culties in offline-to-online RL on real robots. (1) Catas-trophic ’Initial Unlearning’ : When transitioning from offline pre-training (which often uses conservative value estimates) to online fine-tuning, policies suffer from a well-documented performance collapse (Nakamoto et al., 2023; Nair et al., 2021). This ”initial unlearning” is caused by a Q-value scale mismatch, where the highly underestimated 1
+
+> arXiv:2606.26006v1 [cs.RO] 24 Jun 2026
+
+FORCE: Efficient VLA Reinforcement Fine-Tuning Demo Buffer          
+
+> Policy
+> 𝜋 (𝑠 )
+> Critic
+> 𝑄 (𝑠 ,𝑎 )
+> Offline Stage Pre -Calibration Stage Online Stage
+> Offline Demos Success Transition
+> Failure Transition
+> Offline Demos
+> Mixed Buffer
+> Policy
+> 𝜋 (𝑠 )
+> Critic
+> 𝑄 (𝑠 ,𝑎 )
+> Static Rollout
+> Cal -ql
+> Update
+> BC
+> Update
+> Q-grad Q-grad
+> Expert Buffer Policy Buffer
+> Cal -ql
+> Update
+> Expert
+> BC Update
+> Environment
+> Failure Success
+> Policy
+> 𝜋 (𝑠 )
+> Critic
+> 𝑄 (𝑠 ,𝑎 )
+> Q-grad
+> Success Transition
+> Offline Demos
+> Success Transition
+> Failure Transition
+> Equal
+> Sampling
+> TD Update Distill
+> Update
+
+…… 
+
+Vision -Language -Action Backbone 
+
+Figure 1. Overview of the FORCE framework. Our method employs a three-stage reinforcement fine-tuning pipeline that progressively calibrates value estimation and stabilizes policy improvement: (1) offline Cal-QL pretraining to obtain a conservative and well-grounded critic, (2) mixed-rollout value pre-calibration to bridge offline and online distributions and mitigate O2O drift, and (3) online fine-tuning with balanced expert/policy replay coupled with VGPD, enabling safe and sample-efficient policy refinement beyond the imitation ceiling. 
+
+offline Q-function is ”deceived” by new online data, leading to a catastrophic adjustment period and negating the ben-efits of pre-training. (2) Inefficient Policy Updates : The policy update process is severely hindered by low-quality exploratory data (i.e., the policy generates a large number of useless actions when exploring unfamiliar regions). To address these problems and ensure safe exploration, existing methods (Luo et al., 2025; Chen et al., 2025; Kelly et al., 2019) are often forced to rely on costly and difficult-to-scale Human-in-the-Loop (HiL) interventions (Luo et al., 2025), which treat human attention as a scarce resource. To address these challenges, we introduce FORCE, an intervention-free framework that bridges the gap between static datasets and dynamic physical interaction. To miti-gate catastrophic unlearning, FORCE incorporates a distri-butional warm-up phase that calibrates the value function on the policy’s visitation distribution prior to any actor up-dates. This aligns the critic’s support with the agent’s current behavior, ensuring stable value estimates during the offline-to-online transition. Subsequently, the framework employs a value-guided self-distillation mechanism to govern online fine-tuning. Acting as a dynamic filter, this module projects the policy onto a target distribution derived strictly from high-value transitions, effectively eliminating exploration noise and ensuring monotonic improvement without human supervision. We evaluated FORCE on several challenging robotic ma-nipulation tasks both in simulation and the real-world. The experimental results demonstrate that FORCE achieves sig-nificant performance gains, reaching nearly 100% success rates on several tasks, all without human intervention. Our main contributions are summarized as follows: 1. FORCE Framework: A principled three-stage pipeline for intervention-free offline-to-online RL fine-tuning starting from pre-trained models (e.g., VLA). 2. Distributional Warm-up: A mechanism to mitigate cold-start covariate shift by aligning Q-function sup-port with policy visitation prior to fine-tuning. 3. Value-Guided Policy Distillation: A theoretically grounded regularized policy improvement operator that filters high-variance exploration to accelerate conver-gence. 4. SOTA Performance and Efficient Adaptation: Em-pirical validation on physical robots showing that FORCE achieves near-perfect success rates on contact-rich tasks with significantly improved sample effi-ciency compared to baselines. 
+
+## 2. Related Work 
+
+Vision-Language-Action Models Vision-Language-Action (VLA) Models have recently enabled robots to perceive, rea-son, and act using multimodal inputs (Brohan et al., 2022; Zitkovich et al., 2023). Early architectures treated manipula-tion as a discrete token generation problem, like OpenVLA (Kim et al., 2024), often resulting in coarse control resolu-tion. This limitation motivated models to utilize flow match-ing or diffusion processes to chunk continuous motions into high-dimensional latent flows, such as Octo (Ghosh et al., 2024), Rdt-1b (Liu et al., 2024) and π-series models (Black et al., 2024; 2025; Physical Intelligence, 2025). However, these models predominantly rely on supervised imitation learning from static datasets, which prevents them from correcting execution errors or adapting to dynamic environ-ments. In our work, we focus on fine-tuning high-capacity VLA policies using RL to further enhance their performance and generalization. 2FORCE: Efficient VLA Reinforcement Fine-Tuning 
+
+RL Finetuning for VLA Models and Real-world RL 
+
+Many works recently have explored reinforcement learn-ing algorithm to improve the generalization ability of VLA models. Approaches building on PPO (Schulman et al., 2017) or GRPO (Shao et al., 2024)s with transformer back-bones remain largely restricted to simulation (Li et al., 2025; Lu et al., 2025; Liu et al., 2025), as their on-policy nature suffers from poor sample efficiency that prohibits physi-cal deployment. Moreover, these standard formulations are structurally limited to autoregressive backbones, failing to accommodate continuous policies required for dexterous manipulation. Real-world RL training strategies for VLA models generally fall into two paradigms: (1) generalized behavioral cloning (Nair et al., 2021; Peng et al., 2019), exemplified by methods such as PA-RL(Mark et al., 2024), which utilizes value preference feedback to steer the pol-icy towards high-quality behaviors while maintaining the stability of supervised imitation; and (2) direct Q-driven optimization augmented with behavioral cloning regular-ization (Fujimoto & Gu, 2021), like ConRFT (Chen et al., 2025), is to synergize the stability of behavioral cloning (BC) with the optimality-seeking drive of Q-learning via a joint optimization objective. Our framework, FORCE, adopts this hybrid objective but additionally employs a novel value-guided self-distillation mechanism in the online phase to mitigate instability and maximize sample efficiency. 
+
+Offline-to-Online Shift Training robotic policies from scratch is notoriously sample-inefficient and often demands extensive, infeasible human-in-the-loop intervention(Luo et al., 2025; Chen et al., 2025). The offline-to-online fine-tuning paradigm has emerged as a compelling alternative(Yu & Zhang, 2023; Zheng et al., 2023; Song et al., 2022; Kumar et al., 2020a), yet it is plagued by the ”initial unlearning” phenomenon (Kumar et al., 2020b). This critical instabil-ity arises when the policy, pre-trained on static data, first encounters the online environment. To bridge this gap, RL100(Lei et al., 2025) interleaves imitation re-learning in the offline setting. Inspired by this, our framework intro-duces a novel value pre-calibration stage. By strategically augmenting the offline phase with diverse, sub-optimal tra-jectories, we effectively pre-stabilize the Q-function’s distri-bution before online fine-tuning begins. This pre-calibration acts as a crucial transition step, significantly mitigating ini-tial unlearning and enabling a much smoother and more stable handoff from offline to online learning. 
+
+## 3. Method 
+
+We articulate a three-stage training paradigm spanning of-fline reinforcement learning and an offline-to-online bridge phase followed by online fine-tuning in interactive environ-ments. To further bolster sample efficiency during online learning, we introduce a value-guided policy self-distillation (VGPD) method. In the following section, we provide a detailed account of the training pipeline and the VGPD module. 
+
+3.1. Problem Setup 
+
+We address the problem of fine-tuning pretrained VLA mod-els for complex manipulation tasks. While SFT on offline expert demonstrations is standard, it suffers from the dis-tributional shift problem: the learned policy π inevitably visits states outside the support of the expert data DE , lead-ing to compounding errors. To mitigate this, we formu-late the fine-tuning process as a Markov Decision Process (MDP) M = ( S, A, P, R, γ ). The objective is to learn a policy π that maximizes the expected discounted return 
+
+J(π) = Eπ [P∞ 
+
+> t=0
+
+γtR(st, a t)] . We define the state-action value function Qπ (s, a ) = Eπ [P∞ 
+
+> t=0
+
+γtR(st, a t)|s0 =
+
+s, a 0 = a].Our framework addresses two fundamental challenges in VLA fine-tuning: (1) Support Mismatch , where the Q-function is undefined on the current policy’s visitation dis-tribution dπ during the initial offline-to-online transition; and (2) High-Variance Exploration , where standard online policy gradient methods fail due to the sparsity of rewards and the high dimensionality of the VLA action space. 
+
+3.2. Training pipeline 
+
+S1. Offline Reinforcement Fine-Tuning with Expert Demonstrations .To circumvent the prohibitive exploration costs associated with learning from scratch, we initialize the policy πpre via offline RL on expert demonstrations. We adopt Calibrated Q-Learning (Cal-QL) to learn a conservative value function from the static dataset DE. Cal-QL minimizes the temporal-difference (TD) error augmented with a calibration regular-izer that constrains value estimates based on the behavior policy μD . This constraint prevents the overestimation of out-of-distribution (OOD) actions, a critical requirement for stable offline-to-online transfer. The objective for the critic parameter θ is: 
+
+LS1 
+
+> Q
+
+(θ) = E(s,a,s ′)∼D E [( Qθ (s, a ) − B π Qθ (s, a )) 2]+α(Es∼D E,a ∼π(·| s)[max( Qθ (s, a ), Q μ(s, a ))] 
+
+−Es,a ∼D E [Qθ (s, a )]) 
+
+(1) Here, the first term represents the standard Bellman error, while the second term imposes the calibration constraint controlled by hyperparameter α.While Cal-QL effectively regularizes the value landscape, optimizing the policy solely against a limited dataset can lead to optimization instability. We therefore employ a behavior-regularized policy optimization objective. This 3FORCE: Efficient VLA Reinforcement Fine-Tuning 
+
+combines a Behavior Cloning (BC) term, which anchors the policy to the demonstrated manifold, with a Q-guided policy gradient term that drives performance maximization. The offline actor objective is defined as: 
+
+Lπ (ϕ)S1 = η LBC,S 1 
+
+> π
+
+(ϕ) + λ LQ,S 1 
+
+> π
+
+(ϕ) (2) where 
+
+LBC,S 1 
+
+> π
+
+(ϕ) = E(s,a )∼D E
+
+ − log πϕ(a | s) (3) 
+
+LQ,S 1 
+
+> π
+
+(ϕ) = − Es∼D E, a ∼πϕ(·| s)
+
+Qθ (s, a ) (4) Here, η and λ modulate the trade-off between imitation and maximization. In contemporary VLA models, the ac-tion head is often implemented as a multi-step diffusion or flow-matching denoiser, which substantially increases computational cost due to iterative denoising. Distilling a diffusion/flow policy into a one-step policy has been shown to be an effective alternative: it largely preserves the ex-pressiveness of the original policy while avoiding iterative denoising and BPTT problem. In this work, we adopt a consistency policy as the actor network, which maintains the original performance while enabling fast inference and more stable Q-gradient propagation. 
+
+S2. Mitigating Distributional Shift via On-Policy Warm-up .Expert Buffer 
+
+> Policy Buffer
+> Success Transition
+> Offline Demos
+> Success Transition
+> Failure Transition
+> 𝑎 1
+> 𝑎 2
+> 𝑎 3
+> 𝑎 𝑛
+
+Policy 𝜋 (𝑠 ) 
+
+> 𝑄 𝑚𝑒𝑎𝑛𝑠
+> 𝑠 𝑝
+> 𝑎 𝑝
+> 𝑠 𝑒 𝑎 𝑒
+
+# …
+
+> 𝑎 1
+> 𝑎 2
+> 𝑎 𝑚
+
+# …
+
+> 𝑎 𝑝
+
+VGPD 
+
+Figure 2. VGPD module in the online phase. VGPD serves as a regularized policy improvement mechanism. We maintain an ex-pert buffer and a policy buffer. For states sampled from the policy buffer, we compute a dynamic value baseline Vref (s) (approxi-mated by Qmean ). The policy is updated via filtered importance sampling, distilling only from actions that show positive advantage over this baseline. 
+
+A critical challenge in offline-to-online (O2O) RL is the initial performance collapse caused by Covariate Shift . This phenomenon arises from the distributional mismatch be-tween the offline dataset Doffline , sampled from behavior policy πβ , and the visitation distribution dπϕ of the current policy. Standard offline algorithms constrain πϕ close to 
+
+πβ , but strictly enforcing this constraint inhibits necessary exploration and correction. In Stage 2, we introduce a Distributional Warm-up . We collect a small batch of on-policy trajectories Dwarm =
+
+{(s, a, r, s ′) ∼ πϕ} and merge them with the offline data: 
+
+Dmix = Doffline ∪ D warm . Crucially, we apply the conserva-tive value constraint (Eq. 1) on this mixed dataset. This explicitly expands the valid support of the calibrated Q-function from supp (πβ ) to supp (πβ ) ∪ supp (πϕ). By doing so, we ensure that Q-estimates remain well-defined and lower-bounded on the manifold of states the policy is actu-ally visiting, addressing the support mismatch issue before full online adaptation. Consequently, the critic’s ranking of (s, a ) pairs aligns with the on-policy distribution, yielding a robust value function that prevents catastrophic unlearning. The actor is trained with an asymmetric objective: 
+
+LS2 
+
+> π
+
+(ϕ) = η LBC,S 2 
+
+> π
+
+(ϕ) + λ LQ,S 2 
+
+> π
+
+(ϕ) (5) where 
+
+LBC,S 2 
+
+> π
+
+(ϕ) = 1
+
+ρ E(s,a,y )∼D mix 
+
+1{y=1 } · (− log πϕ(a | s)) 
+
+(6) 
+
+LQ,S 2 
+
+> π
+
+(ϕ) = − Es∼D mix , a ∼πϕ(·| s)
+
+Qθ (s, a ) (7) Here, ρ is the success rate normalization factor. Sampling from Dmix aligns the actor’s training distribution with the expanded critic support, effectively mitigating covariate shift. 
+
+S3. Intervention-Free Online Fine-tuning .In the third stage, we perform online fine-tuning without human intervention. We maintain two replay buffers: an 
+
+expert buffer DE (offline data + successful online trajecto-ries) and a policy buffer Dπ (all online rollouts). At each update, we sample equally from both to balance retaining competent behaviors and learning from new exploration. The critic minimizes the standard temporal-difference loss over the union of buffers: 
+
+LS3 
+
+> Q
+
+(θ) = E(s,a,s ′)∼(DE∪D π )[( Qθ (s, a ) − B π Qθ (s, a )) 2i
+
+(8) The actor optimization leverages our Value-Guided Policy Self-Distillation (VGPD) mechanism: 
+
+LS3 
+
+> π
+
+(ϕ) = λ LQ,S 3 
+
+> π
+
+(ϕ) + η LDistill,S 3 
+
+> π
+
+(ϕ), (9) 4FORCE: Efficient VLA Reinforcement Fine-Tuning 
+
+where LQ,S 3 
+
+> π
+
+(ϕ) encourages high-value actions as in Eq. 7. The distillation term LDistill,S 3 
+
+> π
+
+(ϕ) is detailed below. 
+
+3.3. Value-Guided Policy Self-Distillation (VGPD) 
+
+Our proposed VGPD mechanism can be theoretically grounded as an approximate solution to a Regularized Pol-icy Improvement problem with a dynamic data-dependent baseline. Following the formulation in trust-region methods (Peng et al., 2019; Nair et al., 2021), we aim to maximize the expected return subject to a KL-divergence constraint to prevent the policy from deviating too far from the data support. The objective is defined as: 
+
+J (π) = Es∼D 
+
+h
+
+Ea∼π(·| s)[Qθ (s, a )] 
+
+− τ D KL (π(·| s)∥πold (·| s)) 
+
+i (10) where πold serves as the reference proposal distribution. In the context of our online self-distillation, πold corre-sponds to the current policy πϕ. The optimal closed-form solution is the energy-based distribution π∗(a|s) ∝
+
+πold (a|s) exp ( Qθ (s, a )/τ ).Since sampling strictly from π∗ is intractable, we project this optimal policy back into our parameterized policy space 
+
+Π by minimizing DKL (π∗∥πϕ), which is equivalent to max-imizing the weighted log-likelihood: 
+
+max  
+
+> ϕ
+
+Es∼D ,a ∼πold 
+
+
+
+exp 
+
+ Qθ (s, a )
+
+τ
+
+
+
+log πϕ(a|s)
+
+
+
+(11) 
+
+Filtered Importance Sampling. VGPD approximates the expectation over πold using a set of K samples {ˆak}Kk=1 ∼
+
+πϕ(·| s). To mitigate variance from the exponential weights, VGPD introduces a Dynamic Advantage Filter . We de-fine a state-dependent baseline as the empirical mean value: 
+
+Vref (s) = 1
+
+> K
+
+PKk=1 Qθ (s, ˆak). The update rule applies a mask I[Qθ (s, ˆak) ≥ Vref (s)] , effectively performing a Pos-itive Advantage Truncation where samples with negative advantage are discarded. 
+
+Proposition 1 (Monotonic Value Improvement). Let πtgt 
+
+be the empirical target distribution constructed by VGPD. Assuming the critic Qθ is consistent, the expected Q-value under the target distribution is lower-bounded by Vref (s),ensuring that the distillation target always represents a monotonic improvement over the average performance of the current policy rollout. 
+
+Implementation. We implement this theoretical framework as follows. For expert data DE, we treat stored actions as optimal, degenerating to behavior cloning: 
+
+LDistill,D E 
+
+> π
+
+(ϕ) = E(s,a )∼D E
+
+ − log πϕ(a | s). (12) For the policy buffer Dπ , given a sample (s, a buf ), we sam-ple K candidates {ak}Kk=1 from πϕ(·| s). We compute the baseline qmean (s) corresponding to Vref (s) in Eq. 13: 
+
+qmean (s) = 1
+
+K
+
+> K
+
+X
+
+> k=1
+
+Qθ (s, a k). (13) We define an indicator ζ(s) = 1{qmean (s) > Q θ (s, a buf )}.The target distribution is constructed as: 
+
+μVGPD (· | s) = (1 − ζ(s)) δabuf (·)+ ζ(s)
+
+> K
+
+X
+
+> k=1
+
+˜wk(s) δak (·), (14) where the weights ˜wk(s) implement the exponential energy weighting masked by the advantage filter: 
+
+˜wk(s) = 1{Qθ (s, a k) ≥ qmean (s)} exp  Qθ (s, a k)/τ PKj=1 1{Qθ (s, a j ) ≥ qmean (s)} exp  Qθ (s, a j )/τ  .
+
+(15) The final distillation loss is LDistill,S 3 
+
+> π
+
+(ϕ) =
+
+LDistill,D E 
+
+> π
+
+(ϕ) + EμVGPD [− log πϕ].
+
+## 4. Experiments Clean Whiteboard Insert USB Pick Cup 
+
+> Pick Corn Open Drawer Stack Cube
+
+Figure 3. Real-world Experiment Tasks . We conducted real-world experiments using a single-arm Franka robot equipped with two RealSense cameras that supplied complementary visual feed-back: a wrist-view and a side-view. 
+
+4.1. Overview of Experiments 
+
+We designed our empirical evaluation to verify the theo-retical claims of the FORCE framework. Specifically, we investigate whether addressing distributional shift and en-forcing regularized updates leads to superior fine-tuning performance. Our analysis focuses on three key questions: 1. Mitigation of Distributional Shift: Does the Distribu-tional Warm-up stage effectively mitigates the ”cold-start” performance collapse typical of offline-to-online transfer? 5FORCE: Efficient VLA Reinforcement Fine-Tuning 
+
+Success Rate (%) Average(%) Group Method StackCube PullCube PushCube PullCubeTool PlaceSphere PickCube BC Octo(Ghosh et al., 2024) 0 0 13 0 0 8.5 3.58 
+
+π0(Black et al., 2024) 60 87.5 70 7.5 27.5 2.5 42.5 
+
+π0.5(Black et al., 2025) 50 87.5 100 7.5 15 5 44.17 RL Cal-QL(Nakamoto et al., 2023) 65.2 84.9 96.7 0 0 24.2 45.2 CQL(Kumar et al., 2020b) 0 0 92.2 0 0 2.1 15.7 PA-RL(Mark et al., 2024) 73.9 81.1 93.7 0 0 52.4 50.2 ConRFT (no HIL)(Chen et al., 2025) 82.1 91.7 95.9 0 69.8 87.2 71.1 
+
+Ours (Octo) 94.2 99 100 19 85.1 96.7 82.3 
+
+Ours ( π0) 93.2 100 100 36.7 97.5 94.1 86.9 
+
+Table 1. Success rates of BC and RL methods on ManiSkill tasks. We report the final converged success rates across six tasks on three random seeds. For all other reinforcement learning (RL) baselines, we consistently utilize the same offline pre-trained Octo and pi0 model as the backbone for post-training fine-tuning. 0 10000 20000 30000 40000                         
+
+> 0
+> 20
+> 40
+> 60
+> 80
+> 100
+> Success Rate (%)
+> Place Sphere
+> 010000 20000 30000 40000
+> 0
+> 20
+> 40
+> 60
+> 80
+> 100
+> Stack Cube
+> 010000 20000 30000 40000
+> 0
+> 20
+> 40
+> 60
+> 80
+> 100
+> Pick Cube
+> 010000 20000 30000
+> Training Steps
+> 0
+> 20
+> 40
+> 60
+> 80
+> 100
+> Success Rate (%)
+> Push Cube
+> 010000 20000 30000
+> Training Steps
+> 0
+> 20
+> 40
+> 60
+> 80
+> 100
+> Pull Cube
+> 010000 20000 30000 40000 50000 60000
+> Training Steps
+> 0
+> 20
+> 40
+> 60
+> 80
+> 100
+> Pull Cube Tool
+> Ours ConRFT(No-HIL) Cal-QL CQL PA-RL
+
+Figure 4. Learning Curves. We present the performance of our proposed FORCE and baselines in ManiSkill tasks. The evaluation spans three random seeds. FORCE consistently demonstrates faster convergence and higher final performance, validating the benefits of distributional warm-up and value-guided updates. 
+
+Figure 5. Ablation Study. Training curves across four tasks comparing full FORCE against variants without warm-up or VGPD. The results highlight the necessity of mitigating initial distribution shift and filtering policy updates. 
+
+2. Real-World Reliability: Does the VGPD mechanism provide a more stable and sample-efficient learning sig-nal compared to standard gradient-based RL updates? 3. Intervention-Free Convergence Validation: Can FORCE effectively adapt to physical environments and perform consistently in contact-rich tasks without reliance on real-time human correction? 6FORCE: Efficient VLA Reinforcement Fine-Tuning                                                                
+
+> Task Success Rate (%) Execution Steps
+> BC Ours BC Ours
+> Pick Cup 35 45 →90 134.5 125.2 →36.4
+> Open Drawer 35 55 →100 57.4 63.3 →38.2
+> Insert USB 75 60 →100 44.5 42.7 →16.0
+> Pick Corn 40 45 →100 142.3 153.3 →52.4
+> Stack Cube 40 35 →100 155.2 170.4 →46.2
+> Clean Board 45 50 →100 142.6 136.5 →44.3 Avg. 45.0 48.3 →98.3 112.8 115.2 →38.9
+> Table 2. Quantitative results on real-world tasks. Comparison of success rate and execution steps between BC baseline and our FORCE method after online fine-tuning.
+
+We utilize ManiSkill (Tao et al., 2025) for large-scale quan-titative benchmarking and a physical Franka Emika Panda robot for real-world validation. 
+
+4.2. Simulation Experiments FORCE achieves SOTA performance by effectively ex-panding policy support. Quantitative results in Table 1 reveal a significant performance gap between FORCE and prior baselines. Our method achieves an average success rate of 82.3% based on Octo backbone across six tasks, surpassing the strongest baseline, ConRFT, by over 10%. A deeper analysis of task-specific failures exposes the lim-itations of existing methods. Conservative baselines like Cal-QL suffer from severe policy collapse on precision-demanding, long-horizon tasks (e.g., StackCube : 45.5%, 
+
+PlaceSphere : 0%). These methods enforce strict constraints to keep the policy within the support of the offline dataset, which paradoxically hinders the exploration necessary to correct sub-optimal offline behaviors during fine-tuning. In contrast, FORCE mitigates this ”conservative trap” via Distributional Warm-up. By explicitly updating the value function on rollout data before releasing the policy for opti-mization, FORCE effectively expands the valid support of the critic. This pre-conditioning reduces the extrapolation error at the boundaries of the dataset, allowing the agent to explore the state space safely and mastering complex tasks like PullCube (100%) and PickCube (96.4%) where baselines stall. 
+
+VGPD enables rapid convergence and stability. The learn-ing curves in Fig. 4 offer a granular view of the optimization dynamics. FORCE is characterized by a steep, monotonic ascent, contrasting sharply with the erratic performance profiles of standard RL fine-tuning. On the PushCube 
+
+task, FORCE converges to 100% success within just 5,000 steps—achieving a 32% reduction in sample complexity compared to ConRFT. More critically, the curves highlight the stabilizing role of VGPD. While baselines frequently exhibit ”performance chattering”—sharp drops caused by 
+
+value overestimation and noisy gradients guiding the policy into distinct failure modes—FORCE maintains robust stabil-ity. This validates that the Regularized Policy Improvement objective (Eq. 10) acts as an effective dynamic filter . By weighting updates based on the value advantage, VGPD sig-nificantly improves the signal-to-noise ratio of the learning gradient. It ensures that the policy is updated only towards transitions with high verified value, thereby preventing the ”unlearning” of useful primitives and facilitating asymptotic optimality. 
+
+FORCE demonstrates remarkable compatibility with various VLA backbones. Experimental results demon-strate that FORCE not only significantly enhances the per-formance of weaker backbones, such as Octo, but also fully realizes the potential of high-capacity foundations like π0.This is particularly evident in high-difficulty tasks, like PullCubeTool task, where the π0-based implementation achieved results vastly outperforming all other compara-tive methods, thereby underscoring the immense potential of FORCE as a general VLA post-training framework. 
+
+4.3. Ablation Study: Dissecting the Mechanism 
+
+To isolate the contributions of Distributional Warm-up and VGPD, we conducted an ablation study summarized in Ta-ble 3 and Fig. 5. We introduce the metric Steps@80% —the minimum environment steps required to reach 80% suc-cess—to rigorously quantify sample efficiency. 
+
+Distributional Warm-up prevents cold-start collapse. 
+
+Comparing the ”w/o Pre-Cal” variant (Orange) to the full method (Purple) in Fig. 5 reveals the critical role of the warm-up stage. Without warm-up, the policy suffers from immediate performance degradation at the onset of online training. This confirms that the initial covariate shift be-tween the offline dataset and the online policy is the primary driver of instability. By expanding the Q-function support via on-policy rollouts before full fine-tuning, FORCE en-sures the critic is well-defined for the initial exploration steps. 
+
+VGPD ensures asymptotic optimality. The removal of VGPD (Green) results in a premature performance plateau. As shown in Table 3, the ”w/o VGPD” variant requires sig-nificantly more steps to reach competence (e.g., 20k vs 12k for PickCube) or fails to reach the 80% threshold entirely within the budget. This indicates that standard Q-guided updates are insufficient for fine-grained policy refinement in the later stages of training. VGPD’s dynamic advan-tage filtering effectively removes noise from the gradient, allowing the policy to converge to a higher-performing solu-tion. Overall, FORCE reduces the average Steps@80% by 32.5%, demonstrating that both components are essential for maximizing sample efficiency. 7FORCE: Efficient VLA Reinforcement Fine-Tuning 
+
+Task w/o Pre-Cal w/o Pre-Cal&VGPD Ours 
+
+StackCube 28k 28k 18k 
+
+PickCube 14k 20k 12k 
+
+PushCube 8k 10k 4k 
+
+PlaceSphere 30k 30k 20k 
+
+Table 3. Steps@80% success rate. Lower implies higher sample efficiency. FORCE achieves the target threshold significantly faster than ablated variants. 0 10 20 30 40 50 60       
+
+> Online Training Steps (k)
+> 0
+> 50
+> 100
+> 150
+> 200
+> Self-Candidates Using Num.
+> Stack Cube Task
+> 010 20 30 40 50 60
+> Online Training Steps (k)
+> 50
+> 100
+> 150
+> 200
+> Self-Candidates Using Num.
+> Place Sphere Task
+
+Figure 6. Adaptive Nature of VGPD. We visualize the proportion of ”active” learning targets derived from the policy itself (Self-Distillation) versus the offline buffer over time. The mechanism naturally transitions from cloning to exploration. 
+
+4.4. Adaptive Distillation Dynamics 
+
+To understand how VGPD regulates the learning process, we analyze the source of the distillation targets throughout training (Fig. 6). Specifically, we track the ratio of targets derived from successful self-generated rollouts (on-policy) versus the static expert buffer (off-policy). 
+
+VGPD realizes an automatic curriculum. The analysis reveals a dynamic transition in data utilization. In the early training phase, the critic assigns lower values to the imma-ture policy’s proposals compared to the expert demonstra-tions. Consequently, the dynamic advantage filter (Eq. 15) heavily weights the expert actions, acting effectively as a stabilizer akin to Behavior Cloning. As the policy improves, the proportion of self-generated actions passing the advan-tage filter increases. In the later stages (e.g., on PushCube), the algorithm predominantly distills from on-policy data, al-lowing for fine-grained optimization beyond the sub-optimal demonstrations. This confirms that VGPD does not require manual tuning of the exploration-exploitation balance; in-stead, the value-guided mechanism naturally implements an adaptive curriculum—transitioning from conservative imitation to aggressive self-improvement based on the policy’s real-time competence. 
+
+4.5. Real-World Experiments Reliability under Physical Constraints via Value-Calibrated Warm-Up. As shown in Table 2, the BC base-line struggles with an average success rate of 45.0%, fre-quently failing in precision-dependent tasks like Insert USB 
+
+(75%) and Open Drawer (35%). In the physical world, slight calibration errors or sensor noise can push the state distribution out of the BC policy’s support, leading to com-pounding errors. FORCE dramatically boosts the average success rate to 98.3% , achieving 100% on 4 out of 6 tasks. We attribute this robustness to the Distributional Warm-up 
+
+stage. By adapting the value function’s support to the online policy distribution before aggressive updates, FORCE miti-gates the risk of ”policy collapse” during the initial online phase. This is particularly critical in real-world settings where undefined value estimates can lead to dangerous, er-ratic robot motions. FORCE effectively maintains a safe exploration corridor, allowing the agent to recover from OOD states induced by physical noise. 
+
+Execution Efficiency and Motion Quality via Value Guidance. Beyond binary success metrics, execution ef-ficiency serves as a proxy for motion quality. Table 2 reveals a substantial reduction in execution steps, drop-ping from 112.8 (BC) to 38.9 (FORCE). Qualitatively, BC policies on real hardware often exhibit ”hesitant” behav-iors—jittery motions or localized loops—when encounter-ing states marginally different from the training set. In contrast, FORCE reduces the steps required for Stack Cube 
+
+by nearly 4× (170.4 → 46.2) and Clean Board by 3×. This efficiency validates the VGPD mechanism in the physical domain. By rigorously filtering gradients based on value advantage, VGPD suppresses the high-variance, suboptimal actions often generated during stochastic exploration. 
+
+## 5. Conclusion 
+
+In this work, we introduced FORCE, a principled frame-work for VLA fine-tuning that explicitly addresses the dis-tributional mismatches inherent in offline-to-online transfer. By expanding the Q-function support via a Distributional Warm-up and enforcing monotonic improvement through Value-Guided Policy Distillation, FORCE effectively miti-gates the catastrophic unlearning and high variance typical of standard RL fine-tuning. Our empirical results across simulation and real-world domains confirm that FORCE achieves state-of-the-art performance and superior sample efficiency without requiring human intervention, enabling robust policy adaptation in contact-rich environments. Despite these promising results, FORCE entails a computa-tional overhead due to the requirement of sampling multiple action candidates ( K) during the VGPD step. This inference cost can be significant when fine-tuning VLA backbones. Future work could address this bottleneck by investigating action caching mechanisms or utilizing off-policy samples from previous iterations to approximate the distillation tar-get. Additionally, while our current implementation utilizes task-specific critics, extending this framework to leverage Generalist Reward Models represents a vital direction for scaling intervention-free fine-tuning to open-ended, long-horizon tasks. 8FORCE: Efficient VLA Reinforcement Fine-Tuning 
+
+## Impact Statement 
+
+This work develops an RL fine-tuning framework for robotic Vision-Language-Action policies to improve sample effi-ciency and stability in offline-to-online adaptation. It may reduce reliance on human intervention and accelerate de-ployment in real-world manipulation. Potential risks include unsafe behaviors under distribution shift or uncontrolled ex-ploration; therefore, practical use should follow standard safety constraints and thorough evaluation in controlled set-tings. 
+
+## References 
+
+Black, K., Brown, N., Driess, D., Esmail, A., Equi, M., Finn, C., Fusai, N., Groom, L., Hausman, K., Ichter, B., Jakubczak, S., Jones, T., Ke, L., Levine, S., Li-Bell, A., Mothukuri, M., Nair, S., Pertsch, K., Shi, L. X., Tanner, J., Vuong, Q., Walling, A., Wang, H., and Zhilinsky, U. 
+
+π0: A Vision-Language-Action Flow Model for General Robot Control. arXiv preprint arXiv:2410.24164 , 2024. Black, K., Brown, N., Darpinian, J., Dhabalia, K., Driess, D., Esmail, A., Equi, M., Finn, C., Fusai, N., Galliker, M. Y., Ghosh, D., Groom, L., Hausman, K., Ichter, B., Jakubczak, S., Jones, T., Ke, L., LeBlanc, D., Levine, S., Li-Bell, A., Mothukuri, M., Nair, S., Pertsch, K., Ren, A. Z., Shi, L. X., Smith, L., Springenberg, J. T., Stachow-icz, K., Tanner, J., Vuong, Q., Walke, H., Walling, A., Wang, H., Yu, L., and Zhilinsky, U. π0.5: A Vision-Language-Action Model with Open-World Generaliza-tion. arXiv preprint arXiv:2504.16054 , 2025. Brohan, A., Brown, N., Carbajal, J., Chebotar, Y., Dabis, J., Finn, C., Gopalakrishnan, K., Hausman, K., Herzog, A., Hsu, J., et al. Rt-1: Robotics transformer for real-world control at scale. arXiv preprint arXiv:2212.06817 , 2022. Chen, L., Lu, K., Rajeswaran, A., Lee, K., Grover, A., Laskin, M., Abbeel, P., Srinivas, A., and Mordatch, I. De-cision transformer: Reinforcement learning via sequence modeling. In Ranzato, M., Beygelzimer, A., Dauphin, Y. N., Liang, P., and Vaughan, J. W. (eds.), Advances in Neural Information Processing Systems 34: Annual Con-ference on Neural Information Processing Systems 2021, NeurIPS 2021, December 6-14, 2021, virtual , pp. 15084– 15097, 2021. URL https://proceedings. neurips.cc/paper/2021/hash/ 7f489f642a0ddb10272b5c31057f0663-Abstract. html .Chen, Y., Tian, S., Liu, S., Zhou, Y., Li, H., and Zhao, D. Conrft: A reinforced fine-tuning method for vla models via consistency policy. arXiv preprint arXiv:2502.05450 ,2025. Chi, C., Xu, Z., Pan, C., Cousineau, E., Burchfiel, B., Feng, S., Tedrake, R., and Song, S. Universal manipulation interface: In-the-wild robot teaching without in-the-wild robots. arXiv preprint arXiv:2402.10329 , 2024. Fujimoto, S. and Gu, S. S. A minimalist approach to offline reinforcement learning. Advances in neural information processing systems , 34:20132–20145, 2021. Ghosh, D., Walke, H. R., Pertsch, K., Black, K., Mees, O., Dasari, S., Hejna, J., Kreiman, T., Xu, C., Luo, J., Tan, Y. L., Chen, L. Y., Vuong, Q., Xiao, T., Sanketi, P. R., Sadigh, D., Finn, C., and Levine, S. Octo: An open-source generalist robot policy. In Kulic, D., Ven-ture, G., Bekris, K. E., and Coronado, E. (eds.), Robotics: Science and Systems XX, Delft, The Netherlands, July 15-19, 2024 , 2024. doi: 10.15607/RSS.2024.XX.090. URL https://doi.org/10.15607/RSS.2024. XX.090 .Guhur, P.-L., Chen, S., Pinel, R. G., Tapaswi, M., Laptev, I., and Schmid, C. Instruction-driven history-aware poli-cies for robotic manipulations. In Conference on Robot Learning (CoRL) , 2023. Haarnoja, T., Zhou, A., Abbeel, P., and Levine, S. Soft actor-critic: Off-policy maximum entropy deep reinforcement learning with a stochastic actor. In Dy, J. and Krause, A. (eds.), Proceedings of the 35th International Conference on Machine Learning (ICML) , volume 80, pp. 1861–1870. PMLR, 2018. Hester, T., Vecer ´ık, M., Pietquin, O., Lanctot, M., Schaul, T., Piot, B., Horgan, D., Quan, J., Sendonaris, A., Os-band, I., Dulac-Arnold, G., Agapiou, J. P., Leibo, J. Z., and Gruslys, A. Deep q-learning from demonstrations. In McIlraith, S. A. and Weinberger, K. Q. (eds.), Pro-ceedings of the Thirty-Second AAAI Conference on Ar-tificial Intelligence, (AAAI-18), the 30th innovative Ap-plications of Artificial Intelligence (IAAI-18), and the 8th AAAI Symposium on Educational Advances in Arti-ficial Intelligence (EAAI-18), New Orleans, Louisiana, USA, February 2-7, 2018 , pp. 3223–3230. AAAI Press, 2018. doi: 10.1609/AAAI.V32I1.11757. URL https: //doi.org/10.1609/aaai.v32i1.11757 .Hu, J., Hendrix, R., Farhadi, A., Kembhavi, A., Mart ´ın-Mart ´ın, R., Stone, P., Zeng, K.-H., and Ehsani, K. Flare: Achieving masterful and adaptive robot policies with large-scale reinforcement learning fine-tuning. In 2025 IEEE International Conference on Robotics and Automa-tion (ICRA) , pp. 3617–3624. IEEE, 2025. Kalashnikov, D., Irpan, A., Pastor, P., Ibarz, J., Herzog, A., Jang, E., Quillen, D., Holly, E., Kalakrishnan, M., Van-houcke, V., et al. QT-Opt: Scalable deep reinforcement 9FORCE: Efficient VLA Reinforcement Fine-Tuning 
+
+learning for vision-based robotic manipulation. arXiv preprint arXiv:1806.10293 , 2018. Kelly, M., Sidrane, C., Driggs-Campbell, K., and Kochen-derfer, M. J. Hg-dagger: Interactive imitation learning with human experts. In 2019 International Conference on Robotics and Automation (ICRA) , pp. 8077–8083. IEEE, 2019. Kim, M. J., Pertsch, K., Karamcheti, S., Xiao, T., Balakr-ishna, A., Nair, S., Rafailov, R., Foster, E., Lam, G., San-keti, P., Vuong, Q., Kollar, T., Burchfiel, B., Tedrake, R., Sadigh, D., Levine, S., Liang, P., and Finn, C. OpenVLA: An open-source vision-language-action model. arXiv preprint arXiv:2406.09246 , 2024. Kumar, A., Zhou, A., Tucker, G., and Levine, S. Con-servative q-learning for offline reinforcement learning. 
+
+Advances in neural information processing systems , 33: 1179–1191, 2020a. Kumar, A., Zhou, A., Tucker, G., and Levine, S. Conser-vative Q-learning for offline reinforcement learning. In Larochelle, H., Ranzato, M., Hadsell, R., Balcan, M., and Lin, H. (eds.), Advances in Neural Information Pro-cessing Systems (NeurIPS) , volume 33, pp. 1179–1191, 2020b. Lei, K., Li, H., Yu, D., Wei, Z., Guo, L., Jiang, Z., Wang, Z., Liang, S., and Xu, H. Rl-100: Performant robotic ma-nipulation with real-world reinforcement learning. arXiv preprint arXiv:2510.14830 , 2025. Li, H., Zuo, Y., Yu, J., Zhang, Y., Yang, Z., Zhang, K., Zhu, X., Zhang, Y., Chen, T., Cui, G., Wang, D., Luo, D., Fan, Y., Sun, Y., Zeng, J., Pang, J., Zhang, S., Wang, Y., Mu, Y., Zhou, B., and Ding, N. Simplevla-rl: Scaling VLA train-ing via reinforcement learning. CoRR , abs/2509.09674, 2025. doi: 10.48550/ARXIV.2509.09674. URL https: //doi.org/10.48550/arXiv.2509.09674 .Liu, J., Gao, F., Wei, B., Chen, X., Liao, Q., Wu, Y., Yu, C., and Wang, Y. What can rl bring to vla generalization? an empirical study. arXiv preprint arXiv:2505.19789 , 2025. Liu, S., Wu, L., Li, B., Tan, H., Chen, H., Wang, Z., Xu, K., Su, H., and Zhu, J. Rdt-1b: a diffusion founda-tion model for bimanual manipulation. arXiv preprint arXiv:2410.07864 , 2024. Lu, G., Guo, W., Zhang, C., Zhou, Y., Jiang, H., Gao, Z., Tang, Y., and Wang, Z. Vla-rl: Towards masterful and general robotic manipulation with scalable reinforcement learning. arXiv preprint arXiv:2505.18719 , 2025. Luo, J., Xu, C., Wu, J., and Levine, S. Precise and dexterous robotic manipulation via human-in-the-loop reinforcement learning. Sci. Robotics , 10(105), 2025. doi: 10.1126/SCIROBOTICS.ADS5033. URL https: //doi.org/10.1126/scirobotics.ads5033 .Mark, M. S., Gao, T., Sampaio, G. G., Srirama, M. K., Sharma, A., Finn, C., and Kumar, A. Policy agnostic rl: Offline rl and online rl fine-tuning of any class and backbone. arXiv preprint arXiv:2412.06685 , 2024. Nair, A., Dalal, M., Gupta, A., and Levine, S. Awac: Accel-erating online reinforcement learning with offline datasets. In International Conference on Learning Representations (ICLR) , 2021. Nakamoto, M., Zhai, Y., Singh, A., Mark, M. S., Ma, Y., Finn, C., Kumar, A., and Levine, S. Cal-QL: Cal-ibrated offline rl pre-training for efficient online fine-tuning. In Advances in Neural Information Processing Systems (NeurIPS) , 2023. Peng, X. B., Kumar, A., Zhang, G., and Levine, S. Advantage-Weighted Regression: Simple and Scalable Off-Policy Reinforcement Learning, October 2019. Physical Intelligence. π∗
+
+> 0.6
+
+: a VLA that learns from ex-perience, 2025. URL https://arxiv.org/abs/ 2511.14759 .Rajaraman, N., Yang, L., Jiao, J., and Ramchandran, K. Toward the fundamental limits of imitation learning. In Advances in Neural Information Processing Systems (NeurIPS) , 2020. Ross, S., Gordon, G. J., and Bagnell, D. A reduction of imitation learning and structured prediction to no-regret online learning. In Gordon, G. J., Dunson, D. B., and Dud ´ık, M. (eds.), Proceedings of the Fourteenth Inter-national Conference on Artificial Intelligence and Statis-tics, AISTATS 2011, Fort Lauderdale, USA, April 11-13, 2011 , volume 15 of JMLR Proceedings , pp. 627–635. JMLR.org, 2011. URL http://proceedings.mlr. press/v15/ross11a/ross11a.pdf .Schulman, J., Wolski, F., Dhariwal, P., Radford, A., and Klimov, O. Proximal policy optimization algorithms. 
+
+arXiv preprint arXiv:1707.06347 , 2017. Shao, Z., Wang, P., Zhu, Q., Xu, R., Song, J., Bi, X., Zhang, H., Zhang, M., Li, Y., Wu, Y., et al. Deepseekmath: Push-ing the limits of mathematical reasoning in open language models. arXiv preprint arXiv:2402.03300 , 2024. Song, Y., Zhou, Y., Sekhari, A., Bagnell, J. A., Krishna-murthy, A., and Sun, W. Hybrid rl: Using both offline and online data can make rl efficient. arXiv preprint arXiv:2210.06718 , 2022. Tao, S., Xiang, F., Shukla, A., Qin, Y., Hinrichsen, X., Yuan, X., Bao, C., Lin, X., Liu, Y., kai Chan, T., Gao, Y., Li, 10 FORCE: Efficient VLA Reinforcement Fine-Tuning 
+
+X., Mu, T., Xiao, N., Gurha, A., Rajesh, V. N., Choi, Y. W., Chen, Y.-R., Huang, Z., Calandra, R., Chen, R., Luo, S., and Su, H. Maniskill3: Gpu parallelized robotics simulation and rendering for generalizable embodied ai. 
+
+Robotics: Science and Systems , 2025. Team, O. Openvla: An open-source vla and fine-tuning recipe (oft). https://openvla-oft.github. io/ , 2024. Vecerik, M., Hester, T., Scholz, J., Wang, F., Pietquin, O., Piot, B., Heess, N., Rothorl, T., Lampe, T., and Riedmiller, M. Leveraging demonstrations for deep reinforcement learning on robotics problems with sparse rewards. arXiv preprint arXiv:1707.08817 , 2017. Yu, Z. and Zhang, X. Actor-critic alignment for offline-to-online reinforcement learning. In International Confer-ence on Machine Learning , pp. 40452–40474. PMLR, 2023. Zheng, H., Luo, X., Wei, P., Song, X., Li, D., and Jiang, J. Adaptive policy learning for offline-to-online reinforce-ment learning. In Proceedings of the AAAI Conference on Artificial Intelligence , volume 37, pp. 11372–11380, 2023. Zitkovich, B., Yu, T., Xu, S., Xu, P., Xiao, T., Xia, F., Wu, J., Wohlhart, P., Welker, S., Wahid, A., Vuong, Q., Vanhoucke, V., Tran, H. T., Soricut, R., Singh, A., Singh, J., Sermanet, P., Sanketi, P. R., Salazar, G., Ryoo, M. S., Reymann, K., Rao, K., Pertsch, K., Mordatch, I., Michalewski, H., Lu, Y., Levine, S., Lee, L., Lee, T. E., Leal, I., Kuang, Y., Kalashnikov, D., Julian, R., Joshi, N. J., Irpan, A., Ichter, B., Hsu, J., Herzog, A., Hausman, K., Gopalakrishnan, K., Fu, C., Florence, P., Finn, C., Dubey, K. A., Driess, D., Ding, T., Choromanski, K. M., Chen, X., Chebotar, Y., Carbajal, J., Brown, N., Brohan, A., Arenas, M. G., and Han, K. RT-2: vision-language-action models transfer web knowledge to robotic control. In Tan, J., Toussaint, M., and Darvish, K. (eds.), Con-ference on Robot Learning, CoRL 2023, 6-9 November 2023, Atlanta, GA, USA , volume 229 of Proceedings of Machine Learning Research , pp. 2165–2183. PMLR, 2023. URL https://proceedings.mlr.press/ v229/zitkovich23a.html .11 FORCE: Efficient VLA Reinforcement Fine-Tuning 
+
+## A. Algorithm Illustration 
+
+The whole pipeline of our method is outlined in Algorithm 1. 
+
+Algorithm 1 Training Pipeline 
+
+Require: Pretrained policy πpre , expert dataset DE , environment M
+
+Ensure: Fine-tuned policy πϕ 
+
+> 1:
+
+Initialize πϕ ← πpre , critic Qθ 
+
+> 2:
+
+# Stage I: Offline reinforcement fine-tuning  
+
+> 3:
+
+for offline training iterations do  
+
+> 4:
+
+Sample (s, a, r, s ′) from DE 
+
+> 5:
+
+Update critic Qθ and policy πϕ using Equation 1 and Equation 2  
+
+> 6:
+
+end for  
+
+> 7:
+
+# Stage II: Value pre-calibration  
+
+> 8:
+
+Collect on-policy rollouts DR by executing πϕ in M 
+
+> 9:
+
+Dmix ← D E ∪ D R with success labels y 
+
+> 10:
+
+for stabilization iterations do  
+
+> 11:
+
+Sample (s, a, r, s ′, y ) from Dmix  
+
+> 12:
+
+Update critic Qθ and policy πϕ using Equation 1 and Equation 5  
+
+> 13:
+
+end for  
+
+> 14:
+
+# Stage III: Online reinforcement fine-tuning with VGPD  
+
+> 15:
+
+Initialize replay buffers DE (expert) and Dπ (policy)  
+
+> 16:
+
+while online training do  
+
+> 17:
+
+Sample equal-size batches from DE and Dπ 
+
+> 18:
+
+for each (s, a ) in batch do  
+
+> 19:
+
+if (s, a ) from DE then  
+
+> 20:
+
+a∗ ← a {Expert action as target } 
+
+> 21:
+
+else  
+
+> 22:
+
+qbuf ← Qθ (s, a ) 
+
+> 23:
+
+Sample K actions {ak} from πϕ(s) 
+
+> 24:
+
+Compute qk = Qθ (s, a k) for k = 1 , . . . , K  
+
+> 25:
+
+qmean ← 1
+
+> K
+
+PKk=1 qk 
+
+> 26:
+
+if qbuf ≥ qmean then  
+
+> 27:
+
+a∗ ← a {Use buffered action } 
+
+> 28:
+
+else  
+
+> 29:
+
+Select actions {ak : qk ≥ qmean } 
+
+> 30:
+
+Compute weights ˜wk via softmax of qk/τ  
+
+> 31:
+
+Distillation targets: actions {ak} with weights { ˜wk} 
+
+> 32:
+
+end if  
+
+> 33:
+
+end if  
+
+> 34:
+
+end for  
+
+> 35:
+
+Update critic Qθ and policy πϕ using Equation 8 and Equation 9  
+
+> 36:
+
+end while 
+
+## B. Details About Experiments 
+
+B.1. Experiment Setup 
+
+We deploy FORCE on a real-world Franka Emika Panda robot equipped with two Intel RealSense D435 cameras, capturing wrist and side views. The end-effector is either a Robotiq gripper or a soft gripper adapted from UMI(Chi et al., 2024), depending on the task. The model input consists of two RGB images and a 7-dimensional proprioceptive state vector, comprising the 6-dimensional delta end-effector pose and the 1-dimensional gripper status. All other configurations remain consistent with the simulation experiments. Both data collection and policy execution operate at a control frequency of 10 Hz. Task success is determined by human operators. We carried out six different real-robot experimental tasks, with detailed 12 FORCE: Efficient VLA Reinforcement Fine-Tuning 
+
+setups described in Sec. B.2. For our real-world experiments, the setup environment are shown in Fig. 3. Place Sphere Pull Cube Tool Pick Cube Stack Cube Pull Cube Push Cube 
+
+Figure 7. Simulation experiments on six ManiSkill manipulation tasks. PlaceSphere : place a small sphere onto a goal pad; StackCube :stack one cube on another; PickCube : pick and lift a target cube; PushCube : push a cube into a goal region; PullCube : pull a cube into a goal region; PullCubeTool : use an L-shaped tool to drag a cube that starts outside the robot’s reachable workspace into the goal region. Clean Whiteboard  Pick Corn  Open Drawer 
+
+Insert USB  Pick Cup  Stack Cube 
+
+Figure 8. Camera view of successful trajectories on real-world experiment tasks. 
+
+B.2. Task Descriptions Pick Cup: Pick up a cup and place it onto a plate. Open Drawer: Open the top drawer of a cabinet. Insert USB: Insert a USB into a port with precise alignment. Pick Corn: Pick up a corn from a cluttered environment and place it on a plate. 
+
+Stack Cube: Stack a red cube on top of a blue cube. Clean Whiteboard: Erase doodles from a whiteboard. The training setups for all six tasks are shown in Table 4. All tasks share common hyperparameters: 50 offline demonstrations, 
+
+(α, β, η ) = (0 .01 , 1.0, 0.1) for offline fine-tuning, and (β, η ) = (0 .5, 1.0) for online fine-tuning. 
+
+B.3. Implementation Details Network Architecture. Our method employs a diffusion-based consistency policy with a 2-layer MLP architecture (hidden size 256) using Tanh activations. The diffusion process operates with noise scheduling parameters σmin = 0 .002 ,
+
+σmax = 80 .0, σdata = 0 .5, and follows a power schedule with ρ = 7 .0 across M = 40 discretization steps. The noise 13 FORCE: Efficient VLA Reinforcement Fine-Tuning 
+
+levels are computed as σi = ( σ1/ρ  
+
+> min
+
++ i−1  
+
+> M−1
+
+(σ1/ρ  
+
+> max
+
+− σ1/ρ 
+
+> min
+
+)) ρ for i = 1 , . . . , M . For Q-function estimation, we utilize a dual-critic ensemble architecture where each critic is a 2-layer MLP with 256 hidden units and Tanh activations. Visual observations from two RGB cameras ( 640 × 480 resolution) are encoded through a pretrained ResNet-18 backbone, with temporal stacking over 2 consecutive frames.  
+
+> Table 4. Task-specific training parameters for real-world experiments.
+
+Parameter Pick Cup Open Drawer Insert USB Pick Corn Stack Cube Clean Board 
+
+Max episode length 500 300 300 300 1000 1000 Offline steps 20k 24k 20k 14k 26k 20k Transition steps 24k 26k 24k 16k 30k 24k Online steps 32k 30k 28k 20k 36k 32k Negative reward −0.05 −0.01 −0.01 −0.05 −0.01 −0.01 
+
+Online training time 40 min 20 min 20 min 20 min 30 min 40 min 
+
+Hyperparameter. We train the agent using Adam optimizer with learning rate 3 × 10 −4 for both policy and critic networks. Training proceeds with batch size 256, discount factor γ = 0 .99 , and exponential moving average updates for target networks with coefficient τ = 0 .005 .Our training pipeline consists of three progressive phases with adaptive loss weights: (1) an offline pretraining phase using demonstration data with loss weights λQ = 0 .1 and λBC = 1 .0 to prioritize imitation learning; (2) a transition phase where we gradually increase the Q weight with λQ = 0 .3 and λBC = 1 .0; (3) an online fine-tuning phase with λQ = 1 .0 and 
+
+λBC = 0 .5 to favor policy improvement over data imitation. 
+
+Self-Distillation and Regularization. To enable adaptive behavior cloning, we sample N = 20 action candidates per state and select learning targets based on Q-value comparison with a margin threshold δ = 0 .1. The policy loss combines behavior cloning and Q-maximization objectives. For conservative regularization, we apply CQL with coefficient α = 0 .1,evaluating 10 uniformly sampled out-of-distribution actions per training batch. The critic is updated twice as frequently as the policy (2:1 ratio) to ensure stable value estimation. Network parameters are synchronized to actors every 50 gradient steps during distributed training. 
+
+Reward Design. The reward function provides sparse completion signals: +10 for successful task execution, (−0.01 , −0.05) 
+
+per timestep to encourage efficiency, and −0.2 for each gripper actuation to minimize unnecessary movements. 14

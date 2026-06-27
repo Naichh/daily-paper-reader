@@ -6,28 +6,29 @@
 </div>
 
 ## 每次日报
-- 最新运行日期：2026-06-26
-- 运行时间：2026-06-26 21:48:33 UTC
+- 最新运行日期：2026-06-27
+- 运行时间：2026-06-27 20:21:41 UTC
 - 运行状态：成功
-- 本次总论文数：2
+- 本次总论文数：3
 - 精读区：1
-- 速读区：1
+- 速读区：2
 
 ### 今日简报（AI）
-1) 今日精读智能体强化学习技能蒸馏高分论文，速读大语言模型强化学习流水线优化新方法。
-2) 最值得看：OPID在线策略技能蒸馏可提升智能体学习效率；RolloutPipe通过流水线重叠加速训练。
-3) 建议尝试将OPID应用到具体智能体任务，并关注RolloutPipe实现细节以优化大规模LLM训练。
-- 详情：[/202606/26/README](/202606/26/README)
+今日推荐3篇论文，重点精读《FORCE: Efficient VLA Reinforcement Fine-Tuning via Value-Calibrated Warm-up and Self-Distillation》，该方法通过价值校准热身与自蒸馏提升VLA微调效率。另两篇涉及强化学习改进LLM合规系统与后训练梯度优势。建议优先阅读FORCE论文中关于价值校准的技术细节。
+- 详情：[/202606/27/README](/202606/27/README)
 
 ### 精读区论文标签
-1. [OPID: On-Policy Skill Distillation for Agentic Reinforcement Learning](/202606/26/2606.26790v1-opid-on-policy-skill-distillation-for-agentic-reinforcement-learning)  
-   标签：评分：9.0/10、query:policy-dist
-   evidence：提出面向智能体强化学习的在线策略技能蒸馏
+1. [FORCE: Efficient VLA Reinforcement Fine-Tuning via Value-Calibrated Warm-up and Self-Distillation](/202606/27/2606.26006v1-force-efficient-vla-reinforcement-fine-tuning-via-value-calibrated-warm-up-and-self-distillation)  
+   标签：评分：8.0/10、query:policy-dist
+   evidence：在VLA模型强化微调中使用自蒸馏，涉及策略蒸馏方法
 
 ### 速读区论文标签
-1. [RolloutPipe: Overlapping Pipelined Rollout and Training in Disaggregated On-Policy LLM Reinforcement Learning](/202606/26/2606.26997v1-rolloutpipe-overlapping-pipelined-rollout-and-training-in-disaggregated-on-policy-llm-reinforcement-learning)  
-   标签：评分：7.0/10、query:policy-dist
-   evidence：针对后训练中在线策略LLM强化学习的流水线优化
+1. [Reinforcement learning to improve large language model-based automated code compliance systems](/202606/27/2606.22402v1-reinforcement-learning-to-improve-large-language-model-based-automated-code-compliance-systems)  
+   标签：评分：6.0/10、query:policy-dist
+   evidence：使用GRPO（RLHF）改进LLM代码生成，与RLHF和蒸馏相关
+2. [Neglected Free Lunch from Post-training: Progress Advantage for LLM Agents](/202606/27/2606.26080v1-neglected-free-lunch-from-post-training-progress-advantage-for-llm-agents)  
+   标签：评分：6.0/10、query:policy-dist
+   evidence：从RL策略与参考策略的比值推导隐式优势，与蒸馏概念相关
 
 
 <div class="dpr-home-promo-card">
