@@ -6,29 +6,24 @@
 </div>
 
 ## 每次日报
-- 最新运行日期：2026-06-27
-- 运行时间：2026-06-27 20:21:41 UTC
+- 最新运行日期：2026-06-28
+- 运行时间：2026-06-28 20:35:03 UTC
 - 运行状态：成功
-- 本次总论文数：3
-- 精读区：1
-- 速读区：2
+- 本次总论文数：1
+- 精读区：0
+- 速读区：1
 
 ### 今日简报（AI）
-今日推荐3篇论文，重点精读《FORCE: Efficient VLA Reinforcement Fine-Tuning via Value-Calibrated Warm-up and Self-Distillation》，该方法通过价值校准热身与自蒸馏提升VLA微调效率。另两篇涉及强化学习改进LLM合规系统与后训练梯度优势。建议优先阅读FORCE论文中关于价值校准的技术细节。
-- 详情：[/202606/27/README](/202606/27/README)
+今日速读一篇7分论文，聚焦视觉-语言-动作模型的在线自适应。核心亮点：通过自蒸馏实现鲁棒的模型适应，对机器人或具身智能场景极具启发。建议后续关注自蒸馏如何提升在线微调稳定性。
+- 详情：[/202606/28/README](/202606/28/README)
 
 ### 精读区论文标签
-1. [FORCE: Efficient VLA Reinforcement Fine-Tuning via Value-Calibrated Warm-up and Self-Distillation](/202606/27/2606.26006v1-force-efficient-vla-reinforcement-fine-tuning-via-value-calibrated-warm-up-and-self-distillation)  
-   标签：评分：8.0/10、query:policy-dist
-   evidence：在VLA模型强化微调中使用自蒸馏，涉及策略蒸馏方法
+- 本次无精读推荐。
 
 ### 速读区论文标签
-1. [Reinforcement learning to improve large language model-based automated code compliance systems](/202606/27/2606.22402v1-reinforcement-learning-to-improve-large-language-model-based-automated-code-compliance-systems)  
-   标签：评分：6.0/10、query:policy-dist
-   evidence：使用GRPO（RLHF）改进LLM代码生成，与RLHF和蒸馏相关
-2. [Neglected Free Lunch from Post-training: Progress Advantage for LLM Agents](/202606/27/2606.26080v1-neglected-free-lunch-from-post-training-progress-advantage-for-llm-agents)  
-   标签：评分：6.0/10、query:policy-dist
-   evidence：从RL策略与参考策略的比值推导隐式优势，与蒸馏概念相关
+1. [ROAD-VLA: Robust Online Adaptation via Self-Distillation for Vision-Language-Action Models](/202606/28/2606.25800v1-road-vla-robust-online-adaptation-via-self-distillation-for-vision-language-action-models)  
+   标签：评分：7.0/10、query:policy-dist
+   evidence：基于优势引导的自蒸馏用于视觉-语言-行动模型在线适应
 
 
 <div class="dpr-home-promo-card">

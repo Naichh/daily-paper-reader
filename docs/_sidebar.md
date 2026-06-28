@@ -1,6 +1,9 @@
 * <a class="dpr-sidebar-root-link" href="#/">首页</a>
 * <a class="dpr-sidebar-root-link dpr-sidebar-noactive-link" href="javascript:void(0)" data-dpr-hash="#/tutorial/README">使用教程</a>
 * Daily Papers
+  * 2026-06-28 <!--dpr-date:20260628-->
+    * 速读区
+      * <a class="dpr-sidebar-item-link dpr-sidebar-item-structured" href="#/202606/28/2606.25800v1-road-vla-robust-online-adaptation-via-self-distillation-for-vision-language-action-models" data-sidebar-item="{&quot;title&quot;: &quot;ROAD-VLA: Robust Online Adaptation via Self-Distillation for Vision-Language-Action Models&quot;, &quot;link&quot;: &quot;https://arxiv.org/abs/2606.25800v1-road-vla-robust-online-adaptation-via-self-distillation-for-vision-language-action-models&quot;, &quot;score&quot;: &quot;7.0&quot;, &quot;tags&quot;: [{&quot;kind&quot;: &quot;query&quot;, &quot;label&quot;: &quot;policy-dist&quot;}], &quot;evidence&quot;: &quot;基于优势引导的自蒸馏用于视觉-语言-行动模型在线适应&quot;}">ROAD-VLA: Robust Online Adaptation via Self-Distillation for Vision-Language-Action Models</a>
   * 2026-06-27 <!--dpr-date:20260627-->
     * 精读区
       * <a class="dpr-sidebar-item-link dpr-sidebar-item-structured" href="#/202606/27/2606.26006v1-force-efficient-vla-reinforcement-fine-tuning-via-value-calibrated-warm-up-and-self-distillation" data-sidebar-item="{&quot;title&quot;: &quot;FORCE: Efficient VLA Reinforcement Fine-Tuning via Value-Calibrated Warm-up and Self-Distillation&quot;, &quot;link&quot;: &quot;https://arxiv.org/abs/2606.26006v1-force-efficient-vla-reinforcement-fine-tuning-via-value-calibrated-warm-up-and-self-distillation&quot;, &quot;score&quot;: &quot;8.0&quot;, &quot;tags&quot;: [{&quot;kind&quot;: &quot;query&quot;, &quot;label&quot;: &quot;policy-dist&quot;}], &quot;evidence&quot;: &quot;在VLA模型强化微调中使用自蒸馏，涉及策略蒸馏方法&quot;}">FORCE: Efficient VLA Reinforcement Fine-Tuning via Value-Calibrated Warm-up and Self-Distillation</a>
