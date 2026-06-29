@@ -6,24 +6,30 @@
 </div>
 
 ## 每次日报
-- 最新运行日期：2026-06-28
-- 运行时间：2026-06-28 20:35:03 UTC
+- 最新运行日期：2026-06-29
+- 运行时间：2026-06-29 20:30:37 UTC
 - 运行状态：成功
-- 本次总论文数：1
-- 精读区：0
-- 速读区：1
+- 本次总论文数：3
+- 精读区：3
+- 速读区：0
 
 ### 今日简报（AI）
-今日速读一篇7分论文，聚焦视觉-语言-动作模型的在线自适应。核心亮点：通过自蒸馏实现鲁棒的模型适应，对机器人或具身智能场景极具启发。建议后续关注自蒸馏如何提升在线微调稳定性。
-- 详情：[/202606/28/README](/202606/28/README)
+今日精读两篇高分论文，聚焦在线蒸馏的位置偏差与Qwen图像强化学习技术。最值得关注的方向：位置偏差的成因与缓解策略，以及Qwen-Image-2.0的RL训练细节。建议读者优先阅读这两篇技术报告，深入理解其对提升模型对齐效果的实用思路。
+- 详情：[/202606/29/README](/202606/29/README)
 
 ### 精读区论文标签
-- 本次无精读推荐。
+1. [On the Position Bias of On-Policy Distillation](/202606/29/2606.22600v3-on-the-position-bias-of-on-policy-distillation)  
+   标签：评分：9.0/10、query:policy-dist
+   evidence：强化学习中在线策略蒸馏的位置偏差
+2. [Qwen-Image-2.0-RL Technical Report](/202606/29/2606.27608v1-qwen-image-20-rl-technical-report)  
+   标签：评分：9.0/10、query:policy-dist
+   evidence：基于RLHF和在策略蒸馏的后训练文本到图像模型
+3. [ATOD: Annealed Turn-aware On-policy Distillation for Multi-turn Autonomous Agents](/202606/29/2606.27814v1-atod-annealed-turn-aware-on-policy-distillation-for-multi-turn-autonomous-agents)  
+   标签：评分：9.0/10、query:policy-dist
+   evidence：提出ATOD，一种面向多轮语言模型智能体的混合在线策略蒸馏算法
 
 ### 速读区论文标签
-1. [ROAD-VLA: Robust Online Adaptation via Self-Distillation for Vision-Language-Action Models](/202606/28/2606.25800v1-road-vla-robust-online-adaptation-via-self-distillation-for-vision-language-action-models)  
-   标签：评分：7.0/10、query:policy-dist
-   evidence：基于优势引导的自蒸馏用于视觉-语言-行动模型在线适应
+- 本次无速读推荐。
 
 
 <div class="dpr-home-promo-card">
