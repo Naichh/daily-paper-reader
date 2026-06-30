@@ -1,0 +1,436 @@
+Title: DRIFT: Difficulty Routing Self-DIstillation with Rhythm-Gated Exploration and Success BuFfer Training
+
+URL Source: https://arxiv.org/pdf/2606.30345v1
+
+Published Time: Tue, 30 Jun 2026 02:23:32 GMT
+
+Number of Pages: 15
+
+Markdown Content:
+Beike Language and Intelligence 
+
+# DRIFT: D IFFICULTY ROUTING SELF -DI STILLATION WITH RHYTHM -G ATED EXPLORATION AND SUCCESS 
+
+# BUFFER TRAINING 
+
+Haisen Luo 3,∗, Yiwei Liu 2,∗, Haoning Wang 1,∗, Dan Liu 3,∗, Junxi Yin 3,∗,
+
+Haotian Wang 3, Lei Zhang 3, Xiaoyu Tian 3, Shuaiting Chen 3, Yuansheng Song 3, Baoyan Guo 3,Xiongfei Yan 3, Bolan Yang 3, Chengwei Liu 3, Ming Cui 3, Jiong Chen 3,†
+
+> 1
+
+Tsinghua University, 2ENS Paris-Saclay, 3Beike Language and Intelligence 
+
+luohaisen002@ke.com, sunsetlyw2002@gmail.com, whn22@mails.tsinghua.edu.cn, liudan190@ke.com, yinjunxi001@ke.com, chenjiong@ke.com 
+
+# ABSTRACT 
+
+Enabling large language models to achieve stable self-improvement without ex-ternal expert supervision remains a central challenge in complex reasoning tasks. Existing self-distillation and reinforcement learning methods lack explicit mech-anisms for tracking problem-level learning progress and adapting optimization strategies accordingly. Consequently, training may over-optimize easy problems, receive weak supervision from hard problems, and fail to sufficiently explore bor-derline cases. To resolve these issues, we propose DRIFT, an online self-evolution policy optimization framework for large language models. DRIFT regulates the model’s self-improvement process through the joint use of Difficulty Routing and Rhythm Gating. The former identifies the model’s learning state at the problem level and dynamically allocates self-distillation and reinforcement learning sig-nals, while the latter refines policy updates at the token level, concentrating ex-ploration on critical reasoning positions. By further incorporating a success buffer and a two-stage curriculum learning strategy, DRIFT preserves high-quality his-torical experience while progressively guiding the model from reliable behavior acquisition toward stable policy evolution. Evaluated across five benchmarks and three model scales, DRIFT surpasses the peak performance of both GRPO and SDPO across all evaluated metrics. On the average score over the five bench-marks, DRIFT achieves 79.5%, outperforming GRPO by 9.5% and SDPO by 7.5%, establishing a new state-of-the-art result. Notably, on ToolUse, DRIFT reaches an accuracy of 79.2%, improving over GRPO by 13.5% and SDPO by 10.7%, setting a new state-of-the-art and substantially outperforming all concur-rent methods. 
+
+# 1 INTRODUCTION 
+
+Recently, large language models (LLMs) have made remarkable progress on complex tasks such as mathematical reasoning, scientific problem solving, and tool use Jaech et al. (2025); Guo et al. (2025); DeepSeek-AI (2026); Comanici et al. (2025); Olmo et al. (2026). Beyond scaling pre-training, feedback-based reinforcement learning and self-distillation have emerged as important ap-proaches for strengthening LLM reasoningShao et al. (2024); Gu et al. (2023); H¨ ubotter et al. (2026); Zhao et al. (2026); Jin et al. (2026); Fu et al. (2026); Pan et al. (2026); Li et al. (2026b). By learning from trajectories the model produces itself, these methods reduce the dependence on human expert demonstrations and offer a scalable route to self-evolution. Despite their effectiveness, existing self-evolution paradigms share a key limitation: their training signals are rarely adapted to the model’s evolving capability. Reinforcement learning methods such as GRPO (Shao et al., 2024) encourage policy exploration through relative rewards, but the resulting 1
+
+> arXiv:2606.30345v1 [cs.LG] 29 Jun 2026
+
+Beike Language and Intelligence  
+
+> (a) (b)
+
+Figure 1: DRIFT overview 
+
+updates can become noisy when successful samples are sparse or reward distributions are unstable. Self-distillation methods such as SDPO (H¨ ubotter et al., 2026) reuse the model’s correct solutions as supervision, yet they typically treat all such solutions uniformly, ignoring whether a problem is easy, near the model’s capability boundary, or only occasionally solved. Recent sample-routing methods try to combine self-distillation with reinforcement learning (Li et al., 2026a), but most rely on immediate outcomes within the current batch and lack a persistent characterization of problem difficulty and learning progress Zhang & Zuo (2025). As a result, training signals are allocated suboptimally: already-mastered problems keep receiving redundant updates, hard problems fail to yield reliable supervision, and high-value boundary cases are under-explored Zhang & Zuo (2025); Baroian & Berger (2026); H¨ ubotter et al. (2026). Compounding this, many methods neither re-tain nor reuse high-quality correct solutions across batches, preventing the formation of a durable memory for self-evolution (Lin, 1992; Schaul et al., 2016; Zhan et al., 2026). To address these issues, we propose DRIFT, an online self-evolution policy optimization framework for LLMs. DRIFT adaptively coordinates self-distillation and reinforcement learning according to the model’s estimated mastery of each problem, balancing error correction, exploration, and stable convergence. Using the model’s own correct solutions as references, DRIFT routes each problem to a strategy matched to its difficulty: hard problems receive explicit distillation guidance, problems near the capability boundary drive reinforcement-learning exploration, and reliably solved problems are given fewer updates to avoid unnecessary policy perturbation. Crucially, a cross-batch mem-ory retains high-quality correct solutions as distillation references, enabling hard problems rarely solved in the current batch to benefit from successful trajectories accumulated over time. DRIFT further refines reinforcement-learning updates through token-level modulation, concentrating pol-icy improvement on the key positions in a reasoning trace that most directly determines reasoning quality. By integrating difficulty-aware signal allocation, token-level credit shaping, and cross-batch reuse of successful experience, DRIFT sustains a robust online self-evolution process without any external expert supervision. We evaluate DRIFT by training Qwen3-8B (Yang et al., 2025) on a diverse suite of tasks spanning biology, chemistry, materials, physics, and tool use. DRIFT clearly surpasses our reproduced SDPO and GRPO baselines and further improves over recent methods such as SRPO (Li et al., 2026a), with especially pronounced gains on the tool-use task. Our contributions are as follows: 1. Dynamic Difficulty Routing. Historical pass rates are used as a stable estimate of the model’s mastery level, enabling dynamic decisions on when to distill from past successful trajectories, when to explore new strategies, and when to reduce redundant training. 2. Rhythm Gating Exploration. A structure-preserving exploration mechanism is intro-duced to encourage policy variation near the success boundary, while preserving useful reasoning patterns through token-level Rhythm Gating. 3. Two-Stage Curriculum Learning. A two-stage curriculum strategy is designed to align training behaviors with different phases of model learning. The first stage focuses on rapid 2Beike Language and Intelligence 
+
+capability growth and success buffer accumulation, allowing the model to reach a stable performance plateau efficiently. The second stage shifts toward balanced exploration, cor-rection, and convergence, enabling continuous and stable performance improvement. 4. Experience Replay via Success Buffer. DRIFT incorporates a historical success buffer to reuse high-quality trajectories. It further adopts a curriculum learning strategy to support smooth model evolution and uses Rhythm Gating to provide structured exploration rewards on boundary problems. 
+
+# 2 PRELIMINARIES 
+
+2.1 GRPO AND SDPO Group Relative Policy Optimization (GRPO) is a critic-free policy optimization method commonly used in post-training with verifiable rewards. Given a prompt x, the current policy samples a group of G candidate rollouts. Each rollout receives a scalar reward, which is normalized within the group to compute its relative advantage AGRPO  
+
+> i
+
+. The policy is then optimized using a PPO-style clipped surrogate objective, where ρi,t (θ) = πθ (yi,t | x, y i,<t )/π θold (yi,t | x, y i,<t ) denotes the token-level importance ratio: 
+
+JGRPO (θ) = Ei,t 
+
+min  ρi,t (θ) AGRPO  
+
+> i
+
+, clip ( ρi,t (θ), 1 − ϵ, 1 + ϵ) AGRPO 
+
+> i
+
+ . (1) Since AGRPO  
+
+> i
+
+is computed at the sequence level, all tokens within the same rollout share the same advantage. Therefore, GRPO provides a trajectory-level reward alignment signal: high-reward re-sponses are reinforced, while low-reward responses are suppressed. However, this also leads to coarse-grained credit assignment, as GRPO cannot directly identify which specific tokens are re-sponsible for the final outcome. Beyond the scalar reward, Self-Distillation Policy Optimization (SDPO) introduces dense token-level supervision from a self-teacher. Unlike methods that rely solely on the final outcome reward, SDPO leverages the model itself to construct a teacher distribution under additional feedback con-ditions, thereby providing the student with a finer-grained learning signal. The student policy can be written as πθ (· | x), whereas the self-teacher distribution is further conditioned on auxiliary feed-back f , i.e., πθ (· | x, f ). Here the feedback f may arise from the rollout process—for instance, successful sibling responses within the same group of samples, verifier feedback, execution traces, or other auxiliary signals provided by the environment. Given a sampled trajectory yi, SDPO com-pares the student and self-teacher distributions at the same prefix positions. We typically employ the Jensen–Shannon divergence (JSD), in which case the distillation loss can be written as: 
+
+LSDPO (θ) = X
+
+> t
+
+JSD  πθ (· | x, y i,<t ) sg [ πθ (· | x, f, y i,<t )]  , (2) 
+
+JSD( P ∥ Q) = 12 KL( P ∥ M ) + 12 KL( Q ∥ M ), M = 12 (P + Q). (3) Although GRPO and SDPO drive the self-improvement of large models along two paths— reinforcement learning and self-distillation, respectively—both struggle to adapt to the dynamic evolution of model capability. For GRPO, when intra-group rewards become homogeneous, the relative advantage weakens, leading to insufficient effective update signals. At the same time, all tokens within a single rollout share the same advantage in GRPO, so its credit assignment is too coarse-grained to localize the key reasoning steps that truly determine the outcome, causing a large portion of the updates to be spread over tokens unrelated to reasoning quality. By contrast, SDPO relies primarily on successful trajectories as the supervision signal, yet it usually treats all successful samples alike—neither distinguishing whether a sample comes from an easy problem, lies at the ca-pability boundary, or is a hard problem solved by chance, nor characterizing problem-level learning progress. Such indiscriminate imitation may cause the model to keep producing redundant updates on easy problems it has already mastered, and to suppress exploration through a bias toward high-confidence behaviors; meanwhile, the boundary problems that carry genuine learning value are not sufficiently reinforced, and hard problems that lack successful trajectories cannot receive effective supervision. Ultimately, both GRPO and SDPO lack a mechanism that continually tracks the learn-ing state at the problem level and dynamically allocates the optimization signal accordingly—which is precisely the core problem that DRIFT aims to address. 3Beike Language and Intelligence 
+
+# 3 METHOD 
+
+DRIFT is built around these two levels and consists of three interlocking components: a two-stage curriculum that first uses self-distillation for a fast warm-up and to accumulate experience, and then switches to a stable optimization stage that combines self-distillation with reinforcement learning; a two-level signal refinement mechanism that dynamically allocates optimization signals at both levels: at the problem level, difficulty routing modulates the strength of reinforcement-learning up-dates according to the model’s evolving mastery of each problem, while at the token level, rhythm-gated structured exploration concentrates credit on critical decision positions; and a privileged self-teacher that grows stronger throughout training, maintained jointly by the teacher-selection rule in the warm-up stage and a cross-stage success buffer , ensuring that dense token-level supervision remains available even when positive samples are scarce. We elaborate on each component below. 3.1 CURRICULUM TEACHER CONSTRUCTION 
+
+DRIFT adopts a curriculum-learning organization that divides training into a warm-up stage and a mixed-optimization stage. The warm-up stage is dominated by SDPO, exploiting its higher sample efficiency relative to RL to rapidly improve model performance (pass@k) while simultaneously accumulating successful experience; the mixed stage then introduces the cooperation of SDPO and GRPO on top of this, continuing to improve capability in a more stable manner. The two stages share a single self-teacher played by the model itself, whose supervision is provided in the form of privileged information (a success sibling, denoted sib+). 
+
+Stage 1: Entropy-based teacher selection for the SDPO warm-up. In the warm-up stage we adopt an SDPO-dominated training framework. The difference from standard SDPO lies in the selection rule for the success sibling: standard SDPO fixes the choice to the first sample among all those satisfying reward ≥ threshold, whereas we use a two-level “reward-first, entropy-second” strategy—we first select the sample with the largest reward, and then, among the samples with reward ∈ [ rmax − δ, rmax ], select the one with the largest entropy ( δ being a tolerance). The reason we prefer a high-entropy successful trajectory as the teacher signal during warm-up is to maintain stronger exploration and diversity early in training, avoiding premature convergence to a single reasoning pattern. This stage has two goals: first, to leverage the high efficiency of SDPO for a fast performance warm-up; and second, to accumulate successful trajectories so as to build the success buffer, providing privileged supervision when positive samples are scarce in later stages. 
+
+Stage 2: Mixed optimization of SDPO and GRPO. In the mixed stage, we route samples into branches according to correctness: a sample with reward < θ r is judged negative, and positive otherwise. • Negative samples take the SDPO branch. We select sib+ as the teacher to correct this erroneous trajectory. Unlike in warm-up, here we no longer prefer a high-entropy sib+; instead we prefer the one with the largest reward, and if several candidates share the same reward, we further prefer the one with the shortest response length—shorter responses usu-ally have lower entropy, which helps the model converge. This stage emphasizes capability improvement over exploration, so the teacher-selection rule is adjusted accordingly. We do not apply pure GRPO to negative samples, because GRPO handles a negative sample by suppressing the generation probability of all of its tokens, which does not fully exploit the signal carried by the negative sample: the model is only told that “the current trajectory is undesirable” without learning in which direction it should be corrected, whereas sib+ provides a token-by-token correct path for comparison. • Positive samples take the rhythm-GRPO branch. It should be emphasized that the sam-ple advantage AGRPO  
+
+> i
+
+is computed over all samples jointly, rather than only within the set of positive samples. The reason these samples take GRPO rather than SDPO is that using “another correct trajectory” to guide “a trajectory that is already correct” involves two in-consistent distributions, which may misguide the direction of policy adjustment and harm training stability; meanwhile, GRPO handles a positive sample by raising the generation probability of its current tokens, which more effectively preserves the model’s existing capability. 4Beike Language and Intelligence 
+
+Figure 2: Overall DRIFT training pipeline. Writing the two branches together, we obtain the overall objective of DRIFT in the mixed stage: 
+
+min  
+
+> θ
+
+L(θ) := Eyi∼πθ (·| x)
+
+1yi∈incorrect LSDPO (yi, f i)
+
+| {z }  
+
+> Self-Distillation (§3.1,§3.4)
+
+− γi 1yi∈correct J rhythm GRPO (yi)
+
+| {z }  
+
+> Difficulty-Routed RL (§3.2,§3.3)
+
+ , (4) where the two branches expand respectively as 
+
+LSDPO (yi, f i) := 
+
+> |yi|
+
+X
+
+> t=1
+
+JSD  πθ (· | x, y i,<t ) sg[ πθ (· | x, f i, y i,<t )]  , (5) 
+
+J rhythm GRPO (yi) := 
+
+> |yi|
+
+X
+
+> t=1
+
+M rhy  
+
+> t
+
+· min 
+
+
+
+ρi,t (θ) AGRPO  
+
+> i
+
+, clip  ρi,t (θ), 1 − ϵ, 1 + ϵ AGRPO 
+
+> i
+
+
+
+. (6) This objective uses three colored terms to mark the division of labor among the following subsec-tions: 1yi∈incorrect triggers the SDPO privileged-correction branch, whose teacher fi is provided jointly by the teacher-selection rule of this section and the success buffer of Section 3.4; γi is the problem-level difficulty-routing weight, given by Section 3.2; and M rhy  
+
+> t
+
+is the token-level rhythm-gating weight, given by Section 3.3. The following three subsections refine these three quantities in turn. 3.2 DIFFICULTY ROUTING 
+
+This section refines the signal allocation at the problem level, i.e., γi in the objective. Recent studies on RLVR/GRPO show that sample difficulty has a markedly non-monotonic effect on policy opti-mization: overly hard samples often fail to provide the most effective learning signal—positive tra-jectories are scarce among their rollouts, and even when a correct trajectory is occasionally sampled, it may be too far from the current model’s capability or representation space to form a generalizable learning signal. We further observe that, in multiple-choice subject datasets, the model may guess the answer to a hard problem correctly while its chain-of-thought is in fact incorrect, which fur-ther miscalibrates the learning signal. Hence, easy and medium-difficulty samples are usually more suitable for GRPO (Cheng et al., 2026; Baroian & Berger, 2026). On the other hand, overly easy problems tend to produce homogeneous rewards, leading to weak group-relative advantage signals; at the same time, such samples may mainly reinforce direct-answer or surface-level computation steps rather than deeper reasoning (Chen et al., 2026; Cheng et al., 2026). Accordingly, in the second stage of the curriculum we assign different weights to the positive sam-ples taking the GRPO branch according to their difficulty: we reduce the GRPO update strength 5Beike Language and Intelligence 
+
+on overly easy and overly hard samples, and assign higher weight to medium-difficulty samples. Formally, this weight is exactly γi in the objective, taking different values according to problem difficulty. 
+
+Computation and smoothing of the pass rate. We use a problem’s pass rate as the basis for difficulty partitioning. The most direct way is to use the success rate of the current sample as the pass rate, 
+
+rnow = ncorrect 
+
+n , (7) where n is the number of rollouts for a single sample. However, since n is usually small (8 or 16), the rnow estimated at different epochs may fluctuate too much even when the model is fixed, causing unstable difficulty partitioning. We therefore smooth it with an exponential moving average (EMA) of the historical pass rate: 
+
+r = α r past + (1 − α) rnow . (8) 
+
+Difficulty binning and weight values. Using the smoothed pass rate r, we partition problems into easy, medium, and hard, and take a different γi for each: • Easy : r > r easy , take γi = γeasy ;• Medium : rhard < r < r easy , take γi = 1 ;• Hard : r < r hard , take γi = γhard .In our numerical experiments we generally set γhard = 0 , γ easy = 0 .5, r easy = 0 .8, r hard =0.2. This routing directly addresses the problem-level gap pointed out in the Introduction: for easy problems (homogeneous rewards, vanishing advantage) it suppresses redundant updates and surface-level reinforcement; for hard problems (scarce positives, accidental correctness) it avoids being misguided by miscalibrated signals; and it concentrates the effective reinforcement-learning budget on the medium-difficulty region with the highest learning value. 3.3 RHYTHM -G ATED STRUCTURED EXPLORATION 
+
+This section refines the credit assignment at the token level, i.e., M rhy  
+
+> t
+
+in the objective. Standard GRPO uses only the sequence-level advantage and cannot distinguish differences in token impor-tance within the reasoning structure: a large number of semantically irrelevant tokens (e.g., for-matting symbols, high-frequency connectives) share the same exploration signal as critical decision tokens, which both introduces gradient noise and skews credit assignment away from the reasoning steps that truly determine correctness. To improve the effectiveness of the exploration signal within the medium-difficulty region, we introduce a rhythm-gated rebellious bonus on the GRPO branch determined by difficulty routing: we construct a token-level estimate of structural salience from the difference in temporal entropy dynamics between teacher and student, and then use this salience to gate the student’s local exceedance over the teacher. This mechanism does not uniformly am-plify the policy gradient of all correct samples; rather, it applies a bounded amplification to a local token update only when two conditions hold simultaneously—first, the sample lies in the medium-difficulty region “worth continuing to explore”; and second, a token position exhibits both a local exceedance of the student over the teacher and a high structural salience. This improves the effec-tiveness and interpretability of exploratory updates while controlling the magnitude of optimization perturbations. Overall, the final token weight is determined by the product of two factors: one characterizing the 
+
+local exceedance strength of the student relative to the teacher (the rebellious bonus), and the other characterizing the structural salience of the position (the anchor rhythm gate). We construct each in turn. 
+
+Local exceedance: teacher-relative rebellious bonus. Let ℓSt and ℓTt denote the log-probabilities assigned by the student and the teacher, respectively, to the actually sampled token at the t-th re-sponse token. Define the local exceedance of the student relative to the teacher as 
+
+∆t = ℓSt − ℓTt − μ, ∆+ 
+
+> t
+
+= max(∆ t, 0) , (9) 6Beike Language and Intelligence 
+
+where μ ≥ 0 is a margin used to filter out overly small random fluctuations. On top of this we construct a bounded rebellious bonus 
+
+Bt = min   exp( τ ∆+ 
+
+> t
+
+), B max 
+
+, breb  
+
+> t
+
+= Bt − 1, (10) where τ > 0 is a temperature coefficient and Bmax gives an upper bound. This quantity only answers “whether the student significantly surpasses the teacher at this token,” and does not distinguish whether the token is truly important; if applied indiscriminately to all positions with ∆t > 0, the model might allocate too much gradient budget to semantically neutral tokens such as formatting symbols and connectives, thereby amplifying ineffective exploration. 
+
+Structural salience: anchor rhythm gate. To this end we introduce an anchor rhythm gate that acts only on the rebellious bonus. It does not directly weight the SDPO distillation loss, but serves only as a structural filter for the rebellious bonus on the GRPO branch; this temporal-anchor signal combines past and future information simultaneously, so as to more accurately capture the rhythmic key points of exploration. Let HSt and HTt be the token entropies of the student and the teacher at position t. For a local window of length W , define the entropy collapse of model ∗ ∈ { S, T } near this position as 
+
+Drop ∗(t) = max   ¯H∗
+
+> past
+
+(t) − ¯H∗
+
+> future
+
+(t), 0. (11) If the teacher exhibits a more pronounced local entropy collapse than the student near position t,while the student is still more uncertain than the teacher at that position, then the position is more likely to be an “anchor” in the reasoning structure. Accordingly, we define the anchor score 
+
+Danc  
+
+> t
+
+= max  Drop T (t) − Drop S (t), 0 · max  HSt − HTt , 0. (12) We then apply z-score normalization to Danc  
+
+> t
+
+within each sequence, and map it to [0 , 1] via a soft gate: 
+
+zanc  
+
+> t
+
+= zscore  
+
+> seq
+
+(Danc  
+
+> t
+
+), ganc  
+
+> t
+
+= 2 max  σ(αanc zanc  
+
+> t
+
+) − 12 , 0 . (13) Define the anchor rhythm multiplier mt = 1 + λstruct ganc  
+
+> t
+
+, and apply within-sequence mean nor-malization and clipping 
+
+˜mt = mt 
+
+> 1
+> |Y|
+
+P 
+
+> j∈Y
+
+mj
+
+, mclip  
+
+> t
+
+= clip( ˜ mt, m min , m max ), (14) and then linearly map it to the final gate 
+
+grhythm  
+
+> t
+
+= clip mclip  
+
+> t
+
+− 1
+
+mmax − 1 , 0, 1
+
+!
+
+. (15) In this way, only positions whose structural salience is above the within-sequence average receive a positive rhythm gate, while tokens below the mean or in the neutral region are filtered out directly. 
+
+Composite weight and double screening. Combining the two factors, the token weight actually used on the GRPO branch is 
+
+M rhy  
+
+> i,t
+
+= 1 + βi grhythm  
+
+> i,t
+
+breb  
+
+> i,t
+
+, (16) where βi is a sample-level medium-difficulty indicator: βi = 1 if and only if sample i is routed as medium by Section 3.2, and βi = 0 for easy and hard. This expression clearly reflects the division of labor among the three types of signals: βi decides at the sample level whether the sample belongs to the medium-difficulty region worth exploring, breb  
+
+> i,t
+
+measures whether the student achieves a local exceedance over the teacher at this token, and grhythm  
+
+> i,t
+
+judges whether this exceedance occurs at a structurally more critical position. In other words, this mechanism performs a kind of “double screening” at the token level: it first detects whether a teacher-relative improvement exists, and then detects whether that improvement falls on a high-value structural anchor. Rhythm does not change the direction of the distillation objective; it serves only as a structural gate for the rebellious bonus, keeping the exploration enhancement local, bounded, and low-risk. This design is supported by three considerations. First, exploration should be teacher-relative 
+
+rather than unconditionally amplifying all correct tokens: in the medium-difficulty region, the model already has a certain success rate but has not yet converged stably, and the most valuable signal here 7Beike Language and Intelligence 
+
+is often not “what the teacher already knows” but “at which local positions the student begins to significantly surpass the teacher.” Hence the rebellious bonus is defined by the relative difference 
+
+ℓSt − ℓTt , granting extra gain only when the student’s support for the actually sampled token is clearly stronger than the teacher’s, thereby focusing exploration on positions where the student’s new capabilities are emerging, rather than treating the teacher as an insurmountable upper bound. Second, a local exceedance does not automatically imply a high-value exceedance : language models may occasionally achieve a higher log-prob on low-semantic-load tokens such as formatting symbols, connectives, and repeated phrases, and if all positions with ∆t > 0 are treated equally, the training signal will be diluted by a large number of “surface-level exceedances,” skewing credit assignment away from the key positions that determine correctness; the role of the rhythm gate is not to introduce a second independent reward, but to answer a finer question—whether the exceedance occurs at a structurally worthwhile position. Third, the intuition of the temporal anchor is that, at the key turning points of a reasoning chain, the teacher often completes the local collapse of uncertainty faster than the student, and if the student is still more uncertain at this moment, the position is very likely a structural anchor that the student has not yet stably mastered; retaining the rebellious bonus only at such positions amounts to reallocating the exploration budget from “all seemingly better tokens” to “the tokens more likely to determine future reasoning success or failure.” Taken together, this mechanism is a two-stage but single-path token-level credit-assignment process: the first stage detects, via the rebellious term, whether a teacher-relative improvement occurs, and the second stage detects, via the anchor rhythm gate, whether that improvement falls at a position of high structural value; a token receives extra amplification only when both hold—preserving the progressiveness of teacher-relative exploration while constraining its variance and noise propagation through the structural gate, forming a local and bounded exploration enhancement suitable for the medium-difficulty boundary region. 3.4 SUCCESS BUFFER 
+
+Finally, we explain how to keep the privileged self-teacher always present and increasingly strong, i.e., how to still provide fi for the SDPO branch when positive samples are scarce. Inspired by RLEP (Zhang et al., 2025), we introduce a success buffer mechanism into OPD. RLEP shows that, in reinforcement learning for large-model reasoning, trajectories that have been verified as correct can be reused via experience replay, so that the policy need not explore from scratch at every update but can continually reinforce existing effective reasoning paths. Building on this idea, we store rollouts that obtain a positive verification signal into a buffer during sampling, and replay the successful samples within it as sib+ in subsequent OPD updates, injecting them into training in the form of privileged information. Unlike the offline, static replay buffer in RL, our buffer is dynamically replaced: since the teacher’s capability keeps growing and rewards keep rising throughout training, the sib+ corresponding to the same problem in the buffer is replaced by higher-quality trajectories as training proceeds; this amounts to introducing, in the form of privileged information, an implicit reward signal that strengthens with training, rather than simply replaying fixed historical experience. The specific design is as follows. In the first k epochs of training, we encourage the model to explore freely, only accumulating the success buffer without using it; from the (k+1) -th epoch onward, the buffer’s data are used as sib+ only when no sib+ can be found within a group of rollouts; each data point stores at most b sib+ simultaneously (we take b = 3 in experiments), and one of them is randomly chosen at use time; when the sib+ of a data point is full, replacement is done by reward, with high-reward sib+ replacing low-reward ones. Formally, for each training sample x we maintain a success buffer 
+
+B(x) = {(y+ 
+
+> j
+
+, r j )}mx
+
+> j=1
+
+, mx ≤ b, (17) where {y+ 
+
+> j
+
+} are historical successful rollouts and {rj } are their corresponding rewards. In the first 
+
+k epochs, the buffer is only updated, not used: 
+
+i ≤ k : B(x) ← Update  B(x), y +, r (y+). (18) From the (k+1) -th epoch onward, given a set of rollouts Y(x) = {y1, . . . , y n} obtained by current sampling, if the set contains no successful rollout, i.e., 
+
+{ yi ∈ Y (x) : r(yi) > 0 } = ∅, (19) 8Beike Language and Intelligence 
+
+then a historical successful sibling is randomly sampled from the buffer as the sib+ for the current sample: 
+
+˜y+ ∼ Uniform  B(x). (20) The buffer is updated by a reward-based replacement mechanism. When the buffer is not full, a new successful rollout is added directly: 
+
+|B (x)| < b : B(x) ← B (x) ∪ { (y+, r (y+)) }. (21) When the buffer is full, let j⋆ = arg min j rj denote the index of the entry with the lowest reward; then 
+
+B(x) ←
+
+(  B(x) \ { (y+ 
+
+> j⋆
+
+, r j⋆ )} ∪ { (y+, r (y+)) }, if r(y+) > r j⋆ ,
+
+B(x), otherwise . (22) This mechanism increases the utilization of high-quality generated samples, reduces the sample waste caused by discarding successful rollouts at once, and provides a more stable positive training signal for the student policy. Unlike standard on-policy training, where a rollout is discarded after a single update, our framework retains successful reasoning trajectories and reuses them as auxiliary signals for policy distillation and optimization. It is worth noting that the memory overhead of maintaining the success buffer is small: since the buffer is essentially a plain-text dictionary, its footprint grows as (number of problems) × (successful entries per problem) × (per-response length), amounting to at most about 0.2–0.3 GB under our default configuration and typically staying within a few hundred MB in practice—negligible compared with the model weights and optimizer states, and thus it does not adversely affect training. 
+
+# 4 EXPERIMENTS 
+
+4.1 EXPERIMENTAL SETUP 
+
+Models and training. We conduct experiments on three instruction-tuned models, including Qwen3-8B (Yang et al., 2025), Qwen3-4B, and OLMo3-7B (Olmo et al., 2026), covering both different scales within the same model family and models from different families. Qwen3-8B serves as our primary model; unless otherwise noted, all ablation studies and training-dynamics analyses beyond the main performance comparison are conducted on Qwen3-8B. All experiments are trained for more than400 steps on 8 NVIDIA H200 GPUs. Unlike prior work that reports results in terms of wall-clock time (H¨ ubotter et al., 2026; Li et al., 2026a), we follow SC-SDPO (Liu et al., 2026) and report results in terms of training steps, since optimization steps are independent of hardware configuration and enable reproducible comparison across different compute environments. 
+
+Datasets. Following the evaluation setting of SDPO, we conduct experiments on five benchmarks: Chemistry, Physics, Biology, Materials, and Tool Use. The first four benchmarks are drawn from the reasoning subsets of SciKnowEval (Feng et al., 2024), covering undergraduate-level scientific reasoning across multiple domains. The Tool Use benchmark assesses the model’s ability to con-vert a user query and a given tool specification into the correct tool invocation, following ToolAl-paca (Tang et al., 2023). Following SDPO, we split each benchmark into training and test sets to measure in-domain generalization. 
+
+Baselines. We compare DRIFT with six baselines: GRPO (Shao et al., 2024), SDPO (H¨ ubotter et al., 2026), SRPO (Li et al., 2026a), DistIL (Agrawal et al., 2026), SC-SDPO (Liu et al., 2026), and PGPO (Wang et al., 2026). We reproduce GRPO and SDPO using the implementation framework provided by SDPO (H¨ ubotter et al., 2026), with the default hyperparameter settings kept unchanged. For SRPO, DistIL, SC-SDPO, and PGPO, we use the results reported in their corresponding pa-pers (Li et al., 2026a; Agrawal et al., 2026; Liu et al., 2026; Wang et al., 2026). When comparing with reported numbers, we follow the same benchmark and evaluation protocol whenever applicable. 9Beike Language and Intelligence 
+
+4.2 MAIN RESULTS  
+
+> Figure 3: Tool-use performance
+
+Main results. Our main results are reported as the mean@16 accuracy of Qwen3-8B across four scientific rea-soning tasks (biology, chemistry, materials, physics) and tool use. DRIFT attains the highest average accuracy of 79.5%, outperforming the previously strongest baseline SRPO (77.4%) by 2.1 points, SC-SDPO (74.8%) by 4.7 points, and the GRPO/SDPO-series baselines by 7.5–9.5 points, while improving over the Qwen3-8B starting point (49.5%) by 30.0 points. Beyond the overall average, DRIFT is the only method that ranks in the top two on every task: it is best on biology (74.4%) and tool use (79.2%), and second-best on chemistry (82.0%), materials (81.4%), and physics (80.5%), with a gap of no more than 1.1 points from the per-task optimum. This balance arises from the targeted treatment of the learning signal afforded by difficulty routing: on hard tasks, GRPO suffers from advantage collapse because the entire group receives the same re-ward and can only suppress incorrect trajectories indiscriminately, whereas DRIFT routes such cases to the SDPO branch and leverages sib+ to provide token-level correction (on the hardest task, biol-ogy, our GRPO reproduction reaches only 47.4%, while DRIFT attains 74.4%); on easier samples, it applies difficulty weighting to curb superficial reinforcement. By contrast, other methods tend to be uneven across tasks (e.g., SC-SDPO leads on physics but drops to 65.4%/67.3% on biology/tool use). The improvement is most pronounced on tool use, where DRIFT leads the second-best SRPO by 8.0 points. DRIFT’s effectiveness stems from its balance between exploration and structured knowledge learn-ing. The self-distillation branch converts successful in-group siblings into structured supervision, enabling the model to reliably absorb reusable knowledge such as tool protocols, domain facts, and standardized answer formats. Meanwhile, the rhythm-gated rebellious mechanism preserves con-trolled exploration in the policy-gradient branch, preventing premature convergence to specific suc-cessful trajectories. Together, these two components allow DRIFT to improve performance on both tool-use and STEM datasets. The larger gains on tool-use tasks arise because correctness there is clearly defined by tool schemas, Action /Action Input formats, and argument constraints; suc-cessful demonstrations are highly standardized and easily reusable across samples, yielding cleaner distillation signals and more stable correction. In contrast, structured knowledge in STEM tasks is more tightly coupled with problem-specific content, making it less reusable and leading to compar-atively more moderate gains. 
+
+Generalization across model families and scales. On Qwen3-4B and Olmo3-7B, DRIFT again attains the highest average accuracy (74.6% and 72.8%), and its advantage on tool use remains the largest (leading the second-best by 7.0 and 7.3 points, respectively). We highlight two observations. First, the gain amplifies as the starting point weakens: on Olmo3-7B (base 30.5%), DRIFT improves Table 1: Comparison of different post-training methods based on Qwen3-8B, reported as mean@16 accuracy (%). Results marked with ∗ are cited from prior work. Bold and underlined values indi-cate the best and second-best results, respectively. Green subscripts denote absolute gains over the reproduced SDPO baseline.                                                                   
+
+> Method Biology Chemistry Material Physics Tool Use Average
+> Qwen3-8B 30.8 41.2 58.9 59.2 57.5 49.5 + SDPO ∗56.8 80.9 78.4 75.6 68.5 72.0 + SDPO 64.8 78.9 76.1 72.7 67.7 72.0 + GRPO ∗59.9 74.5 77.1 72.7 65.7 70.0 + GRPO 47.4 65.6 73.5 60.6 67.7 63.0 + SRPO ∗72.8 83.0 81.5 78.4 71.2 77.4 + DistIL ∗66.6 80.8 76.2 80.8 ––+ SC-SDPO ∗65.4 80.6 79.3 81.6 67.3 74.8 + PGPO ∗61.3 77.6 78.7 77.6 ––
+> + DRIFT (Ours) 74.4 +9 .682.0 +3 .181.4 +5 .380.5 +7 .879.2 +11 .579.5 +7 .5
+
+10 Beike Language and Intelligence 
+
+by 42.3 points and leads online GRPO by 12 points, because when positive samples are scarce, the privileged replay from the success buffer fills exactly the void left by GRPO’s advantage collapse. Second, the lead over the strongest baseline SRPO widens with scale (+0.4 at 4B, +2.1 at 8B), consistent with the observation that self-teaching ability emerges with increasing model scale. 4.3 TRAINING DYNAMICS 
+
+Training dynamics. Figures 4 and 5 summarize the evolution of DRIFT during training. Actor entropy rises during early exploration and stabilizes after approximately 200 steps, while response length remains bounded. The success buffer grows rapidly before approaching saturation, with intermittent fallback hits indicating selective reuse of historical successes. At the same time, the easy-problem fraction gradually increases, the medium group remains dominant, and the hard frac-tion declines before stabilizing. Together, these trends show that DRIFT progressively shifts from broad exploration toward stable refinement while continuously adapting its routing decisions to the model’s evolving capability. Table 2: Comparison of different post-training methods on Qwen3-4B and Olmo3-7B, reported as mean@16 accuracy (%). We use the same notation as in Table 1. 
+
+Method Biology Chemistry Material Physics Tool Use Average 
+
+Qwen3-4B 30.8 43.6 61.2 59.8 57.9 50.7 + SDPO ∗ 54.0 77.3 74.3 66.7 61.1 66.7 + GRPO ∗ 55.5 78.3 80.1 71.9 62.9 69.7 + SRPO ∗ 65.8 82.7 81.3 74.0 67.0 74.2 
+
++ DRIFT (Ours) 64.3 +10 .3 79.6 +2 .3 82.8 +8 .5 72.2 +5 .5 74.0 +12 .9 74.6 +7 .9
+
+Olmo3-7B 16.2 22.8 36.7 37.7 39.3 30.5 + SDPO ∗ 52.8 80.0 79.1 66.1 62.1 68.0 + GRPO ∗ 49.8 57.5 73.5 62.7 60.6 60.8 + SC-SDPO ∗ 55.9 81.5 79.1 71.1 62.9 70.1 + DistIL ∗ 55.3 81.0 76.9 74.5 – –
+
++ DRIFT (Ours) 61.3 +8 .5 82.0 +2 .0 79.2 +0 .1 71.3 +5 .2 70.2 +8 .1 72.8 +4 .8
+
+Figure 4: Training dynamics of DRIFT (Qwen3-8B in tooluse) 
+
+11 Beike Language and Intelligence 
+
+Figure 5: Difficulty-routing dynamics (Qwen3-8B in tooluse) 
+
+4.4 ABLATION STUDIES 
+
+Component ablation. Figure 6 compares the mean@16 trajectories of DRIFT and two ablated variants on Tool Use. Although all variants improve rapidly at the beginning of training, their be-havior diverges in the later stage. The complete method continues to improve and reaches the high-est final accuracy, whereas removing difficulty routing leads to a sustained decline and removing the success buffer causes performance to plateau at a lower level. These results show that difficulty-aware signal allocation and historical success reuse are both important for stable long-term improve-ment. 
+
+Full ablation comparison. Table 3 confirms that every major component of DRIFT contributes to the final performance. Removing difficulty routing reduces the average score from 79.5% to 
+
+Figure 6: Ablation study on Tool Use of Qwen3-8B 
+
+Table 3: Ablation study of DRIFT on Qwen3-8B, reported as mean@16 accuracy (%). Bold values indicate the best result, and underlined values indicate the second-best result in each column.                                                 
+
+> Method Biology Chemistry Material Physics Tool Use Average
+> Qwen3-8B 30.8 41.2 58.9 59.2 57.5 49.5 + SDPO 64.8 78.9 76.1 72.7 67.7 72.0 + GRPO 47.4 65.6 73.5 60.6 67.7 63.0 + DRIFT w/o difficulty routing 66.2 80.0 77.2 73.7 73.4 74.1 + DRIFT w/o success buffer 64.9 79.9 78.8 77.8 73.2 74.9 + DRIFT w/o warm-up 58.1 78.5 75.1 74.3 72.4 71.7
+> + DRIFT (Ours) 74.4 82.0 81.4 80.5 79.2 79.5
+
+12 Beike Language and Intelligence 
+
+74.1%, with especially clear drops on biology and tool use, indicating that problem-level allocation of RL and distillation signals is important for focusing optimization on the most learnable region. Removing the success buffer also causes a substantial degradation (74.9% average), showing that cross-batch reuse of successful trajectories provides important privileged supervision when in-batch positives are sparse. The warm-up stage is likewise necessary: without it, performance falls to 71.7%, and the drop is particularly severe on biology, suggesting that early-stage capability boot-strapping and buffer accumulation are critical for stable later optimization. Overall, the complete DRIFT design achieves the best result on all five benchmarks, showing that the gains come from the joint effect of curriculum warm-up, historical success reuse, and difficulty-aware routing rather than from any single component alone. 
+
+# 5 CONCLUSION 
+
+We identified a limitation shared by reinforcement learning and self-distillation approaches to LLM self-improvement: both lack a mechanism that tracks learning progress at the problem level and allocates optimization signals accordingly, so that easy problems keep receiving redundant updates, hard problems yield unreliable supervision, and high-value boundary cases remain under-explored. We then proposed DRIFT, an online self-evolution policy optimization framework that coordinates self-distillation and reinforcement learning according to the model’s estimated mastery of each prob-lem. At its core, Difficulty Routing uses smoothed historical pass rates to characterize problem-level learning state and to modulate the strength of reinforcement-learning updates, while Rhythm-Gated Structured Exploration refines credit assignment at the token level, concentrating exploratory up-dates on the critical reasoning positions that most directly determine correctness. We further intro-duced a Success Buffer that retains and reuses high-quality correct trajectories as privileged distil-lation references, and organized the whole process within a two-stage curriculum that progresses from rapid capability acquisition toward stable policy evolution. Empirically, DRIFT consistently surpasses the peak performance of both GRPO and SDPO across all evaluated metrics, reaching an average accuracy of 79.5% on five reasoning benchmarks and outperforming the strongest prior baseline by 2.1 points. The gains are most pronounced on tool use, where feedback is sparse and the decisive tokens are embedded in long trajectories—precisely the regime that DRIFT’s privileged correction and rhythm-gated exploration are designed to address. DRIFT further generalizes across model families and scales: its advantage amplifies as the starting capability weakens, since the suc-cess buffer supplies privileged supervision exactly where reinforcement learning collapses for lack of positive samples, while its lead over the strongest baseline widens with model scale, consistent with self-teaching ability emerging as models grow. More broadly, DRIFT suggests that effective self-evolution depends less on the choice between reinforcement learning and self-distillation than on when and where each signal is applied. By continually tracking what a model has already mas-tered and concentrating updates on the problems and the tokens that matter most, DRIFT turns a model’s own successful experience into a stable, self-reinforcing source of supervision. We view problem-level learning-state tracking and token-level credit shaping as general principles for self-evolution, and hope they inform future methods that let language models improve from their own experience without external expert supervision. 
+
+# REFERENCES 
+
+Rishabh Agrawal, Jacob Fein-Ashley, and Paria Rashidinejad. Reinforcement learning from rich feedback with distributional dagger. arXiv preprint arXiv:2606.05152 , 2026. Andrei Baroian and Rutger Berger. Prompt replay: Speeding up grpo with on-policy reuse of high-signal prompts. arXiv preprint arXiv:2603.21177 , 2026. Yulin Chen, He He, and Chen Zhao. The unlearnability phenomenon in rlvr for language models, 2026. URL https://arxiv.org/abs/2605.16787 .Yue Cheng, Jiajun Zhang, Xiaohui Gao, Weiwei Xing, Zheng Wang, and Zhanxing Zhu. Mech-anistically interpreting the role of sample difficulty in rlvr for llms, 2026. URL https: //arxiv.org/abs/2605.28388 .13 Beike Language and Intelligence 
+
+Gheorghe Comanici, Eric Bieber, Mike Schaekermann, Ice Pasupat, Noveen Sachdeva, et al. Gemini 2.5: Pushing the frontier with advanced reasoning, multimodality, long context, and next genera-tion agentic capabilities. arXiv preprint arXiv:2507.06261 , 2025. DeepSeek-AI. DeepSeek-V4: Towards highly efficient million-token context intelligence. arXiv preprint arXiv:2606.19348 , 2026. URL https://arxiv.org/abs/2606.19348 .Kehua Feng, Keyan Ding, Weijie Wang, Xiang Zhuang, Zeyuan Wang, Ming Qin, Yu Zhao, Jianhua Yao, Qiang Zhang, and Huajun Chen. Sciknoweval: Evaluating multi-level scientific knowledge of large language models. arXiv preprint arXiv:2406.09098 , 2024. Yuqian Fu, Haohuan Huang, Kaiwen Jiang, Jiacai Liu, Zhuo Jiang, Yuanheng Zhu, and Dongbin Zhao. Revisiting on-policy distillation: Empirical failure modes and simple fixes. arXiv preprint arXiv:2603.25562 , 2026. URL https://arxiv.org/abs/2603.25562 .Yuxian Gu, Li Dong, Furu Wei, and Minlie Huang. MiniLLM: On-policy distillation of large lan-guage models. arXiv preprint arXiv:2306.08543 , 2023. URL https://arxiv.org/abs/ 2306.08543 .Daya Guo, Dejian Yang, Haowei Zhang, Junxiao Song, Ruoyu Zhang, Runxin Xu, Qihao Zhu, Shirong Ma, Peiyi Wang, Xiao Bi, et al. Deepseek-r1: Incentivizing reasoning capability in llms via reinforcement learning. arXiv preprint arXiv:2501.12948 , 2025. Jonas H¨ ubotter, Frederike L¨ ubeck, Lejs Behric, Anton Baumann, Marco Bagatella, Daniel Marta, Ido Hakimi, Idan Shenfeld, Thomas Kleine Buening, Carlos Guestrin, and Andreas Krause. Re-inforcement learning via self-distillation. arXiv preprint arXiv:2601.20802 , 2026. Aaron Jaech et al. Learning to reason with llms. arXiv preprint arXiv:2501.19393 , 2025. Woogyeol Jin, Taywon Min, Yongjin Yang, Dennis Wei, Yi Zhou, Swanand Ravindra Kadhe, Nathalie Baracaldo, and Kimin Lee. Entropy-aware on-policy distillation of language models. 
+
+arXiv preprint arXiv:2603.07079 , 2026. URL https://arxiv.org/abs/2603.07079 .Gengsheng Li, Tianyu Yang, Junfeng Fang, Mingyang Song, Mao Zheng, Haiyun Guo, Dan Zhang, Jinqiao Wang, and Tat-Seng Chua. Unifying group-relative and self-distillation policy optimiza-tion via sample routing. arXiv preprint arXiv:2604.02288 , 2026a. Yaxuan Li, Yuxin Zuo, Bingxiang He, Jinqian Zhang, Chaojun Xiao, Cheng Qian, Tianyu Yu, Huan-ang Gao, Wenkai Yang, Zhiyuan Liu, and Ning Ding. Rethinking on-policy distillation of large language models: Phenomenology, mechanism, and recipe. arXiv preprint arXiv:2604.13016 ,2026b. URL https://arxiv.org/abs/2604.13016 .Long-Ji Lin. Self-improving reactive agents based on reinforcement learning, planning and teaching. 
+
+Machine Learning , 8(3–4):293–321, 1992. Zehao Liu, Yuanpu Cao, Jinghui Chen, and Vasant G. Honavar. Restoring the sweet spot: Pass-rate weighted self-distillation for llm reasoning. arXiv preprint arXiv:2605.27765 , 2026. Team Olmo et al. Olmo 3, 2026. URL https://arxiv.org/abs/2512.13961 .Leyi Pan, Shuchang Tao, Yunpeng Zhai, Lingzhe Zhang, Zhaoyang Liu, Bolin Ding, Aiwei Liu, and Lijie Wen. RLCSD: Reinforcement learning with contrastive on-policy self-distillation. arXiv preprint arXiv:2606.11709 , 2026. URL https://arxiv.org/abs/2606.11709 .Tom Schaul, John Quan, Ioannis Antonoglou, and David Silver. Prioritized experience replay. In 
+
+International Conference on Learning Representations , 2016. Zhihong Shao, Peiyi Wang, Qihao Zhu, Runxin Xu, Junxiao Song, Mingchuan Zhang, Y. K. Li, Y. Wu, and Daya Guo. Deepseekmath: Pushing the limits of mathematical reasoning in open language models. arXiv preprint arXiv:2402.03300 , 2024. Qiaoyu Tang, Ziliang Deng, Hongyu Lin, Xianpei Han, Qiao Liang, and Le Sun. Toolalpaca: Generalized tool learning for language models with 3000 simulated cases. arXiv preprint arXiv:2306.05301 , 2023. 14 Beike Language and Intelligence 
+
+Ke Wang, Yuning Wu, Haoran Liu, Chaoqun Jia, Devin Chen, and Kai Wei. Physics-guided policy optimization with self-distillation. arXiv preprint arXiv:2606.03620 , 2026. An Yang et al. Qwen3 technical report. arXiv preprint arXiv:2505.09388 , 2025. Runzhe Zhan, Yafu Li, Zhi Wang, Xiaoye Qu, Dongrui Liu, Jing Shao, Derek F. Wong, and Yu Cheng. Exgrpo: Learning to reason from experience. arXiv preprint arXiv:2510.02245 , 2026. Hongzhi Zhang, Jia Fu, Jingyuan Zhang, Kai Fu, Qi Wang, Fuzheng Zhang, and Guorui Zhou. Rlep: Reinforcement learning with experience replay for llm reasoning, 2025. URL https: //arxiv.org/abs/2507.07451 .Jixiao Zhang and Chunsheng Zuo. Grpo-lead: A difficulty-aware reinforcement learning approach for concise mathematical reasoning in language models. In Proceedings of the 2025 Conference on Empirical Methods in Natural Language Processing , pp. 5642–5654, 2025. Siyan Zhao, Zhihui Xie, Mengchen Liu, Jing Huang, Guan Pang, Feiyu Chen, and Aditya Grover. Self-distilled reasoner: On-policy self-distillation for large language models, 2026. URL https: //arxiv.org/abs/2601.18734 .
+
+# A APPENDIX 
+
+Figure 7: Validation performance on the STEM datasets. In addition to improvements in mean@16, best@16 also increases steadily throughout training. Table 4: Best@16 performance on Qwen3-8B. DRIFT outperforms SDPO and GRPO across all five tasks, with particularly pronounced gains on materials and tool use.                     
+
+> Method Biology Chemistry Material Physics Tool Use SDPO 78.8 89.4 80.4 91.6 73.4 GRPO 80.0 93.5 82.9 87.2 70.8
+> DRIFT 80.1 94.3 87.9 93.8 83.7
+
+15
