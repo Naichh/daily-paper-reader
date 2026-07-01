@@ -6,53 +6,31 @@
 </div>
 
 ## 每次日报
-- 最新运行日期：2026-06-30
-- 运行时间：2026-06-30 21:58:14 UTC
+- 最新运行日期：2026-07-01
+- 运行时间：2026-07-01 21:27:52 UTC
 - 运行状态：成功
-- 本次总论文数：11
-- 精读区：6
-- 速读区：5
+- 本次总论文数：3
+- 精读区：2
+- 速读区：1
 
 ### 今日简报（AI）
-今日推荐重点：多教师在线蒸馏技术（MOPD & SEAD）实现LLM后训练能力集成，评分最高达10/10。此外，过程奖励信号塑造（PASS）和反事实信用分配（CRAFT）为强化学习与自蒸馏提供新思路。建议优先精读MOPD和SEAD两篇，再速读PASS以了解过程监督与奖励设计的结合。
-- 详情：[/202606/30/README](/202606/30/README)
+1) 今日精读两篇高分论文，分别聚焦噪声专家反馈下的在线策略蒸馏与智能体技能的信用感知双向自我蒸馏，并速读一篇LLM蒸馏缩放定律。  
+2) 最值得关注的结论：噪声反馈场景中，在线策略蒸馏显著优于行为克隆；UCOB通过双向蒸馏实现技能持续进化与利用。  
+3) 普通读者可深入研究策略蒸馏与反馈机制的结合点，并关注缩放定律对特定任务蒸馏效率的指导。
+- 详情：[/202607/01/README](/202607/01/README)
 
 ### 精读区论文标签
-1. [MOPD: Multi-Teacher On-Policy Distillation for Capability Integration in LLM Post-Training](/202606/30/2606.30406v1-mopd-multi-teacher-on-policy-distillation-for-capability-integration-in-llm-post-training)  
+1. [Behavior Cloning is Not All You Need: The Optimality of On-Policy Distillation for Noisy Expert Feedback](/202607/01/2606.30923v1-behavior-cloning-is-not-all-you-need-the-optimality-of-on-policy-distillation-for-noisy-expert-feedback)  
    标签：评分：10.0/10、query:policy-dist
-   evidence：标题和摘要直接关注多教师on-policy蒸馏用于LLM后训练
-2. [SEAD: Competence-Aware On-Policy Distillation via Entropy-Guided Supervision](/202606/30/2606.28562v1-sead-competence-aware-on-policy-distillation-via-entropy-guided-supervision)  
-   标签：评分：9.0/10、query:policy-dist
-   evidence：在策略蒸馏和后训练，熵引导方法
-3. [PHF: Privileged Hidden Flow for On-Policy Self-Distillation](/202606/30/2606.29340v1-phf-privileged-hidden-flow-for-on-policy-self-distillation)  
-   标签：评分：9.0/10、query:policy-dist
-   evidence：同策略自蒸馏中的特权隐藏流
-4. [ARKD: Adaptive Reinforcement Learning-Guided Bidirectional KL Divergence Distillation for Text Generation](/202606/30/2606.29869v1-arkd-adaptive-reinforcement-learning-guided-bidirectional-kl-divergence-distillation-for-text-generation)  
-   标签：评分：9.0/10、query:policy-dist
-   evidence：强化学习引导的自适应KL散度蒸馏用于文本生成
-5. [Building Multi-Task Agentic LLMs via Two-Phase Distillation](/202606/30/2606.30044v1-building-multi-task-agentic-llms-via-two-phase-distillation)  
-   标签：评分：9.0/10、query:policy-dist
-   evidence：在策略蒸馏用于多任务大语言模型智能体
-6. [DOPD: Dual On-policy Distillation](/202606/30/2606.30626v1-dopd-dual-on-policy-distillation)  
-   标签：评分：9.0/10、query:policy-dist
-   evidence：双重同策略蒸馏解决特权幻觉
+   evidence：直接讨论语言模型训练中基于噪声专家反馈的在线策略蒸馏
+2. [UCOB: Learning to Utilize and Evolve Agentic Skills via Credit-Aware On-Policy Bidirectional Self-Distillation](/202607/01/2606.29502v1-ucob-learning-to-utilize-and-evolve-agentic-skills-via-credit-aware-on-policy-bidirectional-self-distillation)  
+   标签：评分：8.0/10、query:policy-dist
+   evidence：基于信用感知的在线策略双向自蒸馏
 
 ### 速读区论文标签
-1. [Process Advantage Signal Shaping: A Paradigm-Agnostic Middleware for Process-Supervised RL in LLM Reasoners](/202606/30/2606.29296v1-process-advantage-signal-shaping-a-paradigm-agnostic-middleware-for-process-supervised-rl-in-llm-reasoners)  
-   标签：评分：8.0/10、query:policy-dist
-   evidence：提到用于RL过程监督的on-policy蒸馏KL信号
-2. [Behavior Uncloning: Distilling Mode Redirection into Policy Weights without Inference-Time Steering](/202606/30/2606.29201v1-behavior-uncloning-distilling-mode-redirection-into-policy-weights-without-inference-time-steering)  
-   标签：评分：7.0/10、query:policy-dist
-   evidence：将模式重定向蒸馏到策略权重的策略蒸馏方法
-3. [CRAFT: Counterfactual Credit Assignment from Free Sibling Rollouts for Self-Distilled Agentic Reinforcement Learning](/202606/30/2606.29476v1-craft-counterfactual-credit-assignment-from-free-sibling-rollouts-for-self-distilled-agentic-reinforcement-learning)  
-   标签：评分：7.0/10、query:policy-dist
-   evidence：关注自蒸馏智能体RL，利用兄弟rollout进行反事实信用分配
-4. [DRIFT: Difficulty Routing Self-DIstillation with Rhythm-Gated Exploration and Success BuFfer Training](/202606/30/2606.30345v1-drift-difficulty-routing-self-distillation-with-rhythm-gated-exploration-and-success-buffer-training)  
-   标签：评分：7.0/10、query:policy-dist
-   evidence：自蒸馏与强化学习结合用于LLM自我改进
-5. [KbSD: Knowledge Boundary aware Self-Distillation for Behavioral Calibration in Agentic Search](/202606/30/2606.29863v1-kbsd-knowledge-boundary-aware-self-distillation-for-behavioral-calibration-in-agentic-search)  
+1. [Scaling Laws for Task-Specific LLM Distillation](/202607/01/2606.24747v1-scaling-laws-for-task-specific-llm-distillation)  
    标签：评分：6.0/10、query:policy-dist
-   evidence：结合强化学习引导的自蒸馏框架用于智能体搜索行为校准
+   evidence：LLM蒸馏的经验缩放法则，包括logit和LoRA蒸馏
 
 
 <div class="dpr-home-promo-card">
