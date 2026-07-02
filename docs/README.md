@@ -6,31 +6,27 @@
 </div>
 
 ## 每次日报
-- 最新运行日期：2026-07-01
-- 运行时间：2026-07-01 21:27:52 UTC
+- 最新运行日期：2026-07-02
+- 运行时间：2026-07-02 20:49:43 UTC
 - 运行状态：成功
-- 本次总论文数：3
-- 精读区：2
-- 速读区：1
+- 本次总论文数：2
+- 精读区：0
+- 速读区：2
 
 ### 今日简报（AI）
-1) 今日精读两篇高分论文，分别聚焦噪声专家反馈下的在线策略蒸馏与智能体技能的信用感知双向自我蒸馏，并速读一篇LLM蒸馏缩放定律。  
-2) 最值得关注的结论：噪声反馈场景中，在线策略蒸馏显著优于行为克隆；UCOB通过双向蒸馏实现技能持续进化与利用。  
-3) 普通读者可深入研究策略蒸馏与反馈机制的结合点，并关注缩放定律对特定任务蒸馏效率的指导。
-- 详情：[/202607/01/README](/202607/01/README)
+今日速读两篇论文，聚焦LLM强化学习与扩散模型微调。值得关注《The Mirage of Optimizing Training Policies》揭示单调推理策略才是LLM强化学习的真正目标。建议优先精读该文以理解训练政策优化误区。
+- 详情：[/202607/02/README](/202607/02/README)
 
 ### 精读区论文标签
-1. [Behavior Cloning is Not All You Need: The Optimality of On-Policy Distillation for Noisy Expert Feedback](/202607/01/2606.30923v1-behavior-cloning-is-not-all-you-need-the-optimality-of-on-policy-distillation-for-noisy-expert-feedback)  
-   标签：评分：10.0/10、query:policy-dist
-   evidence：直接讨论语言模型训练中基于噪声专家反馈的在线策略蒸馏
-2. [UCOB: Learning to Utilize and Evolve Agentic Skills via Credit-Aware On-Policy Bidirectional Self-Distillation](/202607/01/2606.29502v1-ucob-learning-to-utilize-and-evolve-agentic-skills-via-credit-aware-on-policy-bidirectional-self-distillation)  
-   标签：评分：8.0/10、query:policy-dist
-   evidence：基于信用感知的在线策略双向自蒸馏
+- 本次无精读推荐。
 
 ### 速读区论文标签
-1. [Scaling Laws for Task-Specific LLM Distillation](/202607/01/2606.24747v1-scaling-laws-for-task-specific-llm-distillation)  
+1. [The Mirage of Optimizing Training Policies: Monotonic Inference Policies as the Real Objective for LLM Reinforcement Learning](/202607/02/2606.29526v1-the-mirage-of-optimizing-training-policies-monotonic-inference-policies-as-the-real-objective-for-llm-reinforcement-learning)  
+   标签：评分：7.0/10、query:policy-dist
+   evidence：探讨LLM后训练中的训练-推理不匹配问题，与在线策略相关
+2. [Diffusion Fine-tuning with Rewarded Moment Matching Distillation](/202607/02/2606.30414v1-diffusion-fine-tuning-with-rewarded-moment-matching-distillation)  
    标签：评分：6.0/10、query:policy-dist
-   evidence：LLM蒸馏的经验缩放法则，包括logit和LoRA蒸馏
+   evidence：扩散模型的在线策略强化学习蒸馏
 
 
 <div class="dpr-home-promo-card">
