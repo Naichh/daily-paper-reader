@@ -6,27 +6,40 @@
 </div>
 
 ## 每次日报
-- 最新运行日期：2026-07-02
-- 运行时间：2026-07-02 20:49:43 UTC
+- 最新运行日期：2026-07-03
+- 运行时间：2026-07-03 21:26:55 UTC
 - 运行状态：成功
-- 本次总论文数：2
-- 精读区：0
+- 本次总论文数：6
+- 精读区：4
 - 速读区：2
 
 ### 今日简报（AI）
-今日速读两篇论文，聚焦LLM强化学习与扩散模型微调。值得关注《The Mirage of Optimizing Training Policies》揭示单调推理策略才是LLM强化学习的真正目标。建议优先精读该文以理解训练政策优化误区。
-- 详情：[/202607/02/README](/202607/02/README)
+今日精读4篇、速读2篇，聚焦自蒸馏与持续训练方向。  
+最值得关注的是满分论文《纯化OPSD：无需失去思考能力的在线自蒸馏》，以及9分论文《密度≠更好：在线自蒸馏对持续后训练的限制》。  
+建议首选精读满分论文掌握核心方法，再结合速读中《学会选择而非重学：硬路由推理LoRA混合》拓展混合训练思路。
+- 详情：[/202607/03/README](/202607/03/README)
 
 ### 精读区论文标签
-- 本次无精读推荐。
+1. [Purified OPSD: On-Policy Self-Distillation Without Losing How to Think](/202607/03/2607.02234v1-purified-opsd-on-policy-self-distillation-without-losing-how-to-think)  
+   标签：评分：10.0/10、query:policy-dist
+   evidence：直接研究LLM后训练中的在线策略自蒸馏
+2. [Denser $\neq$ Better: Limits of On-Policy Self-Distillation for Continual Post-Training](/202607/03/2607.01763v1-denser-neq-better-limits-of-on-policy-self-distillation-for-continual-post-training)  
+   标签：评分：9.0/10、query:policy-dist
+   evidence：研究连续后训练中的在线自蒸馏
+3. [Neuron-Aware Data Selection for Annotation-Free LLM Self-Distillation](/202607/03/2607.02460v1-neuron-aware-data-selection-for-annotation-free-llm-self-distillation)  
+   标签：评分：9.0/10、query:policy-dist
+   evidence：针对LLM后训练的on-policy自蒸馏
+4. [DemoPSD: Disagreement-Modulated Policy Self-Distillation](/202607/03/2607.02502v1-demopsd-disagreement-modulated-policy-self-distillation)  
+   标签：评分：9.0/10、query:policy-dist
+   evidence：提出基于分歧调制的策略自蒸馏方法
 
 ### 速读区论文标签
-1. [The Mirage of Optimizing Training Policies: Monotonic Inference Policies as the Real Objective for LLM Reinforcement Learning](/202607/02/2606.29526v1-the-mirage-of-optimizing-training-policies-monotonic-inference-policies-as-the-real-objective-for-llm-reinforcement-learning)  
+1. [Learning to Select, Not Relearn: Hard-Routed Mixtures of Reasoning LoRAs](/202607/03/2606.31413v1-learning-to-select-not-relearn-hard-routed-mixtures-of-reasoning-loras)  
    标签：评分：7.0/10、query:policy-dist
-   evidence：探讨LLM后训练中的训练-推理不匹配问题，与在线策略相关
-2. [Diffusion Fine-tuning with Rewarded Moment Matching Distillation](/202607/02/2606.30414v1-diffusion-fine-tuning-with-rewarded-moment-matching-distillation)  
+   evidence：结合可验证反馈的强化学习与推理轨迹蒸馏，组合LoRA专家
+2. [Procedural Memory Distillation: Online Reflection for Self-Improving Language Models](/202607/03/2607.01480v1-procedural-memory-distillation-online-reflection-for-self-improving-language-models)  
    标签：评分：6.0/10、query:policy-dist
-   evidence：扩散模型的在线策略强化学习蒸馏
+   evidence：用于自改进语言模型的过程记忆蒸馏
 
 
 <div class="dpr-home-promo-card">
