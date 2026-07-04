@@ -1,6 +1,9 @@
 * <a class="dpr-sidebar-root-link" href="#/">首页</a>
 * <a class="dpr-sidebar-root-link dpr-sidebar-noactive-link" href="javascript:void(0)" data-dpr-hash="#/tutorial/README">使用教程</a>
 * Daily Papers
+  * 2026-07-04 <!--dpr-date:20260704-->
+    * 速读区
+      * <a class="dpr-sidebar-item-link dpr-sidebar-item-structured" href="#/202607/04/2607.01480v1-procedural-memory-distillation-online-reflection-for-self-improving-language-models" data-sidebar-item="{&quot;title&quot;: &quot;Procedural Memory Distillation: Online Reflection for Self-Improving Language Models&quot;, &quot;link&quot;: &quot;https://arxiv.org/abs/2607.01480v1-procedural-memory-distillation-online-reflection-for-self-improving-language-models&quot;, &quot;score&quot;: &quot;7.0&quot;, &quot;tags&quot;: [{&quot;kind&quot;: &quot;query&quot;, &quot;label&quot;: &quot;policy-dist&quot;}], &quot;evidence&quot;: &quot;利用跨回合信号的过程记忆蒸馏&quot;}">Procedural Memory Distillation: Online Reflection for Self-Improving Language Models</a>
   * 2026-07-03 <!--dpr-date:20260703-->
     * 精读区
       * <a class="dpr-sidebar-item-link dpr-sidebar-item-structured" href="#/202607/03/2607.02234v1-purified-opsd-on-policy-self-distillation-without-losing-how-to-think" data-sidebar-item="{&quot;title&quot;: &quot;Purified OPSD: On-Policy Self-Distillation Without Losing How to Think&quot;, &quot;link&quot;: &quot;https://arxiv.org/abs/2607.02234v1-purified-opsd-on-policy-self-distillation-without-losing-how-to-think&quot;, &quot;score&quot;: &quot;10.0&quot;, &quot;tags&quot;: [{&quot;kind&quot;: &quot;query&quot;, &quot;label&quot;: &quot;policy-dist&quot;}], &quot;evidence&quot;: &quot;直接研究LLM后训练中的在线策略自蒸馏&quot;}">Purified OPSD: On-Policy Self-Distillation Without Losing How to Think</a>

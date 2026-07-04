@@ -6,40 +6,24 @@
 </div>
 
 ## 每次日报
-- 最新运行日期：2026-07-03
-- 运行时间：2026-07-03 21:26:55 UTC
+- 最新运行日期：2026-07-04
+- 运行时间：2026-07-04 20:10:08 UTC
 - 运行状态：成功
-- 本次总论文数：6
-- 精读区：4
-- 速读区：2
+- 本次总论文数：1
+- 精读区：0
+- 速读区：1
 
 ### 今日简报（AI）
-今日精读4篇、速读2篇，聚焦自蒸馏与持续训练方向。  
-最值得关注的是满分论文《纯化OPSD：无需失去思考能力的在线自蒸馏》，以及9分论文《密度≠更好：在线自蒸馏对持续后训练的限制》。  
-建议首选精读满分论文掌握核心方法，再结合速读中《学会选择而非重学：硬路由推理LoRA混合》拓展混合训练思路。
-- 详情：[/202607/03/README](/202607/03/README)
+今日速读一篇关于语言模型自我改进的论文，提出程序性记忆蒸馏与在线反思机制。核心方向：让语言模型通过反思自身过程持续提升，无需额外监督数据。建议关注该方法与传统微调的区别，尝试在小模型上验证效果。
+- 详情：[/202607/04/README](/202607/04/README)
 
 ### 精读区论文标签
-1. [Purified OPSD: On-Policy Self-Distillation Without Losing How to Think](/202607/03/2607.02234v1-purified-opsd-on-policy-self-distillation-without-losing-how-to-think)  
-   标签：评分：10.0/10、query:policy-dist
-   evidence：直接研究LLM后训练中的在线策略自蒸馏
-2. [Denser $\neq$ Better: Limits of On-Policy Self-Distillation for Continual Post-Training](/202607/03/2607.01763v1-denser-neq-better-limits-of-on-policy-self-distillation-for-continual-post-training)  
-   标签：评分：9.0/10、query:policy-dist
-   evidence：研究连续后训练中的在线自蒸馏
-3. [Neuron-Aware Data Selection for Annotation-Free LLM Self-Distillation](/202607/03/2607.02460v1-neuron-aware-data-selection-for-annotation-free-llm-self-distillation)  
-   标签：评分：9.0/10、query:policy-dist
-   evidence：针对LLM后训练的on-policy自蒸馏
-4. [DemoPSD: Disagreement-Modulated Policy Self-Distillation](/202607/03/2607.02502v1-demopsd-disagreement-modulated-policy-self-distillation)  
-   标签：评分：9.0/10、query:policy-dist
-   evidence：提出基于分歧调制的策略自蒸馏方法
+- 本次无精读推荐。
 
 ### 速读区论文标签
-1. [Learning to Select, Not Relearn: Hard-Routed Mixtures of Reasoning LoRAs](/202607/03/2606.31413v1-learning-to-select-not-relearn-hard-routed-mixtures-of-reasoning-loras)  
+1. [Procedural Memory Distillation: Online Reflection for Self-Improving Language Models](/202607/04/2607.01480v1-procedural-memory-distillation-online-reflection-for-self-improving-language-models)  
    标签：评分：7.0/10、query:policy-dist
-   evidence：结合可验证反馈的强化学习与推理轨迹蒸馏，组合LoRA专家
-2. [Procedural Memory Distillation: Online Reflection for Self-Improving Language Models](/202607/03/2607.01480v1-procedural-memory-distillation-online-reflection-for-self-improving-language-models)  
-   标签：评分：6.0/10、query:policy-dist
-   evidence：用于自改进语言模型的过程记忆蒸馏
+   evidence：利用跨回合信号的过程记忆蒸馏
 
 
 <div class="dpr-home-promo-card">
