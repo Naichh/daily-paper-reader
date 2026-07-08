@@ -1,0 +1,1472 @@
+Title: SAD-LoRA: Spectral Alignment for Low-Rank Knowledge Distillation
+
+URL Source: https://arxiv.org/pdf/2607.04306v1
+
+Published Time: Tue, 07 Jul 2026 02:12:09 GMT
+
+Number of Pages: 15
+
+Markdown Content:
+# SAD-LoRA: Spectral Alignment for Low-Rank Knowledge Distillation 
+
+Omer Tariq 1 Syed Muhammad Raza 1 Jeongbae Son 1
+
+## Abstract 
+
+Distilling a fine-tuned teacher into a LoRA-adapted student is a standard recipe for parameter-efficient compression, but output-level KD does not explicitly control which rank-r weight sub-space the adapter occupies. We propose SAD-LoRA (Spectral Alignment Distillation), which selects this subspace from the data-weighted student-space reference update ∆WT Σ1/2 
+
+> x
+
+and maintains it during training via a differentiable principal-angle loss on span( B). We show that the data-weighted distillation error decom-poses exactly into subspace misalignment, within-subspace coefficient mismatch, and irreducible rank residual; standard KD can affect the first term only indirectly through output gradients. On controlled synthetic problems with a flat teacher spectrum, SAD-LoRA reduces the subspace-misalignment term from 51% to nearly zero and lifts final subspace alignment from 0.49 to 1.00 .On RoBERTa-large to RoBERTa-base distillation across six GLUE tasks, SAD-LoRA improves rank efficiency: at r=4 , it matches or beats the strongest included spectral baseline on five of six tasks, and at r=8 it gives the best result on SST-2 and CoLA. Ablations identify subspace alignment as the load-bearing component, while coefficient matching is auxiliary. 
+
+## 1. Introduction 
+
+Parameter-efficient fine-tuning has become standard for adapting large pretrained models. Among existing ap-proaches (Han et al., 2024), low-rank adaptation (LoRA) is particularly attractive because it freezes pretrained weights and learns a task-specific update ∆W = BA , with B ∈
+
+Rdout ×r , A ∈ Rr×din , and r ≪ min( dout , d in ) (Hu et al., 2022). In parallel, knowledge distillation (KD) compresses 
+
+> 1
+
+Neubility Inc, Seoul, South Korea. Correspondence to: Omer Tariq <omer.tariq@neubility.co.kr >.
+
+Proceedings of the 43 rd International Conference on Machine Learning , Seoul, South Korea. PMLR 306, 2026. Copyright 2026 by the author(s). 
+
+a stronger teacher into a smaller or capacity-constrained student (Hinton et al., 2015; Gou et al., 2021). Combining LoRA with KD is therefore natural for efficient compres-sion: the student receives teacher supervision while only a low-rank update is trained (Azimi et al., 2024; Yang et al., 2024a). This combination, however, leaves a structural question unresolved. Standard KD objectives operate on logits or intermediate activations, while LoRA constrains the student to a rank-r weight subspace. The KD loss can reduce output discrepancy without explicitly determining which r direc-tions the adapter should occupy. Because the rank-r student cannot represent every direction of the teacher update, a mis-aligned column space of B wastes part of the rank budget on directions that are off-target with respect to the teacher’s task-specific transformation. We refer to this failure mode as subspace misalignment : a distillation error component that is invisible to output-level KD but irreducible without rotating the adapter’s column space. Existing spectral LoRA methods address adjacent but dis-tinct problems: they initialize or allocate adapters using the spectrum of the pretrained weight matrix (Meng et al., 2024; Wang et al., 2025; B ¨uy ¨ukaky ¨uz, 2024), activation-aware pretrained-weight decompositions (Yang et al., 2024b), or sensitivity-based subset selection (Zhong et al., 2024). These methods provide useful starting points, but they do not explicitly preserve a teacher-update subspace during distillation; after initialization, span( B) can still drift un-der task and KD gradients. The central issue is therefore not only how to initialize LoRA, but how to maintain the relevant low-rank subspace throughout training (Fig. 1). This paper studies LoRA distillation from a spectral ap-proximation perspective. Let W (ℓ)0 be a pretrained student weight matrix and let W (ℓ) 
+
+> T
+
+denote a task-adapted reference weight in the same student parameter space, defining the student-space update ∆W (ℓ) 
+
+> T
+
+= W (ℓ) 
+
+> T
+
+− W (ℓ)0 . A rank-r
+
+LoRA student approximates this update by B(ℓ)A(ℓ). Ap-proximation quality depends not only on the singular val-ues of ∆W (ℓ) 
+
+> T
+
+, but also on whether span( B(ℓ)) aligns with the dominant output-side directions of the update under the data distribution. Because distillation is evaluated on data, the relevant spectral object is the data-weighted up-date fW (ℓ) 
+
+> T
+
+= ∆ W (ℓ) 
+
+> T
+
+(Σ (ℓ) 
+
+> x
+
+)1/2, where Σ(ℓ) 
+
+> x
+
+is the layer-input 1               
+
+> arXiv:2607.04306v1 [cs.LG] 5 Jul 2026 SAD-LoRA: Spectral Alignment for Low-Rank Knowledge Distillation
+> Figure 1. Three regimes for low-rank distillation. (a) Standard KD+LoRA may place span( B)away from the teacher subspace
+> span( eUT,r ), wasting rank budget. (b) Spectral initialization aligns the adapter at t= 0 but does not constrain later subspace drift. (c) SAD-LoRA combines spectral initialization with a continuous alignment loss Lalign that encourages span( B)≈span( eUT,r )
+> throughout training.
+
+covariance. We propose SAD-LoRA, which turns alignment with the leading left singular subspace of fW (ℓ) 
+
+> T
+
+into a training ob-jective. SAD-LoRA augments KD with a Grassmannian principal-angle loss on span( B) and, optionally, a within-subspace coefficient-matching term. We show that the data-weighted distillation error decomposes exactly into subspace misalignment, coefficient mismatch, and rank residual; at fixed rank, only the first two are reducible by changing B
+
+and A. Standard KD can affect the subspace term only indi-rectly through output gradients, whereas SAD-LoRA targets it explicitly. 
+
+Contributions. 
+
+1. We formulate LoRA-based knowledge distillation as a data-weighted low-rank approximation problem and prove an exact three-term error decomposition (The-orem 4.1) that isolates subspace misalignment as a distinct, reducible source of error. 2. We identify the optimal rank-r adapter subspace as span( eU (ℓ) 
+
+> T,r
+
+), the leading left singular subspace of ∆W (ℓ) 
+
+> T
+
+(Σ (ℓ) 
+
+> x
+
+)1/2, and derive a layerwise rank-sufficiency criterion from its spectral tail (Proposi-tions 4.2–4.3). 3. We introduce SAD-LoRA, which uses a differentiable principal-angle alignment loss Lalign and an optional coefficient-matching loss Lcoeff to keep the LoRA adapter aligned with the data-weighted teacher-update subspace during distillation. 4. We validate SAD-LoRA on controlled synthetic prob-lems, where the decomposition can be checked exactly, and on RoBERTa-large to RoBERTa-base distillation across six GLUE tasks, emphasizing rank efficiency and alignment-versus-coefficient ablations. 
+
+## 2. Related Work 
+
+PEFT and LoRA. Parameter-efficient fine-tuning adapts pretrained models by training small task-specific modules on top of frozen or near-frozen backbones (Houlsby et al., 2019; Li & Liang, 2021; Lester et al., 2021; Ben Zaken et al., 2022; Hu et al., 2022; Ding et al., 2023; Han et al., 2024). LoRA is widely used because it parameterizes a frozen-weight update as ∆W = BA , preserves the merged architecture, and adds no inference latency (Hu et al., 2022). Subsequent variants improve LoRA through adaptive rank allocation, weight decomposition, quantization, parameter sharing, and modified parameterizations (Zhang et al., 2023; Valipour et al., 2023; Liu et al., 2024; Kopiczko et al., 2024; Renduchintala et al., 2024; Li et al., 2024a; Dettmers et al., 2023; Li et al., 2024b; Xu et al., 2024). SAD-LoRA keeps the same low-rank adapter form, but changes the training objective by explicitly aligning the adapter subspace with a data-weighted teacher-update target. 
+
+Spectral and activation-aware LoRA. A closer line of work exploits spectral structure to improve LoRA. AdaLoRA uses an SVD-like parameterization and prunes less important singular components (Zhang et al., 2023); PiSSA initializes adapters from principal singular compo-nents of the pretrained weight W0 (Meng et al., 2024); MiLoRA uses minor components to preserve principal pre-trained knowledge (Wang et al., 2025); and OLoRA uses QR-based orthonormal initialization for optimization stabil-ity (B ¨uy ¨ukaky ¨uz, 2024). These methods show that adapter subspace matters, but they decompose the pretrained weight or its compressed approximation, not the teacher’s task-specific update. CorDA is closest to our data-weighted view: it orients pretrained-weight decomposition using input acti-vation covariance from calibration data (Yang et al., 2024b). Activation-aware quantization and low-rank reconstruction use related covariance-aware principles (Yuan et al., 2023; Lin et al., 2024). SAD-LoRA differs in the decomposed object: CorDA uses W0 bΣx, whereas SAD-LoRA uses the student-space teacher update ∆WT bΣ1/2 
+
+> x
+
+. For KD, this dis-tinction is central because the approximation target is the teacher’s task update rather than the pretrained weight. 
+
+KD with LoRA students. KD transfers teacher behav-ior through labels, logits, or intermediate representations (Hinton et al., 2015; Gou et al., 2021). Recent meth-ods combine KD with LoRA, including KD-LoRA for encoder benchmarks (Azimi et al., 2024), LLM-Neo for parameter-efficient LLM distillation (Yang et al., 2024a), and PC-LoRA for progressive compression (Hwang et al., 2024). These works establish KD +LoRA as an effec-tive compression paradigm, but treat the adapter mainly as a parameter-efficient training channel; they do not spec-ify which rank-r weight subspace should approximate the teacher update. Concurrent theory on low-rank KD provides 2SAD-LoRA: Spectral Alignment for Low-Rank Knowledge Distillation 
+
+Figure 2. Overview of SAD-LoRA. Layerwise spectral targets eU (ℓ) 
+
+> T,r
+
+and eσ(ℓ) 
+
+> T
+
+are computed offline from a same-architecture reference teacher and calibration activations, then frozen. During training, the student receives output-level KD while the LoRA column space is geometrically aligned to the frozen targets. Only the LoRA adapters {B(ℓ), A (ℓ)} are optimized. 
+
+sample-complexity rank guarantees (Soarez et al., 2026); our criterion is complementary because it is layerwise, data-dependent, and based on the spectral tail of fWT .
+
+Subspace drift and intruder dimensions. Shuttleworth et al. (2024) show that LoRA trained with standard ob-jectives can develop intruder dimensions: high-energy di-rections of BA that are orthogonal to both the pretrained spectrum and the teacher update and can drive forgetting. SAD-LoRA addresses the same geometric failure mode from the KD side: components of B outside the target data-weighted subspace increase Lalign , so any output-level gain must trade off against the alignment penalty. 
+
+## 3. Method 
+
+SAD-LoRA aligns the LoRA adapter with the data-weighted spectral subspace of a student-space teacher update. We first define the target update and its implicit SVD, then introduce the alignment and coefficient losses, the training objective, initialization, and computational cost. Fig. 2 gives an overview; full pseudocode is provided in Appendix A. 
+
+3.1. Setup and the Data-Weighted Teacher Update 
+
+Let W (ℓ)0 ∈ Rdout ×din denote the pretrained weight matrix at layer ℓ. A LoRA student freezes W (ℓ)0 and learns a rank-
+
+rℓ update 
+
+W (ℓ) 
+
+> S
+
+= W (ℓ)0 + B(ℓ)A(ℓ), rℓ ≪ min( dout , d in ), (1) with B(ℓ) ∈ Rdout ×rℓ and A(ℓ) ∈ Rrℓ×din . The LoRA scaling factor is absorbed into B(ℓ)A(ℓ). We suppress the layer index (ℓ) when context is clear. Let W (ℓ) 
+
+> T
+
+denote a task-adapted reference weight in the same parameter space as the student, and define the student-space reference up-date ∆W (ℓ) 
+
+> T
+
+= W (ℓ) 
+
+> T
+
+− W (ℓ)0 . When the functional teacher providing distillation logits is larger than the student, this same-architecture reference model supplies only the weight-space spectral target; the larger teacher still supplies LKD .This separates functional supervision from the student-space geometry required for spectral alignment. Output-level KD constrains predictions but not the rank-rℓ
+
+adapter subspace; SAD-LoRA derives this subspace from the teacher update under the downstream activation dis-tribution. For layer input x(ℓ) with covariance Σ(ℓ) 
+
+> x
+
+=
+
+E[x(ℓ)x(ℓ)⊤], the layerwise surrogate error satisfies 
+
+E(ℓ) = E
+
+h
+
+(∆ W (ℓ) 
+
+> T
+
+− B(ℓ)A(ℓ)) x(ℓ) 22
+
+i
+
+= (∆ W (ℓ) 
+
+> T
+
+− B(ℓ)A(ℓ)) (Σ (ℓ) 
+
+> x
+
+)1/2 2
+
+> F
+
+= fW (ℓ) 
+
+> T
+
+− B(ℓ)A(ℓ)(Σ (ℓ) 
+
+> x
+
+)1/2 2 
+
+> F
+
+,
+
+(2) where the data-weighted teacher update is 
+
+fW (ℓ) 
+
+> T
+
+= ∆ W (ℓ) 
+
+> T
+
+(Σ (ℓ) 
+
+> x
+
+)1/2. (3) The relevant spectral object is therefore fW (ℓ) 
+
+> T
+
+, not the un-weighted update alone. Let its compact SVD be 
+
+fW (ℓ) 
+
+> T
+
+= eU (ℓ) 
+
+> T
+
+eΣ(ℓ) 
+
+> T
+
+eV (ℓ)⊤ 
+
+> T
+
+, eσ(ℓ)1 ≥ eσ(ℓ)2 ≥ · · · . (4) 3SAD-LoRA: Spectral Alignment for Low-Rank Knowledge Distillation 
+
+The leading left singular vectors eU (ℓ) 
+
+> T,r
+
+:= eU (ℓ) 
+
+> T
+
+[: , 1: rℓ] define the target output-side subspace for B(ℓ).
+
+Implicit SVD. The covariance is never formed explicitly. Given centered calibration activations X(ℓ) 
+
+> c
+
+∈ Rn×din col-lected from the student backbone on a small calibration set, define 
+
+Z(ℓ) = 1√n−1 ∆W (ℓ) 
+
+> T
+
+X(ℓ)⊤ 
+
+> c
+
+∈ Rdout ×n. (5) Because bΣ(ℓ) 
+
+> x
+
+= 1 
+
+> n−1
+
+X(ℓ)⊤ 
+
+> c
+
+X(ℓ) 
+
+> c
+
+, we have 
+
+Z(ℓ)Z(ℓ)⊤ = ∆ W (ℓ) 
+
+> T
+
+bΣ(ℓ) 
+
+> x
+
+∆W (ℓ)⊤ 
+
+> T
+
+= fW (ℓ) 
+
+> T
+
+fW (ℓ)⊤ 
+
+> T
+
+, (6) so the left singular vectors of Z(ℓ) are the empirical eU (ℓ)
+
+> T,r
+
+and its singular values are the empirical eσ(ℓ) 
+
+> i
+
+. This avoids forming the din × din covariance matrix when n ≪ din . The targets eU (ℓ) 
+
+> T,r
+
+and eσ(ℓ) 
+
+> i
+
+are computed once and frozen for the rest of training. 
+
+3.2. Spectral Alignment and Coefficient Losses 
+
+The matrix B(ℓ) alone determines the output-side subspace accessible to the LoRA adapter. Let B(ℓ) = Q(ℓ) 
+
+> B
+
+R(ℓ) 
+
+> B
+
+be its thin QR decomposition. SAD-LoRA penalizes the principal-angle discrepancy between span( B(ℓ)) and span( eU (ℓ) 
+
+> T,r
+
+):
+
+L(ℓ)align = 1 − 1 
+
+> rℓ
+
+Q(ℓ)⊤ 
+
+> B
+
+eU (ℓ)
+
+> T,r
+> 2
+> F
+
+= 1
+
+> rℓ
+> rℓ
+
+X
+
+> i=1
+
+sin 2 θ(ℓ) 
+
+> i
+
+, (7) where θ(ℓ) 
+
+> i
+
+are the principal angles between the two rℓ-dimensional subspaces. The loss is zero exactly when the adapter and target subspaces coincide and one when they are orthogonal. Because Q(ℓ) 
+
+> B
+
+is orthonormal, the nonzero singular values of B(ℓ)A(ℓ) equal those of R(ℓ) 
+
+> B
+
+A(ℓ), which is an rℓ × din 
+
+matrix and therefore much cheaper to decompose. We define a spectral coefficient-matching loss 
+
+L(ℓ)coeff =
+
+σ
+
+
+
+R(ℓ) 
+
+> B
+
+A(ℓ)
+
+
+
+− eσ(ℓ)
+
+> T,r
+> 22
+
+eσ(ℓ) 
+
+> T,r
+> 22
+
++ ε , (8) where eσ(ℓ) 
+
+> T,r
+
+= ( eσ(ℓ)1 , . . . , eσ(ℓ) 
+
+> rℓ
+
+) and ε is a small constant. This is an unweighted proxy for the data-weighted coeffi-cient objective analyzed in Section 4; it avoids applying 
+
+Σ1/2 
+
+> x
+
+at every step and is used only as an auxiliary regular-izer. 
+
+3.3. Training Objective 
+
+For classification, we use temperature-scaled logit distilla-tion; for regression, we use mean-squared error between teacher and student predictions. Let zT , z S denote teacher and student logits and τ the distillation temperature: 
+
+LKD = τ 2 KL(softmax( zT /τ ) ∥ softmax( zS /τ )) . (9) With supervised task loss Ltask , the SAD-LoRA objective is 
+
+L = Ltask + λKD LKD 
+
++ α 1
+
+|S| 
+
+X
+
+> ℓ∈S
+
+L(ℓ)align + β 1
+
+|S| 
+
+X
+
+> ℓ∈S
+
+L(ℓ)coeff , (10) where S is the set of adapted layers. The full objective uses both spectral terms ( α, β > 0); the alignment-only variant sets β = 0 , the coefficient-only variant sets α = 0 .We keep the spectral weights α and β fixed throughout training; the optimizer uses the learning-rate warmup and decay described in Appendix C. 
+
+3.4. Spectral Initialization 
+
+SAD-LoRA initializes the adapter directly in the target sub-space: 
+
+B(ℓ) = eU (ℓ) 
+
+> T,r
+
+, A(ℓ) = 0 . (11) Two consequences follow. First, B(ℓ)A(ℓ) = 0 at t=0 ,so the student function exactly reproduces the pretrained backbone. Second, L(ℓ)align is identically zero at initialization, so LKD supplies the dominant gradient signal from the first step and Lalign acts as a regularizer that prevents drift rather than fighting the data fit. If the requested rank exceeds the effective target rank determined from the data-weighted spectral tail (see Proposition 4.3), we fill the remaining columns of B(ℓ) with a random orthonormal complement obtained by Gram-Schmidt against eU (ℓ) 
+
+> T,r
+
+. Zero-padding would leave B(ℓ) rank-deficient and lock Lalign above a hard floor regardless of training; orthonormal-complement padding guarantees both L(0) align = 0 and full column rank. 
+
+3.5. Training Procedure and Cost 
+
+Spectral targets are computed once offline by forming the sketch Z(ℓ) in Eq. 5 from calibration activations and register-ing eU (ℓ) 
+
+> T,r
+
+and eσ(ℓ) 
+
+> T,r
+
+as frozen buffers. Training then initializes 
+
+B(ℓ) = eU (ℓ) 
+
+> T,r
+
+, sets A(ℓ) = 0 , and updates only the LoRA parameters using Eq. 10. The additional per-step cost is one thin QR of B(ℓ) for Lalign and, when Lcoeff is used, one SVD of R(ℓ) 
+
+> B
+
+A(ℓ) ∈ Rr×din , giving O(r2(dout + din )) per adapted layer. The targets are fixed after preprocessing, the backbone remains frozen, and no inference-time module is added. Full pseudocode is given in Appendix A. 4SAD-LoRA: Spectral Alignment for Low-Rank Knowledge Distillation 
+
+## 4. Analysis 
+
+We analyze a single adapted layer and suppress the layer index. The data-weighted distillation error is 
+
+E(B, A ) = fWT − BA Σ1/2 
+
+> x
+> 2
+> F
+
+, (12) with fWT = ∆ WT Σ1/2 
+
+> x
+
+= eUT eΣT eV ⊤ 
+
+> T
+
+its compact SVD. 
+
+4.1. Projector-Based Error Decomposition 
+
+Our first result is an exact projector-based decomposition of the data-weighted distillation error. 
+
+Theorem 4.1 (Distillation error decomposition) . Let 
+
+B ∈ Rdout ×r have full column rank and let PB =
+
+B(B⊤B)−1B⊤ be the orthogonal projector onto span( B).Let eUT,r contain the top r left singular vectors of fWT and let R := P 
+
+> i>r
+
+eσ2 
+
+> i
+
+be the rank-r tail energy. Then 
+
+E(B, A ) = S(B) + C(B, A ) + R, (13) 
+
+where 
+
+S(B) := (I − PB )fWT 
+
+> 2
+> F
+
+− R ≥ 0, (14) 
+
+C(B, A ) := PB fWT − BA Σ1/2 
+
+> x
+> 2
+> F
+
+≥ 0. (15) 
+
+The terms are interpretable as: (I) S(B) — subspace mis-alignment , depending only on span( B) and irreducible without rotating B; (II) C(B, A ) — within-subspace coeffi-cient mismatch , eliminable by choosing A optimally given 
+
+B; and (III) R — rank residual , fixed by the rank budget. Furthermore, if eσr > eσr+1 , then S(B) = 0 if and only if span( B) = span( eUT,r ). Under boundary degeneracy, 
+
+S(B) = 0 for any optimal rank-r left singular subspace within the degenerate eigenspace; SAD-LoRA uses the em-pirical SVD target eUT,r as the alignment reference. Sketch. Since span( BA Σ1/2 
+
+> x
+
+) ⊆ span( B), Pythagoras gives 
+
+E(B, A ) = ∥(I − PB )fWT ∥2 
+
+> F
+
++ ∥PB fWT − BA Σ1/2 
+
+> x
+
+∥2 
+
+> F
+
+.
+
+By Eckart–Young–Mirsky, the first term is lower-bounded by R, with equality at a rank-r optimal left singular sub-space, up to non-uniqueness under singular-value degener-acy. This yields Eq. 13; the second term is nonnegative by definition. Full proof in Appendix B.3. Theorem 4.1 clarifies why output-level KD can waste rank budget. Standard KD updates B and A through output gra-dients and can reduce coefficient error inside a misaligned subspace while leaving S large. SAD-LoRA addresses this by adding Lalign (Section 3.2), which explicitly targets the subspace term. 
+
+Lalign as a Grassmannian surrogate for S. The alignment loss 
+
+Lalign = 1
+
+> rr
+
+X
+
+> i=1
+
+sin 2 θi (16) is the normalized squared chordal distance on Gr( r, d out )
+
+between span( B) and the selected target subspace 
+
+span( eUT,r ). When the top-r subspace is unique, Lalign = 0 
+
+and S(B) = 0 have the same zero set. Under degeneracy, S
+
+may vanish for multiple optimal subspaces, while Lalign an-chors the adapter to the empirical SVD target used by SAD-LoRA. Thus Lalign is not equal to S; it is an unweighted, differentiable surrogate that is cheaper and more stable than estimating spectrally weighted angles directly. 
+
+Relation to Lcoeff . The principled, theory-aligned coeffi-cient loss is the data-weighted form 
+
+Ldw coeff =
+
+σ
+
+
+
+RB AΣ1/2
+
+> x
+
+
+
+− eσT,r 
+
+> 22
+
+eσT,r  
+
+> 22
+
++ ε , (17) which corresponds to matching the within-subspace data-weighted spectrum implied by C. Computing it requires applying Σ1/2 
+
+> x
+
+(or equivalently right-multiplying by the cal-ibration sketch Xc) at every step, which doubles the per-step cost of the coefficient term. Because our ablations show Lcoeff to be auxiliary rather than load-bearing, we adopt the cheaper unweighted proxy Lcoeff = ∥σ(RB A) −
+
+eσT,r ∥22/(∥eσT,r ∥22 + ε) in our main experiments. The proxy equals Ldw coeff when Σx = I; in the anisotropic case it is only an approximation to the data-weighted coefficient objective. We report results with the unweighted form throughout; pre-liminary runs with Ldw coeff show no consistent advantage on GLUE. 
+
+4.2. Optimal Subspace and Rank Sufficiency Proposition 4.2 (Data-weighted teacher subspace) . Among all rank-r matrices M , an optimal minimizer of ∥fWT −
+
+M ∥2 
+
+> F
+
+has column space span( eUT,r ) and residual P 
+
+> i>r
+
+eσ2 
+
+> i
+
+.If eσr > eσr+1 , this optimal column space is unique. Proof. Direct from Eckart–Young–Mirsky; see Ap-pendix B.2. The relevant low-rank target is therefore not the unweighted teacher update, but the teacher update composed with Σ1/2 
+
+> x
+
+.Combined with Theorem 4.1, this identifies span( eUT,r ) as an optimal minimizer of S(B), unique when eσr > eσr+1 ,and justifies Lalign as its Grassmannian surrogate. 
+
+Proposition 4.3 (Rank sufficiency) . For any ϵ > 0, the minimum rank required to drive E(B, A ) < ϵ over all B, A 
+
+5SAD-LoRA: Spectral Alignment for Low-Rank Knowledge Distillation 
+
+is 
+
+r∗ 
+
+> ϵ
+
+(∆ WT , Σx) = min 
+
+(
+
+k : X
+
+> i>k
+
+eσ2 
+
+> i
+
+< ϵ 
+
+)
+
+. (18) 
+
+Proof. At rank k, Eckart–Young–Mirsky gives the mini-mum attainable error P 
+
+> i>k
+
+eσ2 
+
+> i
+
+. The stated criterion selects the smallest k for which this residual is below ϵ. See Ap-pendix B.4. This is a layerwise, data-dependent rank criterion: layers with sharp spectral decay need fewer ranks, while layers with shallow decay require more. In the main experiments, we use a uniform rank r across layers to match prior LoRA baselines; Eq. 18 serves as a diagnostic and motivates future rank-allocation variants. 
+
+Implication for intruder dimensions. Any component of B outside the selected target subspace is penalized by 
+
+Lalign . Under α > 0, the optimizer must trade off any output-level gain from such directions against the geometric penalty, providing an explicit mechanism against intruder dimensions (Shuttleworth et al., 2024). 
+
+## 5. Experiments 
+
+We evaluate SAD-LoRA in two settings: controlled syn-thetic experiments that directly test the decomposition in Theorem 4.1, and RoBERTa-based GLUE distillation across ranks r ∈ { 1, 2, 4, 8, 16 }. We then ablate alignment and coefficient matching to identify which spectral component drives the gains. 
+
+5.1. Experimental Setup Tasks and metrics. We evaluate on six GLUE tasks (Wang et al., 2018): SST-2, MRPC, STS-B, CoLA, QNLI, and RTE. We report accuracy for SST-2, QNLI, and RTE; F1 for MRPC; Spearman correlation for STS-B; and Matthews correlation (MCC) for CoLA. All GLUE results are mean and standard deviation over three seeds. 
+
+Models and adapted modules. The student is RoBERTa-base (Liu et al., 2020) with LoRA adapters on the query and value projections in each Transformer block. Func-tional distillation logits come from a RoBERTa-large teacher. Because SAD-LoRA requires teacher updates in the same parameter space as the student, spectral targets are com-puted from a same-architecture RoBERTa-base reference fine-tuned on the same task; the larger teacher continues to supply LKD . We evaluate r ∈ { 1, 2, 4, 8, 16 }.
+
+Compared methods. All baselines are reproduced in the same training pipeline with matched optimizers and sched-ules: KD-LoRA (KL distillation with LoRA (Azimi et al., 2024)), Logit-MSE (replaces KL with MSE on logits), NN-                                 
+
+> Figure 3. Controlled spectral validation. Left: under a flat teacher spectrum, KD-LoRA spends most of its error on subspace mis-alignment S(51% ), whereas SAD-LoRA drives Snearly to zero, leaving the rank residual R(27% ) and coefficient mismatch C
+> (15% ). Right: final alignment 1
+> r∥Q⊤
+> BeUT,r ∥2
+> Facross spectral gaps. Both methods align under sharp spectra, but only SAD-LoRA re-mains aligned in the flat case ( γ= 1 ).
+> Table 1. Synthetic three-term error decomposition at r= 4 with flat teacher spectrum ( γ= 1 ) and identity covariance. Method
+> S
+> subspace
+> C
+> coeff.
+> R
+> residual Total KD-LoRA 51% 22% 27% 100%
+> SAD-LoRA ≈0%15% 27% 42 %
+
+Init (Neural Nuggets (Zhong et al., 2024), SVD initializa-tion from ∆WT without alignment objective), and PiSSA-Init (principal-singular-vector initialization from W0 (Meng et al., 2024)). We additionally evaluate two SAD-LoRA ablations: SAD-LoRA-Align (β = 0 , alignment only) and 
+
+SAD-LoRA-Coeff (α = 0 , coefficient only). Hyperparame-ters are matched across methods; SAD-LoRA uses α = 0 .2,
+
+β = 0 .05 , τ = 4 , and calibration size n = 1024 , with optimization details in Appendix C. 
+
+5.2. Controlled Spectral Validation 
+
+The synthetic experiments test whether Theorem 4.1 pre-dicts the actual error budget and whether Lalign corrects the predicted failure mode. We generate teacher updates with controlled spectral gap γ = eσr /eσr+1 , train rank-4 adapters, and compute S, C, and R exactly from the trained (B, A )
+
+and synthetic teacher. 
+
+Decomposition (Table 1). The flat-spectrum case is difficult for output-level KD because the teacher update provides weak directional preference. KD-LoRA spends most of its error budget on subspace misalignment ( S = 51% ), whereas SAD-LoRA drives S to nearly zero while leaving the irreducible rank residual R unchanged. The total error drops from 100% to 42% .
+
+Alignment across spectral gaps. Fig. 3 (right) reports final subspace alignment 1 
+
+> r
+
+∥Q⊤ 
+
+> B
+
+eUT,r ∥2 
+
+> F
+
+for sharp ( γ = 13 .4), gradual ( γ = 1 .25 ), and flat ( γ = 1 ) teacher spectra. Both methods recover the dominant subspace under sharp spectra (1.00 each). As the spectral gap shrinks, KD-LoRA de-grades sharply: its final alignment drops to 0.49 in the flat case, while SAD-LoRA remains at 1.00 . This supports the 6SAD-LoRA: Spectral Alignment for Low-Rank Knowledge Distillation                                                                                                        
+
+> Table 2. GLUE results at ranks r= 4 and r= 8 , reported as mean ±std over three seeds. SST-2, QNLI, and RTE use accuracy; MRPC uses F1; STS-B uses Spearman’s ρ; and CoLA uses Matthews correlation. Best results/near-ties under seed variability are also bolded. Method SST-2 MRPC STS-B CoLA QNLI RTE
+> Rank r= 4
+> KD-LoRA 93 .3±0.487 .8±0.90.789 ±0.033 0.426 ±0.013 91 .3±0.265 .0±1.6
+> Logit-MSE 93 .8±0.287 .2±0.20.789 ±0.033 0.423 ±0.013 90 .8±0.659 .0±3.7
+> NN-Init 93 .4±0.490 .3±0.60.887 ±0.003 0.555 ±0.008 92 .5±0.169 .2±1.0
+> PiSSA-Init 93 .7±0.890 .2±0.60.880 ±0.004 0.519 ±0.015 92 .1±0.166 .1±1.2
+> SAD-LoRA 94 .3±0.289 .9±0.30.884 ±0.002 0.558 ±0.006 92 .1±0.069 .9±1.3
+> SAD-LoRA-Align 94 .1±0.190 .1±0.20.887 ±0.003 0.553 ±0.003 92 .5±0.170 .0±1.3
+> SAD-LoRA-Coeff 94 .5±0.190 .0±0.40.885 ±0.002 0.539 ±0.009 92 .2±0.063 .1±6.8
+> Rank r= 8
+> KD-LoRA 93 .7±0.290 .2±0.70.847 ±0.018 0.478 ±0.016 92 .0±0.267 .4±1.1
+> Logit-MSE 93 .5±0.289 .8±0.20.847 ±0.018 0.473 ±0.019 91 .9±0.365 .2±2.8
+> NN-Init 93 .8±0.190 .2±0.90.892 ±0.004 0.554 ±0.005 92 .8±0.272 .1±1.4
+> PiSSA-Init 94 .0±0.591 .1±0.60.887 ±0.006 0.538 ±0.015 92 .3±0.168 .8±2.1
+> SAD-LoRA 94 .5±0.290 .9±0.40.891 ±0.003 0.558 ±0.005 92 .5±0.171 .8±0.8
+> SAD-LoRA-Align 93 .6±0.290 .1±0.30.893 ±0.003 0.562 ±0.006 92 .8±0.172 .2±0.6
+> SAD-LoRA-Coeff 93 .7±0.290 .5±0.20.891 ±0.003 0.537 ±0.005 92 .5±0.168 .0±0.6
+
+role of Lalign : it is most useful when the teacher spectrum provides weak directional preference. 
+
+5.3. Main GLUE Results 
+
+We report exact results at r = 4 and r = 8 , and show rank trajectories for r ∈ { 1, 2, 4, 8, 16 }.
+
+Rank-4/8 results (Table 2). At r = 4 , SAD-LoRA-family variants are strongest or competitive on five of six tasks. SAD-LoRA-Coeff gives the best SST-2 score ( 94 .5), full SAD-LoRA gives the best CoLA score ( 0.558 ), and SAD-LoRA-Align matches NN-Init on STS-B ( 0.887 ) and QNLI (92 .5) while giving the best RTE score ( 70 .0). MRPC is the exception: NN-Init remains strongest ( 90 .3), with SAD-LoRA variants within 0.4 F1. Relative to KD-LoRA, full SAD-LoRA improves STS-B from 0.789 to 0.884 , CoLA from 0.426 to 0.558 , and RTE from 65 .0 to 69 .9. Notably, SAD-LoRA at r = 4 already exceeds KD-LoRA at r = 8 
+
+on STS-B and CoLA, indicating that subspace selection can compensate for additional rank. At r = 8 , margins shrink on saturated tasks, but the same pattern remains. Full SAD-LoRA gives the best SST-2 score ( 94 .5), while SAD-LoRA-Align is strongest on STS-B ( 0.893 ), CoLA ( 0.562 ), and RTE ( 72 .2), and ties NN-Init on QNLI ( 92 .8). PiSSA-Init remains best on MRPC ( 91 .1), with full SAD-LoRA close behind ( 90 .9). The largest gains over KD-LoRA again occur on STS-B and CoLA, supporting the hypothesis that data-weighted teacher-update directions matter most when the adapter must choose a small task-relevant subspace. 
+
+Rank trajectories (Fig. 4). STS-B gives the clearest rank-efficiency signal: at r = 1 , Logit-MSE collapses to −0.016 
+
+Spearman while SAD-LoRA already reaches 0.85 , and by r = 4 SAD-LoRA-Align and NN-Init match the best-rank KD baselines. CoLA shows a similar low-rank gain, whereas SST-2 and QNLI are nearly saturated and MRPC favors PiSSA-Init at moderate rank. 
+
+5.4. Ablations and Rank Efficiency 
+
+The ablations isolate three effects: output-level KD (KD-LoRA, Logit-MSE), spectral initialization without training-time alignment (NN-Init, PiSSA-Init), and SAD-LoRA’s two spectral terms separately. 
+
+Subspace alignment is load-bearing. Removing Lalign 
+
+(SAD-LoRA-Coeff) is more damaging than removing Lcoeff .At r = 8 , dropping Lalign costs 0.025 MCC on CoLA (0.562 → 0.537 ) and 4.2 accuracy points on RTE ( 72 .2 →
+
+68 .0). The variance of SAD-LoRA-Coeff is also larger on small-data tasks ( ±6.8 on RTE at r = 4 ). This is consis-tent with Theorem 4.1: Lcoeff targets C, which is bounded by the within-subspace projection of fWT and is therefore meaningful only after S has been driven small. 
+
+Coefficient matching is auxiliary. Removing Lcoeff im-proves or matches the full objective on STS-B, CoLA, QNLI, and RTE while the full objective is stronger on SST-2 and MRPC. This suggests that exact singular-value matching is more sensitive to weighting than directional alignment and is best used as a regularizer rather than the central mecha-nism. 
+
+Per-task summary at r = 8 (Fig. 5). SAD-LoRA variants improve over the best non-SAD baseline on SST-2 ( +0 .5), STS-B ( +0 .1), CoLA ( +0 .8), and RTE ( +0 .1); tie on QNLI; and remain 0.2 F1 below PiSSA-Init on MRPC. 
+
+Synthesis. The experiments support two conclusions. (i) The synthetic decomposition confirms Theorem 4.1: stan-dard KD’s distillation error is dominated by subspace mis-alignment under flat spectra, and SAD-LoRA removes this term. (ii) GLUE results show that this mechanism trans-lates into downstream gains in low-rank, spectrally sensitive 7SAD-LoRA: Spectral Alignment for Low-Rank Knowledge Distillation           
+
+> Figure 4. Rank efficiency on GLUE. Mean validation performance over three seeds as the LoRA rank varies from 1to 16 . SAD-LoRA variants are most effective in low-rank regimes. STS-B and CoLA show the clearest separation; SST-2 and QNLI are near-saturated; on MRPC, PiSSA-Init remains strongest at moderate rank. Logit-MSE collapses on STS-B at r= 1 (Spearman near zero), highlighting the value of subspace-aware initialization for rank-limited correlation tasks.
+> Figure 5. Best SAD-LoRA-family result minus best non-SAD baseline at r= 8 . Positive values indicate an advantage for SAD-LoRA. Correlation and MCC differences are shown in percentage-point units.
+
+regimes, especially on STS-B and CoLA. 
+
+## 6. Discussion and Limitations 
+
+SAD-LoRA’s gains come primarily from controlling the adapter subspace during training, not merely from spectral initialization. This distinction is important because PiSSA-Init and NN-Init already use SVD-based initialization, yet they do not keep span( B) tied to the data-weighted teacher-update subspace. The synthetic decomposition shows that this geometric target removes the subspace-misalignment term that KD-LoRA does not explicitly penalize, while the GLUE results show corresponding rank-efficiency gains: at r = 4 , SAD-LoRA already matches or exceeds KD-LoRA at r = 8 on STS-B and CoLA. The ablations further indicate that Lalign is the central mechanism. Coefficient matching is useful as an auxiliary regularizer—especially on tasks such as SST-2 and MRPC—but it is less robust than directional alignment and should be treated as optional rather than load-bearing. 
+
+Limitations. SAD-LoRA requires a teacher update in the same weight space as the student adapter. When the func-tional teacher is larger than the student, we therefore use a same-architecture fine-tuned reference model to construct the spectral targets, adding one offline model to the pipeline. The method also requires a calibration pass to compute layer-wise targets, although this cost is incurred once and adds no inference overhead. Empirically, the gains are not uniform: MRPC remains favorable to PiSSA-Init at moderate rank, suggesting that pretrained-weight principal structure can be preferable for some semantic-matching tasks. Finally, our experiments focus on encoder-model distillation on GLUE; extending teacher-update alignment to decoder-only LLMs and generation tasks remains future work. 
+
+## 7. Conclusion 
+
+We introduced SAD-LoRA, a spectral alignment framework for low-rank knowledge distillation. SAD-LoRA derives a layerwise target subspace from the data-weighted student-space reference update ∆WT Σ1/2 
+
+> x
+
+and regularizes the LoRA adapter to remain aligned with this subspace during training. The analysis decomposes the data-weighted distillation error into subspace misalignment, coefficient mismatch, and rank residual, showing why output-level KD alone can waste rank budget in a misaligned adapter subspace. Synthetic experiments verify this mechanism directly, and RoBERTa-based GLUE distillation shows measurable rank-efficiency gains, especially on STS-B and CoLA. Ablations indicate that principal-angle subspace alignment is the central com-ponent, while coefficient matching is useful but auxiliary. 8SAD-LoRA: Spectral Alignment for Low-Rank Knowledge Distillation 
+
+## Acknowledgment 
+
+This work was supported by the Institute of Information & Communications Technology Planning & Evaluation (IITP) grant funded by the Korea government (MSIT) (No. RS-2024-00443391, Korea-Japan Joint International Research on Deep Learning-based Autonomous Mobility Control Technology for Autonomous Mobile Robots). 
+
+## References 
+
+Azimi, R., Rishav, R., Teichmann, M., and Ebrahimi Ka-hou, S. KD-LoRA: A hybrid approach to efficient fine-tuning with LoRA and knowledge distillation. In Reza-gholizadeh, M., Passban, P., Samiee, S., Partovi Nia, V., Cheng, Y., Deng, Y., Liu, Q., and Chen, B. (eds.), 
+
+Proceedings of The 4th NeurIPS Efficient Natural Lan-guage and Speech Processing Workshop , volume 262 of 
+
+Proceedings of Machine Learning Research , pp. 73–80. PMLR, 2024. Ben Zaken, E., Goldberg, Y., and Ravfogel, S. BitFit: Sim-ple parameter-efficient fine-tuning for transformer-based masked language-models. In Proceedings of the 60th Annual Meeting of the Association for Computational Linguistics , pp. 1–9, Dublin, Ireland, 2022. Association for Computational Linguistics. doi: 10.18653/v1/2022. acl-short.1. B ¨uy ¨ukaky ¨uz, K. OLoRA: Orthonormal low-rank adaptation of large language models, 2024. Dettmers, T., Pagnoni, A., Holtzman, A., and Zettlemoyer, L. QLoRA: Efficient finetuning of quantized LLMs. In 
+
+Advances in Neural Information Processing Systems , vol-ume 36, 2023. Ding, N., Qin, Y., Yang, G., Wei, F., Yang, Z., Su, Y., Hu, S., Chen, Y., Chan, C.-M., Chen, W., Yi, J., Zhao, W., Wang, X., Liu, Z., Zheng, H.-T., Chen, J., Liu, Y., Tang, J., Li, J., and Sun, M. Parameter-efficient fine-tuning of large-scale pre-trained language models. Nature Machine Intelligence , 5:220–235, 2023. doi: 10.1038/ s42256-023-00626-4. Gou, J., Yu, B., Maybank, S. J., and Tao, D. Knowledge distillation: A survey. International Journal of Com-puter Vision , 129(6):1789–1819, 2021. doi: 10.1007/ s11263-021-01453-z. Halko, N., Martinsson, P.-G., and Tropp, J. A. Finding structure with randomness: Probabilistic algorithms for constructing approximate matrix decompositions. SIAM Review , 53(2):217–288, 2011. doi: 10.1137/090771806. Han, Z., Gao, C., Liu, J., Zhang, J., and Zhang, S. Q. Parameter-efficient fine-tuning for large models: A com-prehensive survey, 2024. URL https://arxiv. org/abs/2403.14608 .Hinton, G., Vinyals, O., and Dean, J. Distilling the knowl-edge in a neural network, 2015. NIPS Deep Learning and Representation Learning Workshop. Houlsby, N., Giurgiu, A., Jastrzebski, S., Morrone, B., De Laroussilhe, Q., Gesmundo, A., Attariyan, M., and Gelly, S. Parameter-efficient transfer learning for NLP. In Proceedings of the 36th International Conference on Machine Learning , volume 97 of Proceedings of Machine Learning Research , pp. 2790–2799. PMLR, 2019. Hu, E. J., Shen, Y., Wallis, P., Allen-Zhu, Z., Li, Y., Wang, S., Wang, L., Chen, W., et al. Lora: Low-rank adaptation of large language models. Iclr , 1(2):3, 2022. Hwang, I., Park, H., Lee, Y., Yang, J., and Maeng, S. PC-LoRA: Low-rank adaptation for progressive model com-pression with knowledge distillation. In Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition Workshops , pp. 1–8, 2024. Kopiczko, D. J., Blankevoort, T., and Asano, Y. M. VeRA: Vector-based random matrix adaptation. In Proceedings of the 12th International Conference on Learning Repre-sentations , 2024. Lester, B., Al-Rfou, R., and Constant, N. The power of scale for parameter-efficient prompt tuning. In Proceed-ings of the 2021 Conference on Empirical Methods in Natural Language Processing , pp. 3045–3059, Online and Punta Cana, Dominican Republic, 2021. Association for Computational Linguistics. doi: 10.18653/v1/2021. emnlp-main.243. Li, X. L. and Liang, P. Prefix-tuning: Optimizing continu-ous prompts for generation. In Proceedings of the 59th Annual Meeting of the Association for Computational Linguistics and the 11th International Joint Conference on Natural Language Processing , pp. 4582–4597, Online, 2021. Association for Computational Linguistics. doi: 10.18653/v1/2021.acl-long.353. Li, Y., Han, S., and Ji, S. VB-LoRA: Extreme parame-ter efficient fine-tuning with vector banks. In Advances in Neural Information Processing Systems , volume 37, 2024a. Li, Y., Yu, Y., Liang, C., He, P., Karampatziakis, N., Chen, W., and Zhao, T. LoftQ: LoRA-fine-tuning-aware quanti-zation for large language models. In Proceedings of the 12th International Conference on Learning Representa-tions , 2024b. 9SAD-LoRA: Spectral Alignment for Low-Rank Knowledge Distillation 
+
+Lin, J., Tang, J., Tang, H., Yang, S., Chen, W.-M., Wang, W.-C., Xiao, G., Dang, X., Gan, C., and Han, S. AWQ: Activation-aware weight quantization for on-device LLM compression and acceleration. In Proceedings of Machine Learning and Systems , volume 6, 2024. Liu, S.-Y., Wang, C.-Y., Yin, H., Molchanov, P., Wang, Y.-C. F., Cheng, K.-T., and Chen, M.-H. DoRA: Weight-decomposed low-rank adaptation. In Proceedings of the 41st International Conference on Machine Learning ,2024. Liu, Y., Ott, M., Goyal, N., Du, J., Joshi, M., Chen, D., Levy, O., Lewis, M., Zettlemoyer, L., and Stoyanov, V. Ro {bert }a: A robustly optimized {bert } pretraining ap-proach, 2020. Meng, F., Wang, Z., and Zhang, M. PiSSA: Principal sin-gular values and singular vectors adaptation of large lan-guage models. In Advances in Neural Information Pro-cessing Systems , volume 37, 2024. Renduchintala, A., Konuk, T., and Kuchaiev, O. Tied-LoRA: Enhancing parameter efficiency of LoRA with weight tying. In Proceedings of the 2024 Conference of the North American Chapter of the Association for Computational Linguistics: Human Language Technologies , pp. 8694– 8705. Association for Computational Linguistics, 2024. doi: 10.18653/v1/2024.naacl-long.481. Shuttleworth, R., Andreas, J., Torralba, A., and Sharma, P. Lora vs full fine-tuning: An illusion of equivalence. 
+
+arXiv preprint arXiv:2410.21228 , 2024. Soarez, A. R., Kim, D., Costa, M., and Torre, A. Demysti-fying low-rank knowledge distillation in large language models: Convergence, generalization, and information-theoretic guarantees. arXiv preprint arXiv:2603.22355 ,2026. doi: 10.48550/arXiv.2603.22355. Valipour, M., Rezagholizadeh, M., Kobyzev, I., and Ghodsi, A. DyLoRA: Parameter-efficient tuning of pre-trained models using dynamic search-free low-rank adaptation. In Proceedings of the 17th Conference of the European Chapter of the Association for Computational Linguistics ,pp. 3274–3287, Dubrovnik, Croatia, 2023. Association for Computational Linguistics. doi: 10.18653/v1/2023. eacl-main.239. Wang, A., Singh, A., Michael, J., Hill, F., Levy, O., and Bowman, S. Glue: A multi-task benchmark and analysis platform for natural language understanding. In Pro-ceedings of the 2018 EMNLP workshop BlackboxNLP: Analyzing and interpreting neural networks for NLP , pp. 353–355, 2018. Wang, H., Li, Y., Wang, S., Chen, G., and Chen, Y. MiLoRA: Harnessing minor singular components for parameter-efficient LLM finetuning. In Chiruzzo, L., Ritter, A., and Wang, L. (eds.), Proceedings of the 2025 Conference of the Nations of the Americas Chap-ter of the Association for Computational Linguistics: Human Language Technologies (Volume 1: Long Pa-pers) , pp. 4823–4836, Albuquerque, New Mexico, April 2025. Association for Computational Linguistics. ISBN 979-8-89176-189-6. doi: 10.18653/v1/2025.naacl-long. 248. URL https://aclanthology.org/2025. naacl-long.248/ .Xu, Y., Xie, L., Gu, X., Chen, X., Chang, H., Zhang, H., Chen, Z., Zhang, X., and Tian, Q. QA-LoRA: Quantization-aware low-rank adaptation of large lan-guage models. In Proceedings of the 12th International Conference on Learning Representations , 2024. Yang, R., Wu, T., Wang, J., Hu, P., Wu, Y.-C., Wong, N., and Yang, Y. LLM-Neo: Parameter efficient knowledge distillation for large language models, 2024a. Yang, Y., Li, X., Zhou, Z., Song, S. L., Wu, J., Nie, L., and Ghanem, B. CorDA: Context-oriented decomposi-tion adaptation of large language models for task-aware parameter-efficient fine-tuning. In Advances in Neural Information Processing Systems , volume 37, 2024b. Yuan, Z., Shang, Y., Song, Y., Yang, D., Wu, Q., Yan, Y., and Sun, G. ASVD: Activation-aware singular value decomposition for compressing large language models, 2023. Zhang, Q., Chen, M., Bukharin, A., Karampatziakis, N., He, P., Cheng, Y., Chen, W., and Zhao, T. AdaLoRA: Adap-tive budget allocation for parameter-efficient fine-tuning. In Proceedings of the 11th International Conference on Learning Representations , 2023. Zhong, M., An, C., Chen, W., Han, J., and He, P. Seeking neural nuggets: Knowledge transfer in large language models from a parametric perspective. In International Conference on Learning Representations , volume 2024, pp. 25576–25596, 2024. 10 SAD-LoRA: Spectral Alignment for Low-Rank Knowledge Distillation 
+
+## A. SAD-LoRA Pseudocode 
+
+Algorithm 1 SAD-LoRA Training 
+
+Input: Pretrained student weights {W (ℓ)0 }; same-architecture reference teacher {W ref ,(ℓ) 
+
+> T
+
+} in the student parameter space; functional teacher fT supplying logits; training data D; calibration set Dcal ; adapted layers S; ranks {rℓ}ℓ∈S ;hyperparameters α, β, τ, λ KD .
+
+Offline spectral target construction. for each adapted layer ℓ ∈ S do 
+
+Compute the student-space reference update ∆W (ℓ) 
+
+> T
+
+← W ref ,(ℓ) 
+
+> T
+
+− W (ℓ)0 .Collect centered calibration activations X(ℓ) 
+
+> c
+
+∈ Rn×din from the frozen student backbone. Form the sketch Z(ℓ) ← 1√n−1 ∆W (ℓ) 
+
+> T
+
+X(ℓ)⊤ 
+
+> c
+
+.Compute truncated SVD of Z(ℓ) to obtain eU (ℓ) 
+
+> T,r
+
+and eσ(ℓ) 
+
+> T,r
+
+.Register eU (ℓ) 
+
+> T,r
+
+and eσ(ℓ) 
+
+> T,r
+
+as frozen buffers. 
+
+end for Spectral initialization. for each adapted layer ℓ ∈ S do 
+
+Initialize B(ℓ) ← eU (ℓ) 
+
+> T,r
+
+and A(ℓ) ← 0.
+
+if rℓ exceeds the effective spectral rank then 
+
+Pad the remaining columns of B(ℓ) with a random orthonormal complement. 
+
+end if end for Training. for each minibatch (x, y ) ∼ D do 
+
+zT ← fT (x) no gradient 
+
+zS ← fS (x)
+
+Ltask ← TaskLoss( zS , y )
+
+LKD ← τ 2 KL(softmax( zT /τ ) ∥ softmax( zS /τ )) 
+
+for each adapted layer ℓ ∈ S do 
+
+Q(ℓ) 
+
+> B
+
+, R (ℓ) 
+
+> B
+
+← QR( B(ℓ))
+
+L(ℓ)align ← 1 − 1 
+
+> rℓ
+
+Q(ℓ)⊤ 
+
+> B
+
+eU (ℓ)
+
+> T,r
+> 2
+> F
+
+ˆσ(ℓ) ← svdvals 
+
+
+
+R(ℓ) 
+
+> B
+
+A(ℓ)
+
+
+
+L(ℓ)coeff ← ˆσ(ℓ)−eσ(ℓ)
+
+> T ,r
+> 22
+> eσ(ℓ)
+> T ,r
+> 22+ε
+
+end for 
+
+L ← L task + λKD LKD + α
+
+> |S|
+
+P 
+
+> ℓ∈S
+
+L(ℓ)align + β
+
+> |S|
+
+P 
+
+> ℓ∈S
+
+L(ℓ)coeff 
+
+Backpropagate L and update only {B(ℓ), A (ℓ)}ℓ∈S with AdamW. 
+
+end for 
+
+## B. Proofs of Theoretical Results 
+
+This appendix collects the full proofs of the analytical results in Section 4. We use the same notation: fWT = ∆ WT Σ1/2 
+
+> x
+
+∈
+
+Rdout ×din , with compact SVD fWT = eUT eΣT eV ⊤ 
+
+> T
+
+and singular values eσ1 ≥ eσ2 ≥ · · · ≥ 0. We write eUT,r = eUT [: , 1: r] for the matrix of top-r left singular vectors and fW (r) 
+
+> T
+
+= eUT,r eΣT,r eV ⊤ 
+
+> T,r
+
+for the rank-r truncation. 
+
+B.1. Useful Identities 
+
+We collect three elementary facts used throughout. 
+
+(F1) Pythagoras for the Frobenius norm. For any matrix X ∈ Rdout ×din and any orthogonal projector P ∈ Rdout ×dout ,
+
+∥X∥2 
+
+> F
+
+= ∥P X ∥2 
+
+> F
+
++ ∥(I − P )X∥2 
+
+> F
+
+,
+
+because P and I − P have orthogonal column ranges and Frobenius inner products of column-orthogonal matrices vanish. 
+
+(F2) Eckart–Young–Mirsky. The minimum of ∥fWT − M ∥2 
+
+> F
+
+over all rank-r matrices M is P 
+
+> i>r
+
+eσ2 
+
+> i
+
+, attained by 
+
+fW (r) 
+
+> T
+
+= eUT,r eΣT,r eV ⊤ 
+
+> T,r
+
+, whose column space is span( eUT,r ).11 SAD-LoRA: Spectral Alignment for Low-Rank Knowledge Distillation 
+
+(F3) Projection of a matrix onto a subspace via PB . For B with full column rank and PB = B(B⊤B)−1B⊤,
+
+∥PB X∥2 
+
+> F
+
+= tr( X⊤PB X) = X
+
+> i
+
+∥PB xi∥22
+
+where xi denotes the i-th column of X.
+
+B.2. Proof of Proposition 4.2 
+
+Proof. Direct application of Eckart–Young–Mirsky (F2) to fWT . The minimum over rank-r matrices of ∥fWT − M ∥2 
+
+> F
+
+equals 
+
+P 
+
+> i>r
+
+eσ2 
+
+> i
+
+and is attained by fW (r) 
+
+> T
+
+= eUT,r eΣT,r eV ⊤ 
+
+> T,r
+
+. Its column space is span( eUT,r ).
+
+B.3. Proof of Theorem 4.1 
+
+Proof. Let M = BA Σ1/2 
+
+> x
+
+∈ Rdout ×din and let PB = B(B⊤B)−1B⊤ be the orthogonal projector onto span( B). Since 
+
+span( M ) ⊆ span( B), we have PB M = M , hence (I − PB )M = 0 .
+
+Step 1: Pythagorean splitting. Apply (F1) to X = fWT − M :
+
+E(B, A ) = ∥fWT − M ∥2 
+
+> F
+
+= ∥PB (fWT − M )∥2 
+
+> F
+
++ ∥(I − PB )( fWT − M )∥2
+
+> F
+
+= ∥PB fWT − M ∥2 
+
+> F
+
++ ∥(I − PB )fWT ∥2 
+
+> F
+
+,
+
+where the second equality uses PB M = M and (I − PB )M = 0 . This is the exact two-term projector decomposition. 
+
+Step 2: Identifying the rank residual. Define R = P 
+
+> i>r
+
+eσ2 
+
+> i
+
+. By (F2), for any rank-r orthogonal projector P ,
+
+∥(I − P )fWT ∥2 
+
+> F
+
+= ∥fWT ∥2 
+
+> F
+
+− ∥ P fWT ∥2 
+
+> F
+
+= X
+
+> i≥1
+
+eσ2 
+
+> i
+
+− ∥ P fWT ∥2 
+
+> F
+
+.
+
+The maximum of ∥P fWT ∥2 
+
+> F
+
+over rank-r projectors is Pri=1 eσ2 
+
+> i
+
+, achieved iff P projects onto span( eUT,r ). Therefore 
+
+∥(I − PB )fWT ∥2 
+
+> F
+
+≥ R ,
+
+with equality if and only if span( B) = span( eUT,r ).
+
+Step 3: Defining S(B). Set 
+
+S(B) := ∥(I − PB )fWT ∥2 
+
+> F
+
+− R ≥ 0.
+
+By Step 2, S(B) = 0 iff span( B) = span( eUT,r ).
+
+Step 4: Defining C(B, A ). Set 
+
+C(B, A ) := ∥PB fWT − BA Σ1/2 
+
+> x
+
+∥2 
+
+> F
+
+≥ 0,
+
+which is nonnegative by definition. 
+
+Step 5: Combining. Substituting back into Step 1: 
+
+E(B, A ) = ∥PB fWT − BA Σ1/2 
+
+> x
+
+∥2 
+
+> F
+
++ ∥(I − PB )fWT ∥2 
+
+> F
+
+= C(B, A ) + S(B) + R.
+
+This is Eq. 13. The term R depends only on the rank budget; S(B) depends only on span( B); C(B, A ) depends on both B
+
+and A.
+
+Optimality of A given B. For any fixed B, C(B, A ) is a quadratic in A minimized at the (pseudo-)inverse solution. Specifically, when Σx is full rank, 
+
+A∗(B) = ( R⊤ 
+
+> B
+
+RB )−1R⊤ 
+
+> B
+
+Q⊤ 
+
+> B
+
+fWT (Σ 1/2 
+
+> x
+
+)−1,
+
+so C(B, A ∗) = 0 . When eσr > eσr+1 , S(B) = 0 characterizes the unique optimal output subspace at fixed rank r. Under degeneracy, the optimal subspace is not unique, and eUT,r denotes the empirical SVD target selected for alignment. 12 SAD-LoRA: Spectral Alignment for Low-Rank Knowledge Distillation 
+
+B.4. Proof of Proposition 4.3 
+
+Proof. Fix ϵ > 0. By Theorem 4.1, E(B, A ) ≥ R = P 
+
+> i>r
+
+eσ2 
+
+> i
+
+at any rank r, with equality attained by B∗ = eUT,r and the corresponding optimal A∗ from Step 5 of Appendix B.3. Therefore 
+
+min  
+
+> B,A : rank( B)≤k
+
+E(B, A ) = X
+
+> i>k
+
+eσ2 
+
+> i
+
+.
+
+The smallest k for which this minimum drops below ϵ is exactly 
+
+r∗ 
+
+> ϵ
+
+(∆ WT , Σx) = min 
+
+(
+
+k ∈ N : X
+
+> i>k
+
+eσ2 
+
+> i
+
+< ϵ 
+
+)
+
+,
+
+which is Eq. 18. 
+
+B.5. Surrogate Relationship: Lalign and S(B)
+
+We record the precise sense in which Lalign is a surrogate for S(B).
+
+Lemma B.1 (Zero set) . Lalign (B) = 0 if and only if span( B) = span( eUT,r ), if and only if S(B) = 0 .Proof. Let B = QB RB be the thin QR decomposition. Then 
+
+Lalign (B) = 1 − 1 
+
+> r
+
+∥Q⊤ 
+
+> B
+
+eUT,r ∥2 
+
+> F
+
+= 1
+
+> rr
+
+X
+
+> i=1
+
+sin 2 θi,
+
+where θi are the principal angles between span( QB ) = span( B) and span( eUT,r ). Lalign (B) = 0 iff every θi = 0 , iff 
+
+span( B) = span( eUT,r ). By Step 2 of Appendix B.3, this is also equivalent to S(B) = 0 .
+
+Why Lalign ̸ = S. The exact spectral form of the subspace miss is 
+
+∥(I − PB )fWT ∥2 
+
+> F
+
+= X
+
+> i
+
+eσ2
+
+> i
+
+ 1 − ∥ PB eui∥22
+
+,
+
+which is eσ2 
+
+> i
+
+-weighted. The alignment loss Lalign = 1
+
+> r
+
+Pri=1 sin 2 θi is unweighted (each angle contributes equally) and considers only the top r teacher directions. Thus Lalign shares its zero set with S (Lemma B.1) but does not match its level sets. In practice this is desirable: Lalign is differentiable in B, computable from a single thin QR plus one r × r matmul, and numerically stable, whereas a eσ2 
+
+> i
+
+-weighted version would require computing the full eui basis at every step. 
+
+B.6. Coefficient Loss: Data-Weighted vs. Unweighted Forms 
+
+The principled within-subspace coefficient term implied by C(B, A ) = ∥PB fWT − BA Σ1/2 
+
+> x
+
+∥2 
+
+> F
+
+depends on the singular values of BA Σ1/2 
+
+> x
+
+, since PB fWT has top-r singular values bounded by those of fWT projected onto span( B). The matching loss 
+
+Ldw coeff (B, A ) = σ(RB AΣ1/2 
+
+> x
+
+) − eσT,r 
+
+> 22
+
+eσT,r  
+
+> 22
+
++ ε
+
+is therefore the data-weighted form. Computing it requires applying Σ1/2 
+
+> x
+
+, which is not stored; the cheapest equivalent is right-multiplication by the calibration sketch Xc (which has the same nonzero singular values up to the √n − 1 factor), at cost O(rnd in ) per layer per step. We instead use 
+
+Lcoeff (B, A ) = σ(RB A) − eσT,r 
+
+> 22
+
+eσT,r  
+
+> 22
+
++ ε ,
+
+which costs O(r2din ) per layer per step (one r × din SVD) and equals Ldw coeff when Σx = I. In the anisotropic case the two losses differ; both share the trivial zero A = 0 , eσT,r = 0 but not their general level sets. Because our ablations identify 
+
+Lcoeff as auxiliary rather than load-bearing (Section 5.4), the practical cost of using the proxy is small. We confirmed in preliminary runs on SST-2, MRPC, and CoLA that swapping Lcoeff for Ldw coeff produces no consistent improvement. 13 SAD-LoRA: Spectral Alignment for Low-Rank Knowledge Distillation 
+
+## C. Additional Experimental Details 
+
+C.1. Hyperparameters 
+
+Table 3 collects all SAD-LoRA hyperparameters. Optimization, calibration size, and energy threshold values are held fixed across all six GLUE tasks and all five ranks; only the LoRA rank itself varies in our rank-trajectory experiments.                                                  
+
+> Table 3. SAD-LoRA hyperparameters used throughout. Values are matched across baselines wherever they share a parameter (optimizer, LR schedule, KD temperature). Parameter Value Notes
+> SAD-LoRA-specific
+> Alignment weight α0.2Eq. 10 Coefficient weight β0.05 Eq. 10; 0in SAD-LoRA-Align Distillation temperature τ4.0Eq. 9 KD weight λKD 1.0Eq. 10 Calibration size n1024 Phase 2 (Section 3) Spectral energy threshold δ0.01 Prop. 4.3 Stored ranks rmax 64 Cap on per-layer SVD Numerical ε10 −8Eq. 8
+> Optimizer (matched across all methods)
+> Optimizer AdamW Decoupled weight decay Weight decay 0.01 —Learning rate (LoRA) 5×10 −4—Warmup fraction 6% Linear, then linear decay Batch size 32 SST-2, QNLI; 16 for small tasks Max sequence length 128 Standard for GLUE Mixed precision fp16 Spectral ops in fp32 Seeds {42 ,123 ,2024 }—
+
+C.2. Optimization 
+
+We use AdamW with weight decay 0.01 , learning rate 5×10 −4 for LoRA parameters, linear warmup over the first 6% of steps, and linear decay thereafter. Mixed-precision training is enabled, with all spectral operations (QR, SVD, computation of Lalign and Lcoeff ) executed in float32 for numerical stability. 
+
+C.3. Spectral Target Construction 
+
+For each adapted layer, Phase 1 computes ∆W (ℓ) 
+
+> T
+
+from a reference RoBERTa-base teacher fine-tuned on the same task with the same data split. Phase 2 uses n = 1024 calibration samples drawn from the training set; activations are mean-centered before forming Z(ℓ). Truncated SVD uses randomized SVD (Halko et al., 2011) when dout > 256 .
+
+C.4. Per-layer Rank 
+
+We use a uniform rank r across layers in our main results, matching the convention of prior baselines and isolating the effect of the SAD-LoRA losses from rank-allocation choices. Proposition 4.3 suggests that allocating ranks per layer using the spectral tail of fW (ℓ) 
+
+> T
+
+(with δ = 0 .01 ) could yield further gains; preliminary results indicate small but positive effects on parameter efficiency, but a careful per-layer ablation is left to future work. 
+
+C.5. Subspace Alignment Across Tasks and Ranks 
+
+Table 4 reports the final post-training subspace alignment A(ℓ) = 1 
+
+> r
+
+∥Q(ℓ)⊤ 
+
+> B
+
+eU (ℓ) 
+
+> T,r
+
+∥2 
+
+> F
+
+, averaged over adapted layers and three seeds, for SAD-LoRA at each rank. Higher is better; 1.0 means span( B) exactly recovers the data-weighted teacher subspace. The pattern mirrors the GLUE results: tasks with the strongest task-specific spectral structure (RTE, MRPC, CoLA, STS-B) reach near-perfect alignment even at r = 4 , while QNLI and SST-2 — which are nearly saturated by the pretrained backbone and therefore have flatter fWT spectra — require larger r to recover the same alignment. 14 SAD-LoRA: Spectral Alignment for Low-Rank Knowledge Distillation 
+
+Table 4. Mean post-training subspace alignment 1 
+
+> r
+
+∥Q⊤ 
+
+> B
+
+eUT,r ∥2 
+
+> F
+
+for SAD-LoRA across tasks and ranks (averaged over adapted layers and three seeds). Bold entries indicate ≥ 0.95 alignment. Task r=1 r=2 r=4 r=8 r=16 
+
+RTE 1.00 1.00 0.99 0.99 0.99 
+
+MRPC 0.87 0.90 0.94 0.96 0.97 
+
+CoLA 0.82 0.90 0.93 0.95 0.97 
+
+SST-2 0.75 0.84 0.88 0.91 0.94 
+
+QNLI 0.69 0.78 0.84 0.88 0.90 
+
+STS-B 0.68 0.82 0.90 0.94 0.96 
+
+C.6. Per-Task Ablation Across Ranks 
+
+Fig. 6 extends Fig. 5 by reporting all three SAD-LoRA variants — full SAD-LoRA, SAD-LoRA-Align ( β=0 ), and SAD-LoRA-Coeff ( α=0 ) — at both r=4 and r=8 for every GLUE task. The deltas are computed against the strongest non-SAD baseline (KD-LoRA, Logit-MSE, NN-Init, or PiSSA-Init) for each task and rank. Two patterns are visible: (i) SAD-LoRA-Coeff is the most damaging ablation, with large negative deltas on RTE at both ranks ( −6.1 at r=4 , −4.1 at 
+
+r=8 ), confirming that subspace alignment carries the load; (ii) SAD-LoRA-Align is competitive across all tasks at r=8 ,while the full objective adds a measurable advantage on SST-2 (+0.5 at both ranks). MRPC is the consistent exception, where pretrained-weight principal structure (PiSSA-Init) remains a stronger inductive bias than the data-weighted teacher update. 
+
+Figure 6. Per-task ablation: ∆ versus the best non-SAD baseline at r=4 (left) and r=8 (right) for each SAD-LoRA variant. Positive values indicate improvement over the strongest baseline. Removing Lalign (SAD-LoRA-Coeff) is consistently more damaging than removing Lcoeff (SAD-LoRA-Align). 
+
+C.7. Reproducibility 
+
+Code is available at https://github.com/OmerTariq-KAIST/sad-lora. Random seeds are {42 , 123 , 2024 }. Each GLUE config-uration was trained on a single RTX6000Pro 98GB GPU; total wall-clock time for the GLUE result table is approximately 
+
+48 GPU-hours. 15
