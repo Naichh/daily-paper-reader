@@ -6,22 +6,26 @@
 </div>
 
 ## 每次日报
-- 最新运行日期：2026-07-11
-- 运行时间：2026-07-11 20:12:34 UTC
+- 最新运行日期：2026-07-12
+- 运行时间：2026-07-12 20:49:05 UTC
 - 运行状态：成功
-- 本次总论文数：0
+- 本次总论文数：1
 - 精读区：0
-- 速读区：0
+- 速读区：1
 
 ### 今日简报（AI）
-> 今日无新推荐，系统未产出可展示论文。
-- 详情：[/202607/11/README](/202607/11/README)
+今天速读了1篇深度强化学习策略解释方向的论文。
+值得关注的是《ORCAID》提出的斜规则方法用于解释连续动作策略。
+可解释强化学习爱好者可重点关注其规则提取思路。
+- 详情：[/202607/12/README](/202607/12/README)
 
 ### 精读区论文标签
 - 本次无精读推荐。
 
 ### 速读区论文标签
-- 本次无速读推荐。
+1. [ORCAID: Oblique Rule-Based Continuous-Action Interpretation for Deep RL Policies](/202607/12/2607.07235v1-orcaid-oblique-rule-based-continuous-action-interpretation-for-deep-rl-policies)  
+   标签：评分：7.0/10、query:policy-dist
+   evidence：从深度强化学习智能体蒸馏出可解释规则策略
 
 
 <div class="dpr-home-promo-card">

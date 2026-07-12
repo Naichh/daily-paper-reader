@@ -1,6 +1,9 @@
 * <a class="dpr-sidebar-root-link" href="#/">首页</a>
 * <a class="dpr-sidebar-root-link dpr-sidebar-noactive-link" href="javascript:void(0)" data-dpr-hash="#/tutorial/README">使用教程</a>
 * Daily Papers
+  * 2026-07-12 <!--dpr-date:20260712-->
+    * 速读区
+      * <a class="dpr-sidebar-item-link dpr-sidebar-item-structured" href="#/202607/12/2607.07235v1-orcaid-oblique-rule-based-continuous-action-interpretation-for-deep-rl-policies" data-sidebar-item="{&quot;title&quot;: &quot;ORCAID: Oblique Rule-Based Continuous-Action Interpretation for Deep RL Policies&quot;, &quot;link&quot;: &quot;https://arxiv.org/abs/2607.07235v1-orcaid-oblique-rule-based-continuous-action-interpretation-for-deep-rl-policies&quot;, &quot;score&quot;: &quot;7.0&quot;, &quot;tags&quot;: [{&quot;kind&quot;: &quot;query&quot;, &quot;label&quot;: &quot;policy-dist&quot;}], &quot;evidence&quot;: &quot;从深度强化学习智能体蒸馏出可解释规则策略&quot;}">ORCAID: Oblique Rule-Based Continuous-Action Interpretation for Deep RL Policies</a>
   * 2026-07-10 <!--dpr-date:20260710-->
     * 精读区
       * <a class="dpr-sidebar-item-link dpr-sidebar-item-structured" href="#/202607/10/2607.08766v1-opsd-v-on-policy-self-distillation-for-post-training-few-step-autoregressive-video-generators" data-sidebar-item="{&quot;title&quot;: &quot;OPSD-V: On-Policy Self-Distillation for Post-Training Few-Step Autoregressive Video Generators&quot;, &quot;link&quot;: &quot;https://arxiv.org/abs/2607.08766v1-opsd-v-on-policy-self-distillation-for-post-training-few-step-autoregressive-video-generators&quot;, &quot;score&quot;: &quot;8.0&quot;, &quot;tags&quot;: [{&quot;kind&quot;: &quot;query&quot;, &quot;label&quot;: &quot;policy-dist&quot;}], &quot;evidence&quot;: &quot;面向视频生成器训练后的在线策略自蒸馏&quot;}">OPSD-V: On-Policy Self-Distillation for Post-Training Few-Step Autoregressive Video Generators</a>
