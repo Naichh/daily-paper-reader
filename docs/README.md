@@ -6,35 +6,34 @@
 </div>
 
 ## 每次日报
-- 最新运行日期：2026-07-17
-- 运行时间：2026-07-17 21:16:20 UTC
+- 最新运行日期：2026-07-18
+- 运行时间：2026-07-18 20:43:40 UTC
 - 运行状态：成功
 - 本次总论文数：4
-- 精读区：4
-- 速读区：0
+- 精读区：1
+- 速读区：3
 
 ### 今日简报（AI）
-今日精读两篇重点论文，聚焦强化学习中的可验证奖励泛化边界与对比策略优化。  
-《Non-vacuous Generalization Bounds》给出了RL中非平凡泛化界，《Correctness-Aware Advantage Shaping》则通过对比学习提升奖励塑形正确性，两篇均获9分，值得重点研读。  
-建议先阅读《Non-vacuous Generalization Bounds》理解泛化理论，再结合《Correctness-Aware Advantage Shaping》验证实际训练效果。
-- 详情：[/202607/17/README](/202607/17/README)
+今日核心关注多模态智能体的技能-策略协同进化，以及多语言对齐与推理蒸馏的对比研究。  
+值得精读的是《SPyCE》（8.0分），它为构建能自主习得新技能的多模态Agent提供了端到端框架；速读中《Answer-Conditioned Chains of Thought》揭示了一个常见陷阱——依赖答案条件的CoT反而会削弱推理蒸馏效果。  
+普通读者建议从SPyCE入手理解多模态Agent的协作机制，同时注意在训练推理模型时避免“答案先验”的捷径设计。
+- 详情：[/202607/18/README](/202607/18/README)
 
 ### 精读区论文标签
-1. [Non-vacuous Generalization Bounds for Reinforcement Learning with Verifiable Rewards](/202607/17/2607.14506v1-non-vacuous-generalization-bounds-for-reinforcement-learning-with-verifiable-rewards)  
-   标签：评分：9.0/10、query:policy-dist
-   evidence：在LLM后训练中集成了on-policy蒸馏
-2. [Beyond Entropy: Correctness-Aware Advantage Shaping via Contrastive Policy Optimization](/202607/17/2607.14614v1-beyond-entropy-correctness-aware-advantage-shaping-via-contrastive-policy-optimization)  
-   标签：评分：9.0/10、query:policy-dist
-   evidence：将在线策略蒸馏纳入对比策略优化框架，提出正确性感知的优势塑造
-3. [SEED: Self-Evolving On-Policy Distillation for Agentic Reinforcement Learning](/202607/17/2607.14777v1-seed-self-evolving-on-policy-distillation-for-agentic-reinforcement-learning)  
-   标签：评分：9.0/10、query:policy-dist
-   evidence：提出自进化在线策略蒸馏用于LLM智能体强化学习
-4. [On-Policy Delta Distillation](/202607/17/2607.15161v1-on-policy-delta-distillation)  
-   标签：评分：9.0/10、query:policy-dist
-   evidence：直接研究后训练中的在线策略蒸馏
+1. [SPyCE: Skill-Policy Co-evolution for Multimodal Agents](/202607/18/2607.13854v1-spyce-skill-policy-co-evolution-for-multimodal-agents)  
+   标签：评分：8.0/10、query:policy-dist
+   evidence：在多模态强化学习中将轨迹蒸馏为可复用技能
 
 ### 速读区论文标签
-- 本次无速读推荐。
+1. [Meta-Learning Preferences for Multilingual LLM Alignment](/202607/18/2607.13315v1-meta-learning-preferences-for-multilingual-llm-alignment)  
+   标签：评分：7.0/10、query:policy-dist
+   evidence：用于多语言LLM对齐的元学习RLHF和DPO方法
+2. [Answer-Conditioned Chains of Thought Degrade Verifiable-Reasoning Distillation in Large Language Models](/202607/18/2607.14552v1-answer-conditioned-chains-of-thought-degrade-verifiable-reasoning-distillation-in-large-language-models)  
+   标签：评分：6.0/10、query:policy-dist
+   evidence：研究答案条件思维链如何降低推理蒸馏效果
+3. [Digital Pantheon: Simulating and Auditing Coalition Formation with LLM Agents](/202607/18/2607.15095v1-digital-pantheon-simulating-and-auditing-coalition-formation-with-llm-agents)  
+   标签：评分：6.0/10、query:policy-dist
+   evidence：使用RLHF和DPO对齐LLM智能体用于联盟模拟
 
 
 <div class="dpr-home-promo-card">
