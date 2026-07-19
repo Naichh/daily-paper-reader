@@ -1,6 +1,9 @@
 * <a class="dpr-sidebar-root-link" href="#/">首页</a>
 * <a class="dpr-sidebar-root-link dpr-sidebar-noactive-link" href="javascript:void(0)" data-dpr-hash="#/tutorial/README">使用教程</a>
 * Daily Papers
+  * 2026-07-19 <!--dpr-date:20260719-->
+    * 速读区
+      * <a class="dpr-sidebar-item-link dpr-sidebar-item-structured" href="#/202607/19/2607.14952v1-longstraw-long-context-rl-beyond-2m-tokens-under-a-fixed-gpu-budget" data-sidebar-item="{&quot;title&quot;: &quot;LongStraw: Long-Context RL Beyond 2M Tokens under a Fixed GPU Budget&quot;, &quot;link&quot;: &quot;https://arxiv.org/abs/2607.14952v1-longstraw-long-context-rl-beyond-2m-tokens-under-a-fixed-gpu-budget&quot;, &quot;score&quot;: &quot;6.0&quot;, &quot;tags&quot;: [{&quot;kind&quot;: &quot;query&quot;, &quot;label&quot;: &quot;policy-dist&quot;}], &quot;evidence&quot;: &quot;面向长上下文的强化学习后训练基础设施&quot;}">LongStraw: Long-Context RL Beyond 2M Tokens under a Fixed GPU Budget</a>
   * 2026-07-18 <!--dpr-date:20260718-->
     * 精读区
       * <a class="dpr-sidebar-item-link dpr-sidebar-item-structured" href="#/202607/18/2607.13854v1-spyce-skill-policy-co-evolution-for-multimodal-agents" data-sidebar-item="{&quot;title&quot;: &quot;SPyCE: Skill-Policy Co-evolution for Multimodal Agents&quot;, &quot;link&quot;: &quot;https://arxiv.org/abs/2607.13854v1-spyce-skill-policy-co-evolution-for-multimodal-agents&quot;, &quot;score&quot;: &quot;8.0&quot;, &quot;tags&quot;: [{&quot;kind&quot;: &quot;query&quot;, &quot;label&quot;: &quot;policy-dist&quot;}], &quot;evidence&quot;: &quot;在多模态强化学习中将轨迹蒸馏为可复用技能&quot;}">SPyCE: Skill-Policy Co-evolution for Multimodal Agents</a>
