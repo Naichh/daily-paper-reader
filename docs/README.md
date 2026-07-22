@@ -6,48 +6,35 @@
 </div>
 
 ## 每次日报
-- 最新运行日期：2026-07-21
-- 运行时间：2026-07-21 20:14:58 UTC
+- 最新运行日期：2026-07-22
+- 运行时间：2026-07-22 21:11:51 UTC
 - 运行状态：成功
-- 本次总论文数：8
-- 精读区：6
-- 速读区：2
+- 本次总论文数：5
+- 精读区：4
+- 速读区：1
 
 ### 今日简报（AI）
-今日共处理8篇论文，精读6篇，重点聚焦强化学习与蒸馏技术在LLM训练中的应用。
-
-最值得关注的两个方向：覆盖自适应策略蒸馏（CADENCE）和蒸馏强化学习后训练，两篇均获满分10分，揭示了通过自蒸馏缩小推理差距与优化后训练的新范式。
-
-建议读者优先深入研读这两篇10分论文，掌握其方法论核心；对速读中的“基于评分规则的自蒸馏”与“知识酿造”可作延伸了解。
-- 详情：[/202607/21/README](/202607/21/README)
+今日精读两篇高分论文，聚焦混合事后自我蒸馏与对比在线策略蒸馏。最值得关注的是H²SD与对比在线策略蒸馏，均获9.0分，揭示了知识蒸馏中结合事后经验与对比学习的新方向。建议优先深入阅读这两篇9.0分论文，并关注其方法在抗体CDR设计（如ABOPD）中的迁移应用。
+- 详情：[/202607/22/README](/202607/22/README)
 
 ### 精读区论文标签
-1. [CADENCE: Closing the Reasoning Gap via Coverage-Adaptive On-Policy Distillation](/202607/21/2607.16955v1-cadence-closing-the-reasoning-gap-via-coverage-adaptive-on-policy-distillation)  
-   标签：评分：10.0/10、query:policy-dist
-   evidence：覆盖自适应的在线策略蒸馏用于推理
-2. [Distilled Reinforcement Learning for LLM Post-training](/202607/21/2607.17247v1-distilled-reinforcement-learning-for-llm-post-training)  
-   标签：评分：10.0/10、query:policy-dist
-   evidence：提出蒸馏强化学习，将教师监督融入RL目标进行后训练
-3. [Post-Training Shifts Confidence: A Three-Stage Analysis of How SFT, RL, and OPD Shape CoT Calibration](/202607/21/2607.13753v2-post-training-shifts-confidence-a-three-stage-analysis-of-how-sft-rl-and-opd-shape-cot-calibration)  
+1. [H$^2$SD: Hybrid Hindsight Self-Distillation](/202607/22/2607.18955v1-h2sd-hybrid-hindsight-self-distillation)  
    标签：评分：9.0/10、query:policy-dist
-   evidence：研究在线蒸馏在CoT校准中的表现，与SFT和RL对比
-4. [Trace-Based On-Policy Distillation for Masked Diffusion Language Models](/202607/21/2607.16872v1-trace-based-on-policy-distillation-for-masked-diffusion-language-models)  
+   evidence：提出混合后见自我蒸馏，融合同策略蒸馏与自我蒸馏用于LLM的RLVR
+2. [Contrastive On-Policy Distillation](/202607/22/2607.19046v1-contrastive-on-policy-distillation)  
    标签：评分：9.0/10、query:policy-dist
-   evidence：针对扩散语言模型后训练的在线策略蒸馏
-5. [Why Does Feedback-Augmented Self-Distillation Fail to Improve Retrieval-Interleaved Search Agents?](/202607/21/2607.17558v1-why-does-feedback-augmented-self-distillation-fail-to-improve-retrieval-interleaved-search-agents)  
+   evidence：直接提出对比式同策略蒸馏，用于提升学生模型
+3. [Enhancing Rubric-based RL via Self-Distillation](/202607/22/2607.18082v2-enhancing-rubric-based-rl-via-self-distillation)  
    标签：评分：8.0/10、query:policy-dist
-   evidence：针对智能体搜索任务的在线自蒸馏研究
-6. [LLM-as-a-Coach: Experiential Learning for Non-Verifiable Tasks](/202607/21/2607.18110v1-llm-as-a-coach-experiential-learning-for-non-verifiable-tasks)  
+   evidence：基于规则的RL中结合自蒸馏用于LLM对齐
+4. [AdaFlash: Adaptive Speculative Decoding via On-Policy Distilled Diffusion Drafters](/202607/22/2607.19223v1-adaflash-adaptive-speculative-decoding-via-on-policy-distilled-diffusion-drafters)  
    标签：评分：8.0/10、query:policy-dist
-   evidence：使用on-policy context蒸馏
+   evidence：用于推测解码的在线蒸馏扩散草稿模型
 
 ### 速读区论文标签
-1. [Enhancing Rubric-based RL via Self-Distillation](/202607/21/2607.18082v1-enhancing-rubric-based-rl-via-self-distillation)  
-   标签：评分：7.0/10、query:policy-dist
-   evidence：基于rubric的RL中的自蒸馏方法
-2. [AgentBrew: Lifelong Knowledge Brewing from Strong Teachers to Weak LLM Agents](/202607/21/2607.16851v1-agentbrew-lifelong-knowledge-brewing-from-strong-teachers-to-weak-llm-agents)  
+1. [ABOPD: Antibody CDR Design via On-Policy Distillation](/202607/22/2607.18835v1-abopd-antibody-cdr-design-via-on-policy-distillation)  
    标签：评分：6.0/10、query:policy-dist
-   evidence：将教师经验蒸馏到学生记忆中
+   evidence：将同策略蒸馏应用于抗体CDR设计，展示了后训练策略
 
 
 <div class="dpr-home-promo-card">
