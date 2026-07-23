@@ -1,0 +1,623 @@
+Title: REGEN: Replay-recycling for Expert-to-Generalist distillation with Offline Reinforcement Learning
+
+URL Source: https://arxiv.org/pdf/2607.19450v1
+
+Published Time: Thu, 23 Jul 2026 00:04:03 GMT
+
+Number of Pages: 14
+
+Markdown Content:
+# REGEN: R EPLAY -RECYCLING FOR EXPERT -TO -G ENERALIST DISTILLATION WITH OFFLINE REINFORCEMENT LEARNING 
+
+Yunjie Chen 1,2, Xiaoxin Chen 1, Fang Wang 1∗
+
+> 1
+
+vivo AI Lab, Shenzhen, China 
+
+> 2
+
+Department of Computer Science, Sun Yat-Sen University, Guangzhou, China 
+
+## ABSTRACT 
+
+Large-scale online reinforcement learning (RL) is the predominant means of eliciting advanced abilities including long-term reasoning and agentic tool use in large language models (LLMs). However, continuing to scale it across vast task domains of interest remains challenging in both computational infrastructure and cost, especially when considering RL as merely a one-off learning stage. Recently, a widely used technique for distilling knowledge across various domains and training stages, multi-teacher on-policy distillation (MOPD), helps to decouple the RL stage, saving costs, while maintaining generality across vast domains. Nonetheless, similar to online RL, MOPD requires coupled inference and backward passes, which continues to limit its scalability and computational efficiency. To address these challenges, we propose REGEN: Replay-recycling for Expert-to-Generalist distillation with Offline RL . Instead of distilling from multiple teacher models, REGEN trains a generalist by simply recycling the replay memory—the free by-product of the teachers’ specialized RL training—and employing offline RL algorithms. REGEN completely decouples the rollout sampling from the backward training process and thus greatly reduces the training cost. Across mathematical reasoning, code generation, and instruction following, REGEN matches the accuracy of MOPD at substantially lower cost. It potentially turns online RL into a data synthesis process instead of a one-off learning stage, and can potentially be extended to large-scale post-training without requiring heavy computational load. 
+
+## 1 Introduction 
+
+Reinforcement learning (RL) has emerged as the dominant means of endowing large language models (LLMs) with strong reasoning and decision-making ability, underpinning recent advances in mathematical problem solving, program synthesis, scientific question answering, and agentic tool use [DeepSeek-AI, 2025, OpenAI, 2024]. However, as the field shifts from optimizing models for individual tasks toward training generalist reasoning agents, large-scale online RL is approaching a structural bottleneck due to the following reasons. First, jointly optimizing a single policy across many task domains can be relatively challenging and expensive owing to the phenomenon of negative transfer [Yu et al., 2020, Ahn et al., 2025, Wu et al., 2026], especially when it comes to RL, which requires complex infrastructure and substantial exploration costs, or even different reward models and hyper-parameters across different domains. Second, online RL is inherently a one-off optimization process that does not lend itself to straightforward aggregation across domains or stages. Historical rollouts are seldom reused in subsequent training runs—even when the training tasks remain unchanged—leading to a significant waste of computational resources whenever base models or task distributions are switched. To mitigate the cost of large-scale RL across diverse domains and training stages, multi-teacher distillation [Hinton et al., 2015, You et al., 2017] has become a practical alternative, in which multiple domain-specialized RL experts are first trained and then serve as teachers for a separate distillation stage. A central obstacle in distilling RL teachers is the well-known problem of distribution shift [Ross and Bagnell, 2010], whereby the trajectory distribution induced by the student diverges from that of the teacher. To address this issue, data aggregation [Ross and Bagnell, 2010] 
+
+> ∗
+
+Corresponding to: fanwang.px@gmail.com arXiv:2607.19450v1 [cs.LG] 21 Jul 2026 REGEN: Replay-recycling for Expert-to-Generalist distillation with Offline Reinforcement Learning Teacher N                         
+
+> Reinforcement
+> Learning
+> ⋮⋮
+> ImportanceSampling
+> Off-PolicyOptimization
+> Multi-domainGeneralist
+> MOPD
+> Class-Balanced
+> Sampling
+> ⋮
+> ⋮
+> Domain1
+> Tasks
+> Domain2
+> Tasks
+> DomainN
+> Tasks
+> ⋮⋮
+> …
+> On-policy
+> Rollout
+> Distillation
+> REGEN
+> ReplayMemory1
+> ReplayMemory2
+> ReplayMemoryN
+> Teacher2
+> Teacher1
+> Collecting
+> Tasks&Teachers
+> TrainingSpecialistTeachersDistillingGeneralist
+> On-policy
+> RolloutDistillation
+> ⋮⋮
+> Muti-
+> Experts
+> Recyling
+> ReplayMemory
+
+Figure 1: Sketch of the Replay-recycling for Expert-to-Generalist Distillation with Offline RL (REGEN) method in comparison with Multi-Teacher On-Policy Distillation (MOPD) and on-policy distillation (OPD) [Agarwal et al., 2024, Gu et al., 2024, Kim and Rush, 2016] supervise the student on its own generated trajectories using teacher-provided signals. In the multi-domain setting, the Multi-teacher OPD (MOPD) [Xiaomi, 2026, Ma et al., 2026], routes each prompt to the corresponding domain-expert teacher, and thus serves as the natural distillation baseline. Although these methods effectively alleviate distribution shift, they require online inference, supervision, and backpropagation to proceed simultaneously, as in RL, and consequently remain computationally expensive. Motivated by the observation that the rollout trajectories generated as a by-product of an online RL run constitute a rich source of supervision typically discarded by existing pipelines, we propose REGEN : Replay-recycling for 
+
+Expert-to-GEN eralist Distillation with Offline RL as an alternative to MOPD. As shown in Figure 1, instead of distilling from trained teachers, REGEN aggregates the replay memory collected during specialist training into a single offline dataset, on which a generalist student is optimized. This method fully decouples data generation from student training, eliminating the need for teachers or rollout engines in the training loop. Through an appropriate combination of a data sampling and an off-policy offline RL objective, REGEN achieves performance and robustness comparable to MOPD at substantially lower computational cost. More broadly, it reframes any RL training run as a data-production pipeline, offering a scalable path toward large-scale RL on large models, including LLMs and beyond. 
+
+## 2 Related Work 
+
+2.1 Reinforcement Learning for LLM Post-Training 
+
+Building on the vast abilities and knowledge acquired from pre-training and supervised fine-tuning (SFT) [Ouyang et al., 2022a], RL adapts the LLM to human preferences [Ouyang et al., 2022a, Christiano et al., 2017, Ouyang et al., 2022b] and other more specific objectives and advanced abilities, including mathematical and programming tasks [DeepSeek-AI, 2025], chain-of-thought reasoning [Guo et al., 2025], and agentic tool use [Zhang et al., 2026]. Commonly used RL algorithms for LLMs range from proximal policy optimization (PPO) [Schulman et al., 2017], direct preference optimization (DPO) [Rafailov et al., 2023], to group relative policy optimization (GRPO) [Shao et al., 2024], most of which depend on on-policy optimization, where the optimized model continually generates rollouts for training itself in the next stage. A constraint in on-policy RL methods is that the distribution gap between the trajectories used for training and the current policy cannot be too large. This requires RL to proceed through consecutive inference, evaluation, and training. This coupled process raises considerable challenges for infrastructure and learning in several perspectives: First, RL can be much less sample efficient, as it spends most of its costs on exploring relatively low-valued trajectories. Second, considerable efforts are required for the synchronization between inference, evaluation, 2REGEN: Replay-recycling for Expert-to-Generalist distillation with Offline Reinforcement Learning and training in order to maximize the utility of the computational resources [Sheng et al., 2025, Hu et al., 2024]. Third, the modern RL training pipelines for LLMs across different domains can differ a lot in environment settings, including evaluation methods, raising additional challenges for a unified training infrastructure. 
+
+2.2 Policy Distillation from Multiple Teachers 
+
+To address the bottlenecks of building a unified RL framework for all domains, divide-and-conquer RL training combined with policy distillation from multiple teachers offers an alternative path with lower complexity and greater flexibility. LLMs are first trained separately in multiple domains; these domain specialists are then distilled into a generalist capable of performing across domains. Policy distillation is a long-standing topic, with Behaviour Cloning (BC) [Pomerleau, 1988] constituting its most direct realization, formulating policy learning as supervised maximum-likelihood estimation over expert trajectories [Pomerleau, 1988]. A well-documented limitation of BC is distribution shift : since the policy is trained under the state distribution induced by the expert but deployed under its own distribution, per-step prediction errors accumulate over the horizon and degrade long-sequence performance [Ross and Bagnell, 2010]. This challenge has been addressed by shifting the student’s state distribution, leading to approaches such as Data Aggregation (DAgger) [Ross et al., 2011] and inverse RL [Ng and Russell, 2000]. When it comes to optimizing LLMs, BC and DAgger take the form of knowledge distillation [Hinton et al., 2015] and on-policy distillation (OPD) [Agarwal et al., 2024], respectively. DAgger and OPD achieve significantly better performance and much lower regret than BC and naive knowledge distillation, as the state distribution gap has been largely bridged, but at the cost of coupling inference and optimization, much like RL. Nonetheless, OPD inspired Multi-teacher OPD (MOPD) [Xiaomi, 2026, Ma et al., 2026] to become the state-of-the-art for training LLMs across vast domains. 
+
+2.3 Offline Reinforcement Learning 
+
+Addressing the distribution mismatch between training trajectories and the policy being optimized is a long-standing topic in reinforcement learning. Offline RL, in particular, must address the most significant distribution gap, where static trajectories generated by any behavior policy may be used to optimize the performance of a completely unrelated policy [Levine et al., 2020]. Distribution mismatch can cause convergence issues [Baird, 1995] and value estimation biases [Fujimoto et al., 2019], and deteriorate or completely ruin the performances of existing RL algorithms. Typical methods for addressing this challenge include explicit policy regularization to restrict the deviation of the policy distri-bution [Fujimoto et al., 2019, Kumar et al., 2019], conservative value estimation to correct value overestimation [Kumar et al., 2020], and importance-sampling-based off-policy correction to compensate for the deviation in the trajectory distribution. The replay memory, or replay buffer, has been widely applied in off-policy RL algorithms to enhance data reuse and improve sample efficiency [Lange and Riedmiller, 2010, Mnih et al., 2015, Ritter et al., 2026, Arnal et al., 2026]. However, most methods retain only a time window of historical trajectories to avoid a large distribution gap. The application of replay memories from entirely different models remains underexplored, especially in the context of training LLMs. 
+
+## 3 Methodology 
+
+3.1 Preliminaries 
+
+Consider x to be the context, which includes the user prompt and dialogue history, and y to be the answer output of the LLM. We use the policy π(·| x) to represent the distribution of the LLM’s generation. We define each task domain as τd = ( Xd = {x(i) 
+
+> d
+
+}, r d(·)) , where Xd is a collection of tasks or user queries, rd(·) is the evaluation function for domain τd, which can potentially be a reward model or rules. Given D domains τ1, . . . , τ D , a LLM π is first trained independently in each domain as follows: 
+
+π RL (Xd,r d)
+
+−−−−−−→ π∗ 
+
+> d
+
+, (1) with π∗ 
+
+> d
+
+representing the teacher policy for domain d. However, π∗ 
+
+> d
+
+is a domain specialist, as it typically fails in different domains. The most straightforward approach to distilling the teachers is behavior cloning (BC) [Pomerleau, 1988], which forces each teacher to perform inference at its own mastered domain y∗ 
+
+> d
+
+∼ π∗ 
+
+> d
+
+(·| xd), and minimizes the following imitation loss for the policy πθ to be optimized: 
+
+LBC (θ) ∝ − X
+
+> d≤D
+
+Ex∼Xd,y ∼π∗ 
+
+> d(·| xd)
+
+"
+
+1
+
+|y|
+
+X
+
+> t
+
+log πθ (yt | x, y <t )
+
+#
+
+. (2) The risk of BC is that when the self-generated trajectory y<t deviates from the teacher generated trajectory y∗
+
+> d,<t
+
+, the remaining trajectories might enter a "unfamiliar zone" and thus lead to the explosion of prediction error. To avoid the 3REGEN: Replay-recycling for Expert-to-Generalist distillation with Offline Reinforcement Learning impact of this distribution shift, OPD [Agarwal et al., 2024] utilizes supervision on self-generated trajectory instead of teacher generated trajectory. The loss function takes the following form: 
+
+LOPD (θ) ∝ − X
+
+> d≤D
+
+Ex∼Xd, y ∼πθ (·| x)
+
+"
+
+1
+
+|y|
+
+X
+
+> t
+
+AOPD  
+
+> t
+
+log πθ (yt | x, y <t )
+
+#
+
+, (3) 
+
+AOPD  
+
+> t
+
+= stop-gradient 
+
+
+
+log π∗ 
+
+> d
+
+(yt|x, y <t )
+
+πθ (yt|x, y <t )
+
+
+
+.
+
+where the KL divergence between the teacher and the student is minimized on the student-generated trajectories instead of the teacher’s. The advantage AOPD  
+
+> t
+
+penalizes tokens that are less likely to be generated by the teacher and more likely to be generated by the student, while encouraging the reverse. MOPD [Xiaomi, 2026, Ma et al., 2026] further notices the lag between the student policy that generates the rollouts and the current policy under optimization, and introduces an importance weight wt to re-weight the advantage. It also introduces a reward-based advantage (such as the GRPO advantage) in addition to the KL divergence, forming a hybrid method integrating RL and policy distillation, which gives the advantage value of the following final form, with [ · ]ba representing clipping the importance ratio to [a, b ].
+
+AMOPD  
+
+> t
+
+= wt(AOPD  
+
+> t
+
++ αA GRPO  
+
+> t
+
+), (4) 
+
+y ∼ πθlag (·| x), w t = stop-gradient 
+
+" πθ (yt | x, y <t )
+
+πθlag (yt | x, y <t )
+
+ba
+
+#
+
+3.2 Replay-recycling for Expert-to-Generalist Distillation with Offline RL 
+
+Instead of utilizing the teacher’s policy π∗ 
+
+> d
+
+to supervise the trajectory, we choose to recycle the experience within the RL training process of each teacher RL (Xd, r d), which we denote as Ed = {(x(i), y (i), r (i))}. The motivation for recycling the teacher’s experience is straightforward: since domain experience drives the model to become domain specialists, accumulating experiences across those domains should at least be capable of driving the model to become competent in those domains. The only problem is the distribution shift; therefore, it is desirable to apply off-policy correction and offline learning algorithms. We name this method Replay-recycling for expert-to-generalist distillation with offline RL, or REGEN for short. The target loss of REGEN is motivated by two key considerations: • Existing Offline RL methods without importance sampling such as DPO [Rafailov et al., 2023] render most offline samples ineffective, while off-policy GRPO [Mroueh et al., 2025] introduces importance sampling but employs symmetric clipping designed for near on-policy updates, zeroing out the gradient of any sequence whose importance ratio falls outside the given clipping interval and thereby discarding most learning signals under the large distribution shift of accumulated experiences. In contrast, TOPR [Roux et al., 2025] adopts Truncated Importance Sampling (TIS), which clips only the importance weight that modulates the gradient while leaving the underlying policy gradient term intact. • Concerning unified cross-domain optimization, the original reward signal employed by TOPR can be adversely affected by discrepancies in reward settings across different domains. A more principled alternative is to replace the raw reward with a normalized advantage following GRPO. However, GRPO normalizes the advantage exclusively within rollouts generated consecutively by a unique policy, here we need to compute the advantage over the history, with different rollouts possibly coming from different policy snapshots. Consequently, REGEN adopts the following loss function for offline trajectories: 
+
+LREGEN (θ) = − X
+
+> d≤D
+
+E(x,y,r )∼E d
+
+"
+
+AREGEN · 1
+
+|y|
+
+X
+
+> t
+
+log πθ (yt|x, y <t )
+
+#
+
+, (5) 
+
+AREGEN =
+
+
+
+ˆA, if r ≥ rHd
+
+stop-gradient 
+
+"  πθ (y|x)
+
+μ(y|x)
+
+10
+
+#
+
+ˆA, else ,
+
+ˆA = r − ˆE(r|x, Ed)
+
+q ˆV(r|x, Ed) + ε. (6) 
+
+rHd is a reward threshold defined per domain, serving as the criterion for classifying a sample as positive or negative. 
+
+ˆE and ˆV are the empirical mean and variance, respectively. Notice that μ here is the policy that was used to sample 4REGEN: Replay-recycling for Expert-to-Generalist distillation with Offline Reinforcement Learning the rollout y at that moment. Therefore, it does not refer to a single uniform policy, but rather a collection of policies accumulated across the training process and across different domains. Another issue is that for each x ∈ Xd, the corresponding output trajectories recorded in Ed may be generated by models of various training stages and can become excessively large in number. To address these challenges, REGEN introduces two additional techniques: augmented experience recording and class-balanced sampling. 
+
+Augmented experience recording. This phase harvests all rollouts from each teacher’s online RL training without forgetting. To ensure μ(y|x) in Equation 5 can be effectively retrieved, we record the Negative Log Likelihood (NLL) 
+
+z = − P 
+
+> t
+
+log μ(yt|x, y <t ) as the policy generating the rollout, and therefore the replay buffer is augmented by the NLL and represented as: 
+
+Ξd = {( x(i), y (i), z (i), r (i))}, (7) this replay buffer then ensures the estimation of μ can be efficiently recovered by μ(y(i)|x(i)) = exp( −z(i)).
+
+Class-balanced sampling. Similar to GRPO, we group the responses in the replay buffer by the same query. Since an overwhelming number of negative samples has been found to be harmful to RL training [Hong et al., 2023], while uniform sampling—in accumulated rollouts where positives dominate—repeatedly draws highly similar positive samples, reducing sample diversity, collapsing the advantage signal and driving the model to overfit the concentrated positive mode, and positives-only filtering discards negatives entirely, losing the contrastive signal needed to localize decision boundaries [Roux et al., 2025], we additionally apply Class-Balanced Sampling (CBS) [Cui et al., 2019] to adjust the distribution between positive and negative samples. Specifically, we retain only the valid queries, i.e., those that have at least one positive response and one negative response. For each query x, define the positive and negative groups: 
+
+Ξ± 
+
+> d
+
+(x) = {(x, y, z, r ) ∈ Ξd : r ⋛ rHd }, (8) where ⋛ is > for + and ≤ for − (or vice versa). To balance them, we downsample each group with probability 
+
+p±(x) = min( |Ξ+ 
+
+> d
+
+(x)|, |Ξ− 
+
+> d
+
+(x)|)
+
+|Ξ± 
+
+> d
+
+(x)| , (9) and form Ed(x) = Down-Sample (Ξ + 
+
+> d
+
+(x), p +(x)) ∪ Down-Sample (Ξ − 
+
+> d
+
+(x), p −(x)) . Offline training is based on the down-sampled trajectories over all queries Ed = {E d(x) : x ∈ Xd}. Notice that in Equation 5, the advantage ˆAt is calculated over the down-sampled group Ed(x) with respect to each query x. A review of the REGEN method is shown in Algorithm 1. 
+
+Algorithm 1 Replay-recycling for Expert-to-Generalist Distillation with Offline RL (REGEN) 
+
+Require: Tasks from D domains: {(Xd, r d)}; Initial model: π 
+
+> 1:
+
+Experience Recording : Independently train teachers and collect experiences following Equation 7.  
+
+> 2:
+
+Class-balanced Sampling : Filter and down-sample the replay buffer according to Equations 8 and 9.  
+
+> 3:
+
+Off-Policy Optimization : Update the student model using the REGEN objective functions (Equation 5).  
+
+> 4:
+
+return The generalist policy πθ .Note that REGEN can be readily extended to multi-turn tasks, where x represents both the query and the dialogue context at each turn. Moreover, it does not require the rollout-generating policy and the policy under optimization to share the same backbone or the same vocabulary as the teacher. These features endow the method with exceptional flexibility in data accumulation and offline training. 
+
+## 4 Experiments 
+
+4.1 Experiment Settings 
+
+To validate the effectiveness of REGEN in training generalist models, we perform joint training across three domains using the Qwen2.5-1.5B-Instruct [Yang et al., 2024] as the base model: mathematical problem solving ( Math ), code generation ( Code ), and instruction following ( Alignment ). Our training corpora consist of GSM8K [Cobbe et al., 2021] and MATH [Hendrycks et al., 2021] for Math, KodCode-Light-RL-10K [Xu et al., 2025] for Code, and an IFEval-style instruction-following dataset [Hugging Face H4, 2024] for Alignment. For evaluation, we primarily report pass@1 accuracy on the following test sets: GSM8K, MATH, HumanEval [Chen et al., 2021], MBPP [Austin et al., 2021], and the loose-match accuracy on IFEval [Zhou et al., 2023]. We additionally evaluate multiple inference-time decoding metrics, with detailed results deferred to Appendix A. 5REGEN: Replay-recycling for Expert-to-Generalist distillation with Offline Reinforcement Learning We first train domain-expert teachers via online RL, specifically GRPO [Shao et al., 2024], under a unified configuration shared across domains. The specific reward allocation modes for different domains are explained in Appendix B. We set the maximum generation length to 1024 , sample n = 4 responses per prompt, use a global batch size of 128 , and adopt a learning rate of 1 × 10 −6. Each RL run is trained for 4 epochs. Overall, training these teachers yields approximately 
+
+800 K logged trajectories in total and produces one expert model per domain. Based on the trained teachers and logged trajectories, we mainly compare the following methods: • Behavior Cloning (BC) [Pomerleau, 1988]: We select the best checkpoint from each online RL run as the domain-expert teacher and employ it to re-label answers to the training queries across all three domains. The student base model is then directly trained on this re-labeled corpus using Equation 2. • Multi-Teacher On-Policy Distillation (MOPD) [Xiaomi, 2026, Ma et al., 2026]: After acquiring the domain-expert teachers, for each training query across all three domains, we generate a new rollout using the policy under optimization, evaluate the answer with a reward, and relabel each token according to the corresponding domain expert. The student model is then trained with Equation 4. • REGEN : We apply CBS [Cui et al., 2019] directly to the logged trajectories, yielding 140 K trajectories with an equal number of positive and negative examples. We then train the student base model on this sampled dataset by minimizing the REGEN objective in Equation 5. For training BC, MOPD, and REGEN, we adopt experimental settings similar to those for teacher training, with a maximum sequence length of 1024 , a batch size of 128 , a slightly lower learning rate of 5.0 × 10 −7, and 4 training epochs. To ensure a fair comparison—even though REGEN can leverage a much larger corpus at minimal additional cost—we keep the total corpus used across the three methods to an identical size of 140 K, distributed roughly uniformly among the domains. Specific distribution statistics of the collected replay memory are provided in Appendix C. All experiments are conducted on a single node equipped with 4 NVIDIA L40S GPUs, each with 48 GB of memory. Each device uses a maximum local batch size of 4, and we apply 8-step gradient accumulation to reach an effective global batch size of 128 .
+
+4.2 Main Results 
+
+Table 1 summarizes the performance of different methods across five benchmarks. Overall, REGEN performs on par with MOPD across all benchmarks while substantially outperforming BC, particularly on Code and Alignment, demonstrating that both REGEN and MOPD are effective approaches for training generalist models across diverse domains. Notably, REGEN achieves this competitive accuracy with considerably higher training efficiency than MOPD. Since the student trainer maintains only πθ , without hosting either the teacher model or a rollout engine during training, REGEN eliminates the online teacher inference that dominates MOPD’s computational cost, thereby achieving substantially higher training throughput and lower per-token latency, as shown in Fig. 2. Despite these gains, both REGEN and MOPD remain noticeably behind the code teacher on HumanEval. We attribute this gap to a fundamental limitation of policy distillation under distribution shift [Ross and Bagnell, 2010]. Specifically, KodCode-Light-RL-10K, the code training corpus, consists primarily of code generation tasks similar to MBPP, whereas HumanEval evaluates code completion. Because both methods ultimately distill the teacher’s behavior only on the training distribution, the mismatch between generation and completion prevents the student’s policy from fully inheriting the teacher’s capabilities on the target benchmark. On MBPP and IFEval, REGEN trails MOPD by a moderate margin. This difference stems primarily from the granularity of the supervision signals. MOPD receives high-quality online guidance from the domain-expert teacher, which provides token-level KL supervision on the student’s own rollouts together with GRPO advantages. Such dense, per-token supervision is particularly beneficial for tasks requiring precise constraint satisfaction. In contrast, REGEN relies exclusively on trajectory-level rewards and truncated importance sampling over static offline data, yielding substantially coarser supervision without the fine-grained corrective signals available in online teacher-guided training. Although REGEN is slightly behind MOPD under pass@1 on certain benchmarks, this gap narrows or even reverses under multiple inference-time decoding metrics, where online methods exhibit inherent limitations [Chen et al., 2026] while offline methods remain unaffected, as detailed in Appendix A. 
+
+4.3 Ablations and Analysis RQ1: How do the sampling strategy and training objective affect model performance? We compare all com-binations of sampling strategy and training objective in Table 2. Overall, the results provide direct empirical support for the design choices introduced in Section 3.2. Across almost all benchmarks, CBS consistently outperforms both 6REGEN: Replay-recycling for Expert-to-Generalist distillation with Offline Reinforcement Learning Table 1: Accuracy on the Math, Code, and Alignment domains. Student is the base model Qwen2.5-1.5B-Instruct and 
+
+Teacher is the online-RL domain-expert. The best result among BC, MOPD, and REGEN in each row is highlighted in bold, and the value in parentheses in the REGEN column denotes its performance gap relative to MOPD. Domain Benchmark Student Teacher BC MOPD REGEN (Ours) Math GSM8K 76.6 81.2 79.4 79.9 79.5 ( −0.4)MATH 53.6 57.0 57.0 57.3 58.4 (+1 .1)Code HumanEval 55.5 66.5 57.3 62.2 62.2 (+0 .0)MBPP 65.3 70.4 66.9 71.4 69.3 ( −2.1)Alignment IFEval 52.7 73.0 65.4 73.2 71.5 ( −1.7)MOPD REGEN (Ours)    
+
+> 10 2
+> 10 3
+> 10 4
+> Throughput (Tokens / s)
+> 382.0
+> 7,714.5
+> 20.19 ×faster
+> (a) Training Throughput
+> MOPD REGEN (Ours)
+> 0
+> 200
+> 400
+> 600
+> 800
+> Time (Ms / 1k Tokens)
+> 463.3
+> 218.7
+> Total: 684.2
+> 43.2
+> 86.4
+> Total: 129.6
+> 5.28 ×faster
+> (b) Per-1k-Token Latency Breakdown
+> Forward Pass
+> Backward Pass
+
+Figure 2: Training efficiency of REGEN versus MOPD on four 48 GB NVIDIA L40S GPUs. MOPD places each of the three teachers on one GPU and the student on the remaining one, while REGEN trains the student on all four GPUs without any teacher serving. uniform sampling and positives-only filtering, confirming its effectiveness in correcting the imbalance inherent in accumulated rollouts. Likewise, REGEN consistently surpasses TOPR, off-policy GRPO, and DPO, demonstrating that the asymmetric TIS objective handles distribution shift more effectively than symmetric clipping and preference-based alternatives. The only exception is MBPP, where positives-only SFT achieves the best performance. This difference stems from the nature of code generation: a program forms an integrated computation through its control flow, so an error typically propagates globally rather than remaining localized. Consequently, a fully correct program already serves as a clean imitation target, whereas an incorrect one provides little transferable supervision. By contrast, in mathematical reasoning, positive and negative solutions usually share most intermediate reasoning steps and diverge only at the erroneous step, while in IFEval the soft compositional constraints preclude a simple binary correctness criterion. In both settings, contrasting a correct solution with a near-miss negative provides critical supervision for localizing the decision boundary. 
+
+RQ 2: To what extent is REGEN robust to capacity mismatches? Prior work has shown that capacity mismatch between teacher and student can hinder knowledge distillation performance [Cho and Hariharan, 2019], and this issue can be even more pronounced in offline RL settings. Therefore, it is crucial to determine how much discrepancy between the student policy and the behavior policy (i.e., the policy that generates the rollouts) can be tolerated for the student to still benefit from the data. To investigate this, we utilize trajectories collected from training a 1.5B teacher model to optimize a smaller 0.5B student, specifically Qwen2.5-0.5B-Instruct. As shown in Table 3, REGEN remains within 1 to 3 accuracy points of MOPD and surpasses it on three of the five benchmarks, while BC remains clearly behind both on most tasks. Thus a single collection pass can serve students of different scales, whereas MOPD requires fresh online teacher inference for each new student. 
+
+RQ 3: How does the performance of REGEN differ between multi-domain and single-domain training? We investigate whether training a single student jointly across all domains incurs any performance degradation compared with training a dedicated specialist for each domain. Figure 3 compares our multi-domain offline student with single-domain students trained using the same objective on each domain independently. Across all five benchmarks, the performance gap never exceeds 2 accuracy points, and neither setting consistently outperforms the other. These results 7REGEN: Replay-recycling for Expert-to-Generalist distillation with Offline Reinforcement Learning Table 2: Ablation of the sampling strategy and training objective on Qwen2.5-1.5B-Instruct, using the accumulated rollout trajectories logged along the online teachers’ RL runs. The best result in each column is highlighted in bold .GRPO denotes off-policy GRPO. Sampling Objective GSM8K MATH HumanEval MBPP IFEval CBS REGEN 79.5 58.4 62.2 69.3 71.5 
+
+TOPR 78.5 57.6 61.6 70.1 66.7 GRPO 76.5 52.6 60.4 68.8 60.0 DPO 75.3 54.7 60.4 65.9 56.9 Uniform REGEN 77.2 56.7 60.4 68.5 71.0 TOPR 77.7 56.7 59.1 69.6 70.1 GRPO 74.9 54.1 59.1 66.9 67.8 Positives Only SFT 77.7 57.3 61.0 72.0 68.2 Table 3: Robustness to capacity mismatch: trajectories collected from the 1.5B teacher, the same one used in Table 1, are reused to train a smaller Qwen2.5-0.5B-Instruct student. Domain Benchmark Student Teacher BC MOPD REGEN (Ours) Math GSM8K 48.7 81.2 51.9 60.6 57.8 ( −2.8)MATH 32.6 57.0 35.2 36.5 38.1 (+1 .6)Code HumanEval 39.0 66.5 40.6 40.2 41.5 (+1 .3)MBPP 48.4 70.4 47.1 51.9 52.6 (+0 .7)Alignment IFEval 38.1 73.0 46.2 59.9 57.1 ( −2.8)indicate that aggregating data from multiple domains introduces little to no cross-domain interference, demonstrating that REGEN remains stable and effective when a single student is shared across diverse domains. 1 2 3 4      
+
+> Epoch
+> 55
+> 60
+> 65
+> 70
+> 75
+> 80
+> Accuracy (%)
+> GSM8K
+> MATH
+> Math
+> GSM8K
+> Multi-GSM8K
+> Single-GSM8K
+> MATH
+> Multi-MATH
+> Single-MATH
+> 1234
+> Epoch
+> 60
+> 62
+> 64
+> 66
+> 68
+> 70
+> Accuracy (%)
+> MBPP
+> HumanEval
+> Code
+> MBPP
+> Multi-MBPP
+> Single-MBPP
+> HumanEval
+> Multi-HumanEval
+> Single-HumanEval
+> 1234
+> Epoch
+> 67
+> 68
+> 69
+> 70
+> 71
+> 72
+> 73
+> Accuracy (%)
+> IFEval
+> Alignment
+> Multi-IFEval
+> Single-IFEval
+
+Figure 3: Multi-domain versus single-domain training with REGEN on Qwen2.5-1.5B-Instruct. Multi trains one student jointly over all three domains, whereas Single trains a separate student per domain. The two settings share identical training hyperparameters. 
+
+## 5 Conclusion and Discussion 
+
+We propose REGEN, a method that recycles the replay memory accumulated during RL training of domain-expert teachers to subsequently train a generalist student. Through class-balanced sampling and an advantage-weighted asymmetric offline objective, REGEN achieves accuracy comparable to MOPD at substantially lower computational cost, surpassing naive behavior cloning by a significant margin. More broadly, REGEN reframes any RL run as a 8REGEN: Replay-recycling for Expert-to-Generalist distillation with Offline Reinforcement Learning recyclable data-production process rather than a one-off learning stage, offering a scalable path toward large-scale post-training. Our work effectively demonstrates the potential of reusing replay memory; however, the optimal strategy for leveraging this resource remains an open question worthy of deeper investigation. For example, are the negative samples discarded by CBS truly devoid of value, or could more sophisticated reuse methods unlock additional utility? Furthermore, while REGEN currently treats all replay data uniformly regardless of their generation stage, incorporating stage-specific information may enable more effective utilization. We leave these directions to future work. 
+
+## References 
+
+DeepSeek-AI. Deepseek-r1: Incentivizing reasoning capability in llms via reinforcement learning. CoRR ,abs/2501.12948, 2025. doi:10.48550/ARXIV.2501.12948. URL https://doi.org/10.48550/arXiv.2501. 12948 .OpenAI. Openai o1 system card. CoRR , abs/2412.16720, 2024. doi:10.48550/ARXIV.2412.16720. URL https: //doi.org/10.48550/arXiv.2412.16720 .Tianhe Yu, Saurabh Kumar, Abhishek Gupta, Sergey Levine, Karol Hausman, and Chelsea Finn. Gradient surgery for multi-task learning. Advances in neural information processing systems , 33:5824–5836, 2020. Hongjoon Ahn, Jinu Hyeon, Youngmin Oh, Bosun Hwang, and Taesup Moon. Prevalence of negative transfer in continual reinforcement learning: Analyses and a simple baseline. In The Thirteenth International Conference on Learning Representations , 2025. Runzhe Wu, Ankur Samanta, Ayush Jain, Scott Fujimoto, Jeongyeol Kwon, Ben Kretzu, Youliang Yu, Kaveh Hassani, Boris Vidolov, and Yonathan Efroni. Imbalanced gradients in rl post-training of multi-task llms. In Findings of the Association for Computational Linguistics: EACL 2026 , pages 3137–3150, 2026. Geoffrey E. Hinton, Oriol Vinyals, and Jeffrey Dean. Distilling the knowledge in a neural network. CoRR ,abs/1503.02531, 2015. URL http://arxiv.org/abs/1503.02531 .Shan You, Chang Xu, Chao Xu, and Dacheng Tao. Learning from multiple teacher networks. In Proceedings of the 23rd ACM SIGKDD International Conference on Knowledge Discovery and Data Mining, Halifax, NS, Canada, August 13 - 17, 2017 , pages 1285–1294. ACM, 2017. doi:10.1145/3097983.3098135. URL https: //doi.org/10.1145/3097983.3098135 .Stéphane Ross and Drew Bagnell. Efficient reductions for imitation learning. In Yee Whye Teh and D. Mike Titterington, editors, Proceedings of the Thirteenth International Conference on Artificial Intelligence and Statistics, AISTATS 2010, Chia Laguna Resort, Sardinia, Italy, May 13-15, 2010 , volume 9 of JMLR Proceedings , pages 661–668. JMLR.org, 2010. URL http://proceedings.mlr.press/v9/ross10a.html .Rishabh Agarwal, Nino Vieillard, Yongchao Zhou, Piotr Stanczyk, Sabela Ramos Garea, Matthieu Geist, and Olivier Bachem. On-policy distillation of language models: Learning from self-generated mistakes. In The Twelfth Inter-national Conference on Learning Representations, ICLR 2024, Vienna, Austria, May 7-11, 2024 . OpenReview.net, 2024. URL https://openreview.net/forum?id=3zKtaqxLhW .Yuxian Gu, Li Dong, Furu Wei, and Minlie Huang. Minillm: Knowledge distillation of large language models. In 
+
+The Twelfth International Conference on Learning Representations, ICLR 2024, Vienna, Austria, May 7-11, 2024 .OpenReview.net, 2024. URL https://openreview.net/forum?id=5h0qf7IBZZ .Yoon Kim and Alexander M. Rush. Sequence-level knowledge distillation. In Jian Su, Xavier Carreras, and Kevin Duh, editors, Proceedings of the 2016 Conference on Empirical Methods in Natural Language Processing, EMNLP 2016, Austin, Texas, USA, November 1-4, 2016 , pages 1317–1327. The Association for Computational Linguistics, 2016. doi:10.18653/V1/D16-1139. URL https://doi.org/10.18653/v1/d16-1139 .LLM-Core Xiaomi. Mimo-v2-flash technical report. CoRR , abs/2601.02780, 2026. doi:10.48550/ARXIV.2601.02780. URL https://doi.org/10.48550/arXiv.2601.02780 .Wenhan Ma, Jianyu Wei, Liang Zhao, Hailin Zhang, Bangjun Xiao, Lei Li, Qibin Yang, Bofei Gao, Yudong Wang, Rang Li, et al. Mopd: Multi-teacher on-policy distillation for capability integration in llm post-training. arXiv preprint arXiv:2606.30406 , 2026. Long Ouyang, Jeffrey Wu, Xu Jiang, Diogo Almeida, Carroll Wainwright, Pamela Mishkin, Chong Zhang, Sandhini Agarwal, Katarina Slama, Alex Ray, et al. Training language models to follow instructions with human feedback. 
+
+Advances in neural information processing systems , 35:27730–27744, 2022a. 9REGEN: Replay-recycling for Expert-to-Generalist distillation with Offline Reinforcement Learning Paul F. Christiano, Jan Leike, Tom B. Brown, Miljan Martic, Shane Legg, and Dario Amodei. Deep reinforcement learning from human preferences. In Isabelle Guyon, Ulrike von Luxburg, Samy Bengio, Hanna M. Wallach, Rob Fergus, S. V. N. Vishwanathan, and Roman Garnett, editors, Advances in Neural Information Processing Systems 30: Annual Conference on Neural Information Processing Systems 2017, December 4-9, 2017, Long Beach, CA, USA , pages 4299–4307, 2017. URL https://proceedings.neurips.cc/paper/2017/hash/ d5e2c0adad503c91f91df240d0cd4e49-Abstract.html .Long Ouyang, Jeffrey Wu, Xu Jiang, Diogo Almeida, Carroll L. Wainwright, Pamela Mishkin, Chong Zhang, Sandhini Agarwal, Katarina Slama, Alex Ray, John Schulman, Jacob Hilton, Fraser Kelton, Luke Miller, Mad-die Simens, Amanda Askell, Peter Welinder, Paul F. Christiano, Jan Leike, and Ryan Lowe. Training lan-guage models to follow instructions with human feedback. In Sanmi Koyejo, S. Mohamed, A. Agarwal, Danielle Belgrave, K. Cho, and A. Oh, editors, Advances in Neural Information Processing Systems 35: An-nual Conference on Neural Information Processing Systems 2022, NeurIPS 2022, New Orleans, LA, USA, November 28 - December 9, 2022 , 2022b. URL http://papers.nips.cc/paper_files/paper/2022/hash/ b1efde53be364a73914f58805a001731-Abstract-Conference.html .Daya Guo, Dejian Yang, Haowei Zhang, Junxiao Song, Peiyi Wang, Qihao Zhu, Runxin Xu, Ruoyu Zhang, Shirong Ma, Xiao Bi, et al. Deepseek-r1 incentivizes reasoning in llms through reinforcement learning. Nature , 645(8081): 633–638, 2025. Guibin Zhang, Hejia Geng, Xiaohang Yu, Zhenfei Yin, Zaibin Zhang, Zelin Tan, Heng Zhou, Zhong-Zhi Li, Xiangyuan Xue, Yijiang Li, Yifan Zhou, Yang Chen, Chen Zhang, Yutao Fan, Zihu Wang, Songtao Huang, Francisco Piedrahita Velez, Yue Liao, Hongru WANG, Mengyue Yang, Heng Ji, Jun Wang, Shuicheng YAN, Philip Torr, and LEI BAI. The landscape of agentic reinforcement learning for LLMs: A survey. Transactions on Machine Learning Research ,2026. ISSN 2835-8856. URL https://openreview.net/forum?id=RY19y2RI1O . Survey Certification. John Schulman, Filip Wolski, Prafulla Dhariwal, Alec Radford, and Oleg Klimov. Proximal policy optimization algorithms. CoRR , abs/1707.06347, 2017. URL http://arxiv.org/abs/1707.06347 .Rafael Rafailov, Archit Sharma, Eric Mitchell, Christopher D. Manning, Stefano Ermon, and Chelsea Finn. Direct preference optimization: Your language model is secretly a reward model. In Alice Oh, Tristan Naumann, Amir Globerson, Kate Saenko, Moritz Hardt, and Sergey Levine, editors, Advances in Neural Information Processing Systems 36: Annual Conference on Neural Information Processing Systems 2023, NeurIPS 2023, New Orleans, LA, USA, December 10 - 16, 2023 , 2023. URL http://papers.nips.cc/paper_files/paper/2023/hash/ a85b405ed65c6477a4fe8302b5e06ce7-Abstract-Conference.html .Zhihong Shao, Peiyi Wang, Qihao Zhu, Runxin Xu, Junxiao Song, Mingchuan Zhang, Y. K. Li, Y. Wu, and Daya Guo. Deepseekmath: Pushing the limits of mathematical reasoning in open language models. CoRR , abs/2402.03300, 2024. doi:10.48550/ARXIV.2402.03300. URL https://doi.org/10.48550/arXiv.2402.03300 .Guangming Sheng, Chi Zhang, Zilingfeng Ye, Xibin Wu, Wang Zhang, Ru Zhang, Yanghua Peng, Haibin Lin, and Chuan Wu. Hybridflow: A flexible and efficient rlhf framework. In Proceedings of the Twentieth European Conference on Computer Systems , pages 1279–1297, 2025. Jian Hu, Xibin Wu, Zilin Zhu, Weixun Wang, Dehao Zhang, Yu Cao, et al. Openrlhf: An easy-to-use, scalable and high-performance rlhf framework. arXiv preprint arXiv:2405.11143 , 6, 2024. Dean Pomerleau. ALVINN: an autonomous land vehicle in a neural network. In David S. Touret-zky, editor, Advances in Neural Information Processing Systems 1, [NIPS Conference, Denver, Col-orado, USA, 1988] , pages 305–313. Morgan Kaufmann, 1988. URL http://papers.nips.cc/paper/ 95-alvinn-an-autonomous-land-vehicle-in-a-neural-network .Stéphane Ross, Geoffrey J. Gordon, and Drew Bagnell. A reduction of imitation learning and structured prediction to no-regret online learning. In Geoffrey J. Gordon, David B. Dunson, and Miroslav Dudík, editors, Proceedings of the Fourteenth International Conference on Artificial Intelligence and Statistics, AISTATS 2011, Fort Lauderdale, USA, April 11-13, 2011 , volume 15 of JMLR Proceedings , pages 627–635. JMLR.org, 2011. URL http://proceedings. mlr.press/v15/ross11a/ross11a.pdf .Andrew Y Ng and Stuart J Russell. Algorithms for inverse reinforcement learning. In Proceedings of the Seventeenth International Conference on Machine Learning , pages 663–670, 2000. Sergey Levine, Aviral Kumar, George Tucker, and Justin Fu. Offline reinforcement learning: Tutorial, review, and perspectives on open problems. CoRR , abs/2005.01643, 2020. URL https://arxiv.org/abs/2005.01643 .Leemon Baird. Residual algorithms: Reinforcement learning with function approximation. In Machine learning proceedings 1995 , pages 30–37. Elsevier, 1995. 10 REGEN: Replay-recycling for Expert-to-Generalist distillation with Offline Reinforcement Learning Scott Fujimoto, David Meger, and Doina Precup. Off-policy deep reinforcement learning without exploration. In Kamalika Chaudhuri and Ruslan Salakhutdinov, editors, Proceedings of the 36th International Conference on Machine Learning, ICML 2019, 9-15 June 2019, Long Beach, California, USA , volume 97 of Proceedings of Machine Learning Research , pages 2052–2062. PMLR, 2019. URL http://proceedings.mlr.press/v97/fujimoto19a.html .Aviral Kumar, Justin Fu, Matthew Soh, George Tucker, and Sergey Levine. Stabilizing off-policy q-learning via bootstrapping error reduction. In Hanna M. Wallach, Hugo Larochelle, Alina Beygelzimer, Florence d’Alché-Buc, Emily B. Fox, and Roman Garnett, editors, Advances in Neural Information Processing Systems 32: An-nual Conference on Neural Information Processing Systems 2019, NeurIPS 2019, December 8-14, 2019, Vancou-ver, BC, Canada , pages 11761–11771, 2019. URL https://proceedings.neurips.cc/paper/2019/hash/ c2073ffa77b5357a498057413bb09d3a-Abstract.html .Aviral Kumar, Aurick Zhou, George Tucker, and Sergey Levine. Conservative q-learning for offline reinforcement learning. In Hugo Larochelle, Marc’Aurelio Ranzato, Raia Hadsell, Maria-Florina Balcan, and Hsuan-Tien Lin, edi-tors, Advances in Neural Information Processing Systems 33: Annual Conference on Neural Information Processing Systems 2020, NeurIPS 2020, December 6-12, 2020, virtual , 2020. URL https://proceedings.neurips.cc/ paper/2020/hash/0d2b2061826a5df3221116a5085a6052-Abstract.html .Sascha Lange and Martin Riedmiller. Deep auto-encoder neural networks in reinforcement learning. In The 2010 international joint conference on neural networks (IJCNN) , pages 1–8. IEEE, 2010. Volodymyr Mnih, Koray Kavukcuoglu, David Silver, Andrei A Rusu, Joel Veness, Marc G Bellemare, Alex Graves, Martin Riedmiller, Andreas K Fidjeland, Georg Ostrovski, et al. Human-level control through deep reinforcement learning. nature , 518(7540):529–533, 2015. Daniel Ritter, Owen Oertell, Bradley Guo, Jonathan Chang, Kianté Brantley, and Wen Sun. Llms can learn to reason via off-policy rl. arXiv preprint arXiv:2602.19362 , 2026. Charles Arnal, Vivien Cabannes, Taco Cohen, Julia Kempe, and Remi Munos. Efficient rl training for llms with experience replay. arXiv preprint arXiv:2604.08706 , 2026. Youssef Mroueh, Nicolas Dupuis, Brian Belgodere, Apoorva Nitsure, Mattia Rigotti, Kristjan Greenewald, Jiri Navratil, Jerret Ross, and Jesus Rios. Revisiting group relative policy optimization: Insights into on-policy and off-policy training. arXiv preprint arXiv:2505.22257 , 2025. Nicolas Le Roux, Marc G. Bellemare, Jonathan Lebensold, Arnaud Bergeron, Joshua Greaves, Alexandre Fréchette, Carolyne Pelletier, Eric Thibodeau-Laufer, Sándor Tóth, and Sam Work. Tapered off-policy REINFORCE: stable and efficient reinforcement learning for llms. CoRR , abs/2503.14286, 2025. doi:10.48550/ARXIV.2503.14286. URL 
+
+https://doi.org/10.48550/arXiv.2503.14286 .Zhang-Wei Hong, Aviral Kumar, Sathwik Karnik, Abhishek Bhandwaldar, Akash Srivastava, Joni Pajari-nen, Romain Laroche, Abhishek Gupta, and Pulkit Agrawal. Beyond uniform sampling: Offline rein-forcement learning with imbalanced datasets. In Alice Oh, Tristan Naumann, Amir Globerson, Kate Saenko, Moritz Hardt, and Sergey Levine, editors, Advances in Neural Information Processing Systems 36: Annual Conference on Neural Information Processing Systems 2023, NeurIPS 2023, New Orleans, LA, USA, December 10 - 16, 2023 , 2023. URL http://papers.nips.cc/paper_files/paper/2023/hash/ 0ff3502bb29570b219967278db150a50-Abstract-Conference.html .Yin Cui, Menglin Jia, Tsung-Yi Lin, Yang Song, and Serge Belongie. Class-balanced loss based on effective number of samples. In Proceedings of the IEEE/CVF conference on computer vision and pattern recognition , pages 9268–9277, 2019. An Yang, Baosong Yang, Beichen Zhang, Binyuan Hui, Bo Zheng, Bowen Yu, Chengyuan Li, Dayiheng Liu, Fei Huang, Haoran Wei, Huan Lin, Jian Yang, Jianhong Tu, Jianwei Zhang, Jianxin Yang, Jiaxi Yang, Jingren Zhou, Junyang Lin, Kai Dang, Keming Lu, Keqin Bao, Kexin Yang, Le Yu, Mei Li, Mingfeng Xue, Pei Zhang, Qin Zhu, Rui Men, Runji Lin, Tianhao Li, Tingyu Xia, Xingzhang Ren, Xuancheng Ren, Yang Fan, Yang Su, Yichang Zhang, Yu Wan, Yuqiong Liu, Zeyu Cui, Zhenru Zhang, and Zihan Qiu. Qwen2.5 technical report. CoRR , abs/2412.15115, 2024. doi:10.48550/ARXIV.2412.15115. URL https://doi.org/10.48550/arXiv.2412.15115 .Karl Cobbe, Vineet Kosaraju, Mohammad Bavarian, Mark Chen, Heewoo Jun, Lukasz Kaiser, Matthias Plappert, Jerry Tworek, Jacob Hilton, Reiichiro Nakano, Christopher Hesse, and John Schulman. Training verifiers to solve math word problems. CoRR , abs/2110.14168, 2021. URL https://arxiv.org/abs/2110.14168 .Dan Hendrycks, Collin Burns, Saurav Kadavath, Akul Arora, Steven Basart, Eric Tang, Dawn Song, and Jacob Steinhardt. Measuring mathematical problem solving with the MATH dataset. In Joaquin Vanschoren and Sai-Kit Yeung, editors, 
+
+Proceedings of the Neural Information Processing Systems Track on Datasets and Benchmarks 1, NeurIPS Datasets and Benchmarks 2021, December 2021, virtual , 2021. URL https://datasets-benchmarks-proceedings. neurips.cc/paper/2021/hash/be83ab3ecd0db773eb2dc1b0a17836a1-Abstract-round2.html .11 REGEN: Replay-recycling for Expert-to-Generalist distillation with Offline Reinforcement Learning Zhangchen Xu, Yang Liu, Yueqin Yin, Mingyuan Zhou, and Radha Poovendran. Kodcode: A diverse, challenging, and verifiable synthetic dataset for coding. In Wanxiang Che, Joyce Nabende, Ekaterina Shutova, and Mohammad Taher Pilehvar, editors, Findings of the Association for Computational Linguistics, ACL 2025, Vienna, Austria, July 27 - August 1, 2025 , volume ACL 2025 of Findings of ACL , pages 6980–7008. Association for Computational Linguistics, 2025. doi:10.18653/V1/2025.FINDINGS-ACL.365. URL https://doi.org/10.18653/v1/2025. findings-acl.365 .Hugging Face H4. Ifeval-like data. https://huggingface.co/datasets/HuggingFaceH4/ifeval-like-data ,2024. Hugging Face Datasets. Mark Chen, Jerry Tworek, Heewoo Jun, Qiming Yuan, Henrique Pondé de Oliveira Pinto, Jared Kaplan, Harri Edwards, Yuri Burda, Nicholas Joseph, Greg Brockman, Alex Ray, Raul Puri, Gretchen Krueger, Michael Petrov, Heidy Khlaaf, Girish Sastry, Pamela Mishkin, Brooke Chan, Scott Gray, Nick Ryder, Mikhail Pavlov, Alethea Power, Lukasz Kaiser, Mohammad Bavarian, Clemens Winter, Philippe Tillet, Felipe Petroski Such, Dave Cummings, Matthias Plappert, Fotios Chantzis, Elizabeth Barnes, Ariel Herbert-Voss, William Hebgen Guss, Alex Nichol, Alex Paino, Nikolas Tezak, Jie Tang, Igor Babuschkin, Suchir Balaji, Shantanu Jain, William Saunders, Christopher Hesse, Andrew N. Carr, Jan Leike, Joshua Achiam, Vedant Misra, Evan Morikawa, Alec Radford, Matthew Knight, Miles Brundage, Mira Murati, Katie Mayer, Peter Welinder, Bob McGrew, Dario Amodei, Sam McCandlish, Ilya Sutskever, and Wojciech Zaremba. Evaluating large language models trained on code. CoRR , abs/2107.03374, 2021. URL 
+
+https://arxiv.org/abs/2107.03374 .Jacob Austin, Augustus Odena, Maxwell I. Nye, Maarten Bosma, Henryk Michalewski, David Dohan, Ellen Jiang, Carrie J. Cai, Michael Terry, Quoc V. Le, and Charles Sutton. Program synthesis with large language models. CoRR ,abs/2108.07732, 2021. URL https://arxiv.org/abs/2108.07732 .Jeffrey Zhou, Tianjian Lu, Swaroop Mishra, Siddhartha Brahma, Sujoy Basu, Yi Luan, Denny Zhou, and Le Hou. Instruction-following evaluation for large language models. CoRR , abs/2311.07911, 2023. doi:10.48550/ARXIV.2311.07911. URL https://doi.org/10.48550/arXiv.2311.07911 .Zhiqi Chen, Rui Lu, Andrew Zhao, Zhaokai Wang, Yang Yue, Shiji Song, and Gao Huang. Does reinforcement learning really incentivize reasoning capacity in llms beyond the base model? Advances in Neural Information Processing Systems , 38:57654–57689, 2026. Jang Hyun Cho and Bharath Hariharan. On the efficacy of knowledge distillation. In Proceedings of the IEEE/CVF international conference on computer vision , pages 4794–4802, 2019. 
+
+## A Other Evaluation Criteria 
+
+Besides pass@1, we additionally report majority@ 4 on Math, pass@ 10 on Code, and strict-match accuracy on Alignment in Table 4. Overall, the conclusions remain consistent with the main paper, with REGEN achieving performance comparable to MOPD across most evaluation criteria. An interesting phenomenon appears on the code benchmarks under pass@10. As the sampling budget increases, the RL teacher no longer exhibits an advantage and even falls below the pretrained student in some cases. This observation is consistent with recent findings that online RL primarily improves first-sample decoding rather than fundamentally expanding the model’s reasoning capacity [Chen et al., 2026]. Once multiple decoding attempts are allowed, this advantage largely disappears. Notably, this limitation does not carry over to BC and REGEN. Unlike MOPD, whose supervision is tightly coupled with the final RL teacher through online rollouts, REGEN directly learns from the replay memory accumulated throughout the entire RL optimization process. The replay buffer naturally preserves successful trajectories produced at different training stages and therefore captures a broader distribution of valid programs instead of the decoding preference of a single converged policy. As a result, REGEN consistently outperforms MOPD under pass@10 metric on code tasks, suggesting that the offline learning based replay memory transfers the diverse behaviors discovered during RL more effectively than online policy distillation. Other trend is observed on IFEval under the strict-match metric, where REGEN falls further behind MOPD than under loose-match evaluation. We attribute this to the stricter evaluation criterion, where every instruction must be satisfied exactly. Under such settings, MOPD benefits from token-level online teacher supervision that continuously corrects small generation errors, whereas REGEN relies solely on trajectory-level offline signals. This result highlights a trade-off of offline RL: eliminating online teacher supervision substantially improves training efficiency but sacrifices part of the fine-grained supervisory signal that is particularly valuable for exact instruction following. 12 REGEN: Replay-recycling for Expert-to-Generalist distillation with Offline Reinforcement Learning Table 4: Performance under additional inference-time evaluation criteria. All models are identical to those evaluated in Table 1, and only the evaluation metrics differ. We report majority@4 for Math, pass@10 for Code, and strict-match accuracy for Alignment. The best result among BC, MOPD, and REGEN in each row is highlighted in bold, and the value in parentheses in the REGEN column denotes its performance gap relative to MOPD.                                      
+
+> Domain Benchmark Student Teacher BC MOPD REGEN (Ours) Math (maj@4) GSM8K 77.3 83.1 81.3 81.9 82.6 (+0 .7)MATH 57.8 59.6 60.8 59.0 61.4 (+2 .4)Code (pass@10) HumanEval 73.8 70.1 68.9 65.9 70.1 (+4 .2)MBPP 84.9 76.7 81.7 77.2 77.8 ( +0 .6)Alignment (strict) IFEval 49.7 65.2 60.1 67.8 64.3 ( −3.5)
+
+## B Reward Design Across Domains 
+
+The three task domains adopt distinct reward schemes tailored to their evaluation characteristics. For the Math domain, the reward is binary. Both GSM8K and MATH employ prompts that constrain the final answer within a box{} format, and the reward is determined by matching the extracted answer against the ground truth. During the online RL training of each Math teacher, we assign a reward of 1 for correct answers and 0 for incorrect ones, as negative rewards would dilute the learning signal and hinder teacher training. However, in the TOPR baseline, where trajectories are weighted by their rewards instead of advantages, a reward of 0 for negative samples would cause them to be entirely discarded. To address this, we redefine the trajectory-level reward of negative samples as −1 during TOPR training, which aligns with the original TOPR design and ensures that negative samples contribute a meaningful contrastive signal. For the Code domain, the reward is continuous in [0 , 1] , reflecting the fraction of passed test cases. A program that passes all tests receives a reward of 1, while a completely failing program receives 0, with intermediate values proportional to the test pass rate. For the Alignment domain, the reward is also continuous in [0 , 1] , representing the proportion of verifiable constraints satisfied by the generated response. This fine-grained reward provides nuanced supervision compared to the binary Math domain. 
+
+## C Distribution Statistics of Replay Memory 
+
+Figure 4 illustrates the reward and advantage distributions of the accumulated replay memory across the three domains. As expected from the reward design described in Appendix B, the Math domain exhibits a bimodal reward distribution concentrated at −1.0 and 1.0, while Code and Alignment display continuous distributions over [0 , 1] . After group-relative normalization, the advantage distributions of Code and Alignment are centered around 0.0 with a continuous range, whereas the Math advantage distribution mirrors its binary reward structure. Despite the heterogeneity in reward scales, the advantage normalization in REGEN provides a unified, scale-invariant learning signal across all domains. 13 REGEN: Replay-recycling for Expert-to-Generalist distillation with Offline Reinforcement Learning 1.0 0.5 0.0 0.5 1.0 
+
+reward 
+
+0
+
+2
+
+4
+
+6
+
+8
+
+10 
+
+12 
+
+14 
+
+> probability density
+
+Math 
+
+mean=0.000 
+
+1.0 0.5 0.0 0.5 1.0 
+
+reward 
+
+0
+
+2
+
+4
+
+6
+
+8
+
+10 
+
+12 
+
+14 
+
+Code 
+
+mean=0.753 
+
+1.0 0.5 0.0 0.5 1.0 
+
+reward 
+
+0
+
+2
+
+4
+
+6
+
+8
+
+10 
+
+12 
+
+14 
+
+Alignment 
+
+mean=0.879 
+
+2.0 1.5 1.0 0.5 0.0 0.5 1.0 
+
+advantage 
+
+0
+
+1
+
+2
+
+3
+
+4
+
+5
+
+6
+
+7
+
+> probability density
+
+Math 
+
+mean=0.000 
+
+2.0 1.5 1.0 0.5 0.0 0.5 1.0 
+
+advantage 
+
+0.0 
+
+0.5 
+
+1.0 
+
+1.5 
+
+2.0 
+
+2.5 
+
+3.0 
+
+Code 
+
+mean=-0.000 
+
+2.0 1.5 1.0 0.5 0.0 0.5 1.0 
+
+advantage 
+
+0
+
+1
+
+2
+
+3
+
+4
+
+5
+
+6
+
+Alignment 
+
+mean=-0.000 
+
+Figure 4: Reward (Top) vs Advantage (Bottom) Distribution by Domain. The dashed lines indicate the mean values. 14
