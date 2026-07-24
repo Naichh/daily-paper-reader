@@ -6,29 +6,29 @@
 </div>
 
 ## 每次日报
-- 最新运行日期：2026-07-23
-- 运行时间：2026-07-23 21:07:19 UTC
+- 最新运行日期：2026-07-24
+- 运行时间：2026-07-24 21:03:33 UTC
 - 运行状态：成功
 - 本次总论文数：3
-- 精读区：1
-- 速读区：2
+- 精读区：2
+- 速读区：1
 
 ### 今日简报（AI）
-今日精读1篇、速读2篇，聚焦离线强化学习与视觉-语言社交导航中的知识蒸馏与模仿学习。最值得关注精读论文《REGEN》提出的“重放回收”专家到通才蒸馏方法，以及速读中结合VLM的选择性策略蒸馏。建议普通读者重点关注蒸馏技术如何通过混合事后经验提升机器人多任务泛化能力。
-- 详情：[/202607/23/README](/202607/23/README)
+今天精读2篇高分论文，速读1篇，重点围绕策略蒸馏与智能体样本效率学习。最值得关注的是《OPOD》提出的通用多模态蒸馏（9.0分），以及《X³-OPD》将推理蒸馏到大型音频语言模型（8.0分）的新方案。建议普通读者优先了解OPOD的通用性设计，再结合X³-OPD看如何扩展至音频领域。
+- 详情：[/202607/24/README](/202607/24/README)
 
 ### 精读区论文标签
-1. [REGEN: Replay-recycling for Expert-to-Generalist distillation with Offline Reinforcement Learning](/202607/23/2607.19450v1-regen-replay-recycling-for-expert-to-generalist-distillation-with-offline-reinforcement-learning)  
+1. [OPOD: On-Policy Omni Distillation](/202607/24/2607.20918v1-opod-on-policy-omni-distillation)  
+   标签：评分：9.0/10、query:policy-dist
+   evidence：标题明确为on-policy蒸馏；学生生成响应，教师评估，实现on-policy学习
+2. [X$^3$-OPD: Distilling Reasoning into Large Audio-Language Models via On-Policy Alignment](/202607/24/2607.21550v1-x3-opd-distilling-reasoning-into-large-audio-language-models-via-on-policy-alignment)  
    标签：评分：8.0/10、query:policy-dist
-   evidence：提出多教师在线策略蒸馏用于LLM后训练中解耦RL阶段
+   evidence：跨模态在线策略蒸馏框架
 
 ### 速读区论文标签
-1. [SOPD-SocialNav: Selective On-Policy Distillation for Vision-Language Social Navigation](/202607/23/2607.19850v1-sopd-socialnav-selective-on-policy-distillation-for-vision-language-social-navigation)  
-   标签：评分：7.0/10、query:policy-dist
-   evidence：选择性在线策略蒸馏用于社交导航
-2. [H$^2$SD: Hybrid Hindsight Self-Distillation](/202607/23/2607.18955v2-h2sd-hybrid-hindsight-self-distillation)  
+1. [Sample-Efficient Learning from Agent Experience](/202607/24/2607.21051v1-sample-efficient-learning-from-agent-experience)  
    标签：评分：6.0/10、query:policy-dist
-   evidence：提出混合事后自我蒸馏用于语言模型推理，利用成功轨迹作为特权上下文
+   evidence：提出经验蒸馏，一种面向RL智能体的知识蒸馏形式
 
 
 <div class="dpr-home-promo-card">
