@@ -1,6 +1,9 @@
 * <a class="dpr-sidebar-root-link" href="#/">首页</a>
 * <a class="dpr-sidebar-root-link dpr-sidebar-noactive-link" href="javascript:void(0)" data-dpr-hash="#/tutorial/README">使用教程</a>
 * Daily Papers
+  * 2026-07-25 <!--dpr-date:20260725-->
+    * 精读区
+      * <a class="dpr-sidebar-item-link dpr-sidebar-item-structured" href="#/202607/25/2607.21556v1-visual-contrastive-self-distillation" data-sidebar-item="{&quot;title&quot;: &quot;Visual Contrastive Self-Distillation&quot;, &quot;link&quot;: &quot;https://arxiv.org/abs/2607.21556v1-visual-contrastive-self-distillation&quot;, &quot;score&quot;: &quot;9.0&quot;, &quot;tags&quot;: [{&quot;kind&quot;: &quot;query&quot;, &quot;label&quot;: &quot;policy-dist&quot;}], &quot;evidence&quot;: &quot;针对语言模型的在线自蒸馏&quot;}">Visual Contrastive Self-Distillation</a>
   * 2026-07-24 <!--dpr-date:20260724-->
     * 精读区
       * <a class="dpr-sidebar-item-link dpr-sidebar-item-structured" href="#/202607/24/2607.20918v1-opod-on-policy-omni-distillation" data-sidebar-item="{&quot;title&quot;: &quot;OPOD: On-Policy Omni Distillation&quot;, &quot;link&quot;: &quot;https://arxiv.org/abs/2607.20918v1-opod-on-policy-omni-distillation&quot;, &quot;score&quot;: &quot;9.0&quot;, &quot;tags&quot;: [{&quot;kind&quot;: &quot;query&quot;, &quot;label&quot;: &quot;policy-dist&quot;}], &quot;evidence&quot;: &quot;标题明确为on-policy蒸馏；学生生成响应，教师评估，实现on-policy学习&quot;}">OPOD: On-Policy Omni Distillation</a>
