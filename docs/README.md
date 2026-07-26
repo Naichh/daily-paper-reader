@@ -6,26 +6,24 @@
 </div>
 
 ## 每次日报
-- 最新运行日期：2026-07-25
-- 运行时间：2026-07-25 21:02:56 UTC
+- 最新运行日期：2026-07-26
+- 运行时间：2026-07-26 20:05:33 UTC
 - 运行状态：成功
 - 本次总论文数：1
-- 精读区：1
-- 速读区：0
+- 精读区：0
+- 速读区：1
 
 ### 今日简报（AI）
-今日精读1篇高分论文《Visual Contrastive Self-Distillation》（9.0/10）。  
-该论文提出视觉对比自蒸馏方法，有效提升模型表征学习的性能。  
-建议关注其自监督学习与知识蒸馏结合的思路，可作为提升视觉模型泛化能力的备选方案。
-- 详情：[/202607/25/README](/202607/25/README)
+今日聚焦：动态规则赋能大模型评估，探索评估器与策略的协同进化。值得关注的方向：利用动态评分标准让LLM评估器自我进化，同时自适应调整评估策略。建议下一步：关注这类动态评估方法如何提升AI系统的可靠性和对齐效果。
+- 详情：[/202607/26/README](/202607/26/README)
 
 ### 精读区论文标签
-1. [Visual Contrastive Self-Distillation](/202607/25/2607.21556v1-visual-contrastive-self-distillation)  
-   标签：评分：9.0/10、query:policy-dist
-   evidence：针对语言模型的在线自蒸馏
+- 本次无精读推荐。
 
 ### 速读区论文标签
-- 本次无速读推荐。
+1. [Co-Evolving LLM Evaluators and Policies via DynamicRubric](/202607/26/2607.20083v1-co-evolving-llm-evaluators-and-policies-via-dynamicrubric)  
+   标签：评分：6.0/10、query:policy-dist
+   evidence：评估器与策略共同进化改进后训练，与RLHF及蒸馏相关
 
 
 <div class="dpr-home-promo-card">

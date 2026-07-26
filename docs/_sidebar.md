@@ -1,6 +1,9 @@
 * <a class="dpr-sidebar-root-link" href="#/">首页</a>
 * <a class="dpr-sidebar-root-link dpr-sidebar-noactive-link" href="javascript:void(0)" data-dpr-hash="#/tutorial/README">使用教程</a>
 * Daily Papers
+  * 2026-07-26 <!--dpr-date:20260726-->
+    * 速读区
+      * <a class="dpr-sidebar-item-link dpr-sidebar-item-structured" href="#/202607/26/2607.20083v1-co-evolving-llm-evaluators-and-policies-via-dynamicrubric" data-sidebar-item="{&quot;title&quot;: &quot;Co-Evolving LLM Evaluators and Policies via DynamicRubric&quot;, &quot;link&quot;: &quot;https://arxiv.org/abs/2607.20083v1-co-evolving-llm-evaluators-and-policies-via-dynamicrubric&quot;, &quot;score&quot;: &quot;6.0&quot;, &quot;tags&quot;: [{&quot;kind&quot;: &quot;query&quot;, &quot;label&quot;: &quot;policy-dist&quot;}], &quot;evidence&quot;: &quot;评估器与策略共同进化改进后训练，与RLHF及蒸馏相关&quot;}">Co-Evolving LLM Evaluators and Policies via DynamicRubric</a>
   * 2026-07-25 <!--dpr-date:20260725-->
     * 精读区
       * <a class="dpr-sidebar-item-link dpr-sidebar-item-structured" href="#/202607/25/2607.21556v1-visual-contrastive-self-distillation" data-sidebar-item="{&quot;title&quot;: &quot;Visual Contrastive Self-Distillation&quot;, &quot;link&quot;: &quot;https://arxiv.org/abs/2607.21556v1-visual-contrastive-self-distillation&quot;, &quot;score&quot;: &quot;9.0&quot;, &quot;tags&quot;: [{&quot;kind&quot;: &quot;query&quot;, &quot;label&quot;: &quot;policy-dist&quot;}], &quot;evidence&quot;: &quot;针对语言模型的在线自蒸馏&quot;}">Visual Contrastive Self-Distillation</a>
