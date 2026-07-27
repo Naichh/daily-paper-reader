@@ -6,24 +6,27 @@
 </div>
 
 ## 每次日报
-- 最新运行日期：2026-07-26
-- 运行时间：2026-07-26 20:05:33 UTC
+- 最新运行日期：2026-07-27
+- 运行时间：2026-07-27 20:13:47 UTC
 - 运行状态：成功
-- 本次总论文数：1
-- 精读区：0
-- 速读区：1
+- 本次总论文数：2
+- 精读区：2
+- 速读区：0
 
 ### 今日简报（AI）
-今日聚焦：动态规则赋能大模型评估，探索评估器与策略的协同进化。值得关注的方向：利用动态评分标准让LLM评估器自我进化，同时自适应调整评估策略。建议下一步：关注这类动态评估方法如何提升AI系统的可靠性和对齐效果。
-- 详情：[/202607/26/README](/202607/26/README)
+今日精读两篇高分解码器蒸馏研究，分数均达9.0。一篇提出混合事后自我蒸馏（H²SD），另一篇通过字节前缀边缘化实现跨分词器在线蒸馏。建议重点关注如何结合事后监督与跨架构对齐来提升模型压缩效果。
+- 详情：[/202607/27/README](/202607/27/README)
 
 ### 精读区论文标签
-- 本次无精读推荐。
+1. [H$^2$SD: Hybrid Hindsight Self-Distillation](/202607/27/2607.18955v3-h2sd-hybrid-hindsight-self-distillation)  
+   标签：评分：9.0/10、query:policy-dist
+   evidence：区分成功与失败轨迹的混合事后自我蒸馏方法
+2. [Cross-Tokenizer On-Policy Distillation via Byte-Prefix Marginalization](/202607/27/2607.22334v1-cross-tokenizer-on-policy-distillation-via-byte-prefix-marginalization)  
+   标签：评分：9.0/10、query:policy-dist
+   evidence：针对语言模型后训练的在策略蒸馏
 
 ### 速读区论文标签
-1. [Co-Evolving LLM Evaluators and Policies via DynamicRubric](/202607/26/2607.20083v1-co-evolving-llm-evaluators-and-policies-via-dynamicrubric)  
-   标签：评分：6.0/10、query:policy-dist
-   evidence：评估器与策略共同进化改进后训练，与RLHF及蒸馏相关
+- 本次无速读推荐。
 
 
 <div class="dpr-home-promo-card">
