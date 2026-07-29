@@ -1,6 +1,9 @@
 * <a class="dpr-sidebar-root-link" href="#/">首页</a>
 * <a class="dpr-sidebar-root-link dpr-sidebar-noactive-link" href="javascript:void(0)" data-dpr-hash="#/tutorial/README">使用教程</a>
 * Daily Papers
+  * 2026-07-29 <!--dpr-date:20260729-->
+    * 速读区
+      * <a class="dpr-sidebar-item-link dpr-sidebar-item-structured" href="#/202607/29/2607.24900v1-inverse-rl-helps-align-ai-by-imitating-humans" data-sidebar-item="{&quot;title&quot;: &quot;Inverse RL Helps Align AI by Imitating Humans&quot;, &quot;link&quot;: &quot;https://arxiv.org/abs/2607.24900v1-inverse-rl-helps-align-ai-by-imitating-humans&quot;, &quot;score&quot;: &quot;7.0&quot;, &quot;tags&quot;: [{&quot;kind&quot;: &quot;query&quot;, &quot;label&quot;: &quot;policy-dist&quot;}], &quot;evidence&quot;: &quot;通过演示进行在线优化以实现AI对齐&quot;}">Inverse RL Helps Align AI by Imitating Humans</a>
   * 2026-07-28 <!--dpr-date:20260728-->
     * 精读区
       * <a class="dpr-sidebar-item-link dpr-sidebar-item-structured" href="#/202607/28/2607.23731v1-outcome-confounded-local-supervision-in-on-policy-distillation" data-sidebar-item="{&quot;title&quot;: &quot;Outcome-Confounded Local Supervision in On-Policy Distillation&quot;, &quot;link&quot;: &quot;https://arxiv.org/abs/2607.23731v1-outcome-confounded-local-supervision-in-on-policy-distillation&quot;, &quot;score&quot;: &quot;10.0&quot;, &quot;tags&quot;: [{&quot;kind&quot;: &quot;query&quot;, &quot;label&quot;: &quot;policy-dist&quot;}], &quot;evidence&quot;: &quot;直接研究on-policy蒸馏的混淆问题&quot;}">Outcome-Confounded Local Supervision in On-Policy Distillation</a>
