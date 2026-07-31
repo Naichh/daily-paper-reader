@@ -1,0 +1,502 @@
+Title: Lightning OPD 2.0: Mitigating Style Bias in Cross-Teacher On-Policy Distillation for Large Reasoning Models
+
+URL Source: https://arxiv.org/pdf/2607.28449v1
+
+Published Time: Fri, 31 Jul 2026 01:28:25 GMT
+
+Number of Pages: 14
+
+Markdown Content:
+# Lightning OPD 2.0: Mitigating Style Bias in Cross-Teacher On-Policy Distillation for Large Reasoning Models 
+
+Yecheng Wu, Song Han, Han Cai 
+
+NVIDIA 
+
+https://github.com/jet-ai-projects/Lightning-OPD 
+
+On-policy distillation (OPD) provides dense token-level supervision from a teacher, but its effectiveness can depend on teacher consistency , meaning that the model providing OPD supervision should also have generated the demonstrations used to train the supervised fine-tuning (SFT) reference. However, this condition is frequently violated in practice when SFT data have mixed or unknown provenance or when different models are preferred for SFT data generation and subsequent distillation. In such cross-teacher settings, even a stronger OPD teacher can yield little improvement over the SFT reference. We find that raw teacher–reference disagreement contains potentially useful context-specific teacher evidence as well as a recurring component associated with differences in wording, formatting, and reasoning cadence. We introduce Lightning OPD 2.0 
+
+with cross-fitted style residualization, which uses rollout-level cross-fitting to estimate this recurring component as an operational proxy for style-token bias and subtracts it before constructing the token-level OPD update. Across mathematical reasoning and code generation benchmarks, Lightning OPD 2.0 consistently outperforms Lightning OPD in cross-teacher settings. Starting from Klear-Reasoner-8B-SFT, Lightning OPD 2.0 reaches 
+
+82 .4% on AIME 2024 and 63 .0% on LiveCodeBench v5. Together, these results establish Lightning OPD 2.0 as a practical approach to cross-teacher OPD, relaxing teacher consistency as a prerequisite and allowing the SFT data generator and distillation teacher to be selected independently. Code will be released soon. Accuracy (%)                  
+
+> 20
+> 35
+> 50
+> 65
+> Student Model: Qwen3-4B-SFT
+> Math Reasoning Code Reasoning
+> SFT Lightning OPD IW-OPD
+> TA-OPD Lightning OPD 2.0
+> 55
+> 40
+> 25
+> 10
+> 48.3 48.6 48.2
+> 45.6
+> 51.7
+> 32.6 34.3 35.5
+> 33.1
+> 35.7
+> Accuracy (%)
+> 68
+> 72
+> 76
+> 80
+> Student Model: Klear-Reasoner-8B-SFT
+> Math Reasoning Code Reasoning
+> SFT Lightning OPD IW-OPD
+> TA-OPD Lightning OPD 2.0
+> 73.6 73.6 73.9 73.9
+> 74.6
+> 64
+> 60
+> 56
+> 52
+> 54.9
+> 57.1 57.4 57.6
+> 58.5
+
+Figure 1 | Average Pass@1 (%) on mathematical reasoning and code generation in two cross-teacher settings with Qwen3-30B-A3B-Thinking-2507 as the OPD teacher. Lightning OPD 2.0 achieves the strongest average performance across both task families and both SFT references, consistently improving over Lightning OPD. 
+
+1. Introduction 
+
+On-policy distillation (OPD) has become an effective post-training alternative to reinforcement learning for large language models (LLMs) (Agarwal et al., 2024; Lu and Lab, 2025; Yang et al., 2026a;c). Rather than learning from a sparse sequence-level reward, OPD utilizes a high-capability teacher to score student-generated trajectories and converts teacher–student disagreement into dense token-level supervision. This dense on-policy supervision makes OPD a stable and cost-effective alternative to reinforcement learning from verifiable rewards (RLVR), while maintaining strong performance across reasoning tasks (Lu and Lab, 2025; Xiao et al., 2026; Yang et al., 2025; 2026a;c; Zeng et al., 2026). Standard OPD nevertheless requires a live teacher throughout training. Wu et al. (2026) introduce Lightning OPD, which removes this systems bottleneck by precomputing both the rollouts from the supervised fine-tuning (SFT) reference policy and their corresponding teacher log-probabilities before training, then reusing the 
+
+Corresponding author(s): Han Cai ( hcai@nvidia.com ). 
+
+© 2026 NVIDIA. All rights reserved. arXiv:2607.28449v1 [cs.CL] 30 Jul 2026 Lightning OPD 2.0: Mitigating Style Bias in Cross-Teacher On-Policy Distillation for Large Reasoning Models 
+
+resulting cache throughout optimization. A central finding of that work is that effective OPD requires teacher consistency . This condition means that the teacher used for OPD is the same model that generated the demonstrations used to train the SFT reference policy. Teacher consistency aligns the token-level distillation signal with the behavior already learned by the reference policy, which allows fully offline Lightning OPD to closely track standard online OPD. This consideration is not unique to the offline formulation. Standard OPD also begins from an SFT policy shaped by its demonstration teacher. Selecting a different OPD teacher can therefore introduce the cross-teacher mismatch even though rollouts and teacher scores are collected online. However, teacher consistency is often difficult to satisfy in practice. Available SFT data may have mixed or undocumented provenance and may have been generated by several different models, leaving no single demonstration teacher that can be reused consistently during OPD. Even when the original data generator is known, practitioners may want to reuse an existing SFT dataset rather than incur the substantial cost of regenerating demonstrations with every candidate teacher and repeating SFT. More fundamentally, teacher consistency couples the choice of the SFT data generator with the choice of the OPD teacher, even though the best models for these two roles need not be the same. The intended OPD teacher may not be the most suitable model for generating SFT demonstrations. Practitioners may instead use a stronger generator to produce higher-quality demonstrations and obtain a stronger SFT reference policy, while selecting a different teacher for later distillation to maximize the overall post-training result. Enforcing consistency in these settings would require rebuilding the SFT pipeline or compromising one stage to accommodate the other. The practical goal is therefore to preserve the strongest available SFT reference while retaining the freedom to choose the most suitable teacher for subsequent OPD. To this end, our goal is to remove teacher consistency as a practical prerequisite for effective OPD and decouple the choice of the SFT data generator from that of the OPD teacher while still achieving reliable post-training performance across different teacher combinations. However, naively replacing the consistent teacher with a different OPD teacher substantially degrades performance, even when the new teacher is stronger. To understand this degradation, we consider the role of each token in the response. Some tokens carry problem-specific reasoning, whereas others primarily express the response’s style. On reasoning-related tokens, a low probability from the OPD teacher may identify an incorrect intermediate conclusion, operation, or reasoning direction and thereby provide useful corrective supervision. On style tokens, however, the same low probability may instead reflect a preference for different wording, transitions, formatting, derivation length, or reasoning cadence, even when the reference trajectory remains valid. Lightning OPD cannot distinguish these cases and converts both into the same token-level update. Because style choices appear throughout a response and similar preferences recur across rollouts, their accumulated penalties may systematically interfere with the more context-specific reasoning signal. This difference also suggests an observable statistical proxy. Disagreement associated with style tokens is more likely to recur across unrelated rollouts through similar lexical choices, response positions, and levels of reference-policy surprisal, whereas reasoning-related disagreement depends more strongly on the current problem and reasoning state. We therefore treat the component that is predictable across cached rollouts as a proxy for style-token bias and the remaining residual as a candidate carrier of reasoning-related teacher evidence. These terms describe the roles that motivate our method rather than a ground-truth semantic partition, and our procedure does not assume that every predictable effect is style or that every residual reflects correct reasoning. Based on this observation, we introduce Lightning OPD 2.0 with cross-fitted style residualization. We first compute the token-level log-probability difference between the OPD teacher and the SFT reference. We then split the cached rollouts into folds and use the other folds to construct two lookup tables, one indexed by token identity and the other by normalized response position and reference-policy surprisal. Averaging the two lookup values gives each held-out token an estimate of its recurring style bias without using its own rollout. We subtract this estimate from the raw difference and use the residual in place of the original disagreement in the Lightning OPD objective. Using Qwen3-30B-A3B-Thinking-2507 as the OPD teacher, we evaluate Lightning OPD 2.0 on mathematical reasoning and code generation benchmarks with Qwen3-4B-SFT and Klear-Reasoner-8B-SFT as two distinct SFT references. Lightning OPD 2.0 consistently outperforms Lightning OPD in both settings. It improves average mathematical reasoning performance by 3.1 and 1.0 points, respectively, and average code generation performance by 1.4 points in both settings. Starting from Klear-Reasoner-8B-SFT, Lightning OPD 2.0 reaches 
+
+82 .4% on AIME 2024 and 63 .0% on LiveCodeBench v5. 
+
+> 2Lightning OPD 2.0: Mitigating Style Bias in Cross-Teacher On-Policy Distillation for Large Reasoning Models
+
+Our contributions are threefold. 
+
+• We formulate the cross-teacher OPD setting, in which the SFT data generator and the OPD teacher are selected independently, and show that distillation effects can substantially degrade under this setting. 
+
+• We identify a recurring component of teacher–reference disagreement that is predictable across rollouts and associated with style-token bias, explaining why raw cross-teacher supervision can be misleading. 
+
+• We introduce Lightning OPD 2.0, which estimates this recurring component with cross-fitted token and context lookup tables and subtracts it before applying the Lightning OPD update. Across two cross-teacher settings, Lightning OPD 2.0 consistently improves Lightning OPD on mathematical reasoning and code generation benchmarks and achieves state-of-the-art performance. 
+
+2. Related Work 
+
+LLM Post-Training. Post-training is central to capable LLMs, commonly combining supervised fine-tuning on high-quality instruction and reasoning demonstrations (Guha et al., 2025; Guo et al., 2025; Ouyang et al., 2022; Yang et al., 2024) with preference- and reward-based optimization (Ahmadian et al., 2024; Dong et al., 2023; Li et al., 2023; Rafailov et al., 2023; Schulman et al., 2017). For reasoning, recent methods develop outcome-based policy optimization (Hu, 2025; Liu et al., 2025b; MiniMax et al., 2025; Shao et al., 2024; Yu et al., 2025; Zheng et al., 2025) and improve process-level credit assignment or value learning (Cui et al., 2025; Kazemnejad et al., 2024; Yuan et al., 2025; Yue et al., 2025b). These advances support increasingly capable mathematical and general reasoning systems (Chen et al., 2025b; Guo et al., 2025; Hu et al., 2025; Liu et al., 2024; NVIDIA, 2025; Singh et al., 2025; Team et al., 2025; 2026; Xiao et al., 2026; Yang et al., 2024; 2025; 2026c; Zeng et al., 2026). Complementary analyses study what online optimization adds beyond SFT and why it can better preserve existing capabilities (Shenfeld et al., 2025; Yue et al., 2025a), while recent methods co-design or interleave SFT and RL (Chen et al., 2025a; Huang et al., 2025; Liu et al., 2025a; Ma et al., 2026; Yan et al., 2025; Zhang et al., 2025). Our work instead studies the coupling between the model that generates the SFT demonstrations and the teacher that provides subsequent OPD supervision, seeking to remove teacher consistency as a practical prerequisite for effective OPD. 
+
+On-Policy Distillation. Knowledge distillation transfers capabilities from a teacher to a student by matching their output distributions (Hinton et al., 2015). Sequence-level and language-model distillation extend this idea to autoregressive generation (Gu et al., 2024; Kim and Rush, 2016; Rang et al., 2025; Xu et al., 2025), whereas on-policy distillation evaluates the teacher on student-generated trajectories and provides dense feedback on states visited by the student (Agarwal et al., 2024; Lu and Lab, 2025; Song and Zheng, 2026). Recent work extends OPD through reward extrapolation and flexible reference policies (Yang et al., 2026a), entropy-aware divergence and local-support matching (Fu et al., 2026; Jin et al., 2026; Ke et al., 2026), reinforcement-aware or verifier-guided objectives (Xu et al., 2026; Zhang et al., 2026), controllable reasoning (Liang et al., 2026), and black-box, privileged, or self-distillation settings (Hübotter et al., 2026; Penaloza et al., 2026; Shenfeld et al., 2026; Tan and Hong, 2026; Yang et al., 2026b; Ye et al., 2025; Zhao et al., 2026). OPD has also become a component of large-scale reasoning post-training pipelines (Xiao et al., 2026; Yang et al., 2025; 2026c). Complementary studies show that stronger teachers do not always yield better students and trace failures to thinking-pattern incompatibility, unreliable token-level guidance, and teacher-dependent gradient quality (Armandpour et al., 2026; Fu et al., 2026; Li et al., 2026; Xu et al., 2026; Yang et al., 2026b). Offline OPD variants avoid maintaining a live teacher during optimization by precomputing rollouts and their corresponding teacher log-probabilities before training (Rang et al., 2025; Wu et al., 2026). Building upon Lightning OPD, we study how to maintain effective distillation in cross-teacher settings, where the SFT data generator and the OPD teacher differ. Lightning OPD 2.0 uses rollout-level cross-fitting to estimate the recurring component of teacher–reference disagreement as an operational proxy for style-token bias and subtracts it before constructing the token-level OPD update. 
+
+> 3Lightning OPD 2.0: Mitigating Style Bias in Cross-Teacher On-Policy Distillation for Large Reasoning Models
+
+3. Methodology 
+
+3.1. Cross-Teacher OPD 
+
+Let 𝑝 be the training-prompt distribution and {𝑞 𝑖 }𝑁 𝑖 =1 the prompts stored in the replay. When the supervised fine-tuning (SFT) demonstrations have a single identifiable generator, let 𝜋 𝐺 denote this SFT data generator. Let 𝜋 𝑅 be the resulting SFT reference policy, 𝜋 𝑇 the model selected to provide OPD supervision, and 𝜋 𝜃 
+
+a trainable policy initialized from 𝜋 𝑅 . Teacher consistency requires 𝜋 𝑇 = 𝜋 𝐺 (Wu et al., 2026). We study 
+
+cross-teacher OPD , where 𝜋 𝑇 is selected independently of 𝜋 𝐺 or no single 𝜋 𝐺 can be identified. Our method addresses this general setting through the frozen replay of Lightning OPD. Following Lightning OPD, we sample and freeze one response 𝑥 𝑖 = ( 𝑦 𝑖 1, . . . , 𝑦 𝑖𝐿 𝑖 ) ∼ 𝜋 𝑅 (· | 𝑞 𝑖 ) for every prompt. Let ℎ𝑖𝑡 = ( 𝑞 𝑖 , 𝑦 𝑖,<𝑡 ) be the prefix at token 𝑡 . The OPD teacher and the SFT reference score the same realized token, producing the cached chosen-token log-probabilities 
+
+ℓ𝑇 𝑖𝑡 = log 𝜋 𝑇 (𝑦 𝑖𝑡 | ℎ𝑖𝑡 ), ℓ𝑅 𝑖𝑡 = log 𝜋 𝑅 (𝑦 𝑖𝑡 | ℎ𝑖𝑡 ). (1) We assume that these scores are aligned to the same response tokens. Our experiments use models with compatible Qwen-family tokenization. Using this cache, unmodified Lightning OPD retains the original per-token advantage 
+
+𝐴 base  
+
+> 𝑖𝑡
+
+(𝜃 ) = ℓ𝑇 𝑖𝑡 − log 𝜋 𝜃 (𝑦 𝑖𝑡 | ℎ𝑖𝑡 ), (2) and optimizes 
+
+𝐽 base (𝜃 ) = E𝑞 𝑖 ∼𝑝, 𝑥 𝑖 ∼𝜋 𝑅 [︃ 
+
+> 𝐿 𝑖
+
+∑︁ 
+
+> 𝑡 =1
+
+𝐴 base  
+
+> 𝑖𝑡
+
+(𝜃 )]︃ . (3) Following standard OPD practice (Agarwal et al., 2024; Lu and Lab, 2025; Wu et al., 2026), the advantage is treated as a fixed scalar when computing parameter updates. Throughout this section, ∇𝐽 denotes the resulting advantage-weighted policy gradient rather than ordinary differentiation through the advantage. We use the same policy surrogate as Lightning OPD. To isolate the part of the signal affected by the teacher choice, we define the teacher–reference disagreement 
+
+𝑑 𝑖𝑡 = ℓ𝑇 𝑖𝑡 − ℓ𝑅 𝑖𝑡 . (4) At initialization, 𝜋 𝜃 = 𝜋 𝑅 , so 𝐴 base  
+
+> 𝑖𝑡
+
+= 𝑑 𝑖𝑡 . In cross-teacher OPD, 𝑑 𝑖𝑡 can contain both context-specific teacher evidence and recurring teacher–reference differences induced by the mismatch with the SFT data generator. The unmodified update cannot distinguish the two. The next subsection develops an operational proxy for this recurring component. 
+
+3.2. Predictability across Rollouts as a Style Proxy 
+
+The raw disagreement 𝑑 𝑖𝑡 can contain both context-specific teacher evidence and systematic differences in how the selected teacher and the SFT reference express a response. We make the operational assumption that disagreement associated with recurring style differences is more predictable across cached rollouts from simple lexical and coarse contextual coordinates, whereas potentially useful, reasoning-related teacher evidence is more dependent on the current context. We therefore write 
+
+𝑑 𝑖𝑡 = 𝑏 (𝑧 𝑖𝑡 ) + 𝑣 𝑖𝑡 , (5) where 𝑧 𝑖𝑡 collects the token and context coordinates defined below, 𝑏 (𝑧 𝑖𝑡 ) is the component that recurs at those coordinates across rollouts, and 𝑣 𝑖𝑡 is the remaining variation. This is an operational decomposition rather than a semantic labeling of individual tokens. We use 𝑏 (𝑧 𝑖𝑡 ) as a proxy for recurring style-token bias and approximate it by equally combining token- and context-based lookup predictions. We estimate these predictions by rollout-level cross-fitting and replace 𝑑 𝑖𝑡 with its estimated residual in the training objective. 
+
+> 4
+
+Lightning OPD 2.0: Mitigating Style Bias in Cross-Teacher On-Policy Distillation for Large Reasoning Models Offl ine  OPD  Rollout  Collection 
+
+Prompt  qi SFT model  πR
+
+Cached rollout 
+
+xi = (yi1, ⋯, yiLi) ∼ πR( ⋅ , qi)
+
+Reference scores  OPD teacher scores <latexit sha1_base64="mlg6Zc54mS+fW6JmIchXXRsS+Vw=">AAACGnicbVDLSsNAFJ34rPVVdelmsAi6KYmIuhFENy4r9CE0MUymN+3g5MHMjVBiv8ONv+LGhSLuxI1/4zRm4evA5R7OuZeZe4JUCo22/WFNTc/Mzs1XFqqLS8srq7W19Y5OMsWhzROZqMuAaZAihjYKlHCZKmBRIKEbXJ9N/O4NKC2SuIWjFLyIDWIRCs7QSH7NcUFKPxc4vmrRY+rKZOCmwm+5EkLcGRXO7bBorhKDIe76tbrdsAvQv8QpSZ2UaPq1N7ef8CyCGLlkWvccO0UvZwoFlzCuupmGlPFrNoCeoTGLQHt5cdqYbhulT8NEmYqRFur3jZxFWo+iwExGDIf6tzcR//N6GYZHXi7iNEOI+ddDYSYpJnSSE+0LBRzlyBDGlTB/pXzIFONo0qyaEJzfJ/8lnb2Gc9A4uNivn5yWcVTIJtkiO8Qhh+SEnJMmaRNO7sgDeSLP1r31aL1Yr1+jU1a5s0F+wHr/BFkxobk=</latexit> ωT
+
+it = log εT (yit |hit )
+
+Raw disagreement <latexit sha1_base64="02wK+4y28i5h37eA0/SqR1vxRPg=">AAACC3icbVC7TsMwFHV4lvIKMLJYrZBYqBKECgtSBQtjQX1JbYgcx2mtOk5kO0hV1J2FX2FhACFWfoCNv8FNMkDLlSydx726vseLGZXKsr6NpeWV1bX10kZ5c2t7Z9fc2+/IKBGYtHHEItHzkCSMctJWVDHSiwVBocdI1xtfz/zuAxGSRrylJjFxQjTkNKAYKS25ZsV3U6qm8BIOCGP3rZyd5OwuY65ZtWpWVnAR2AWogqKarvk18COchIQrzJCUfduKlZMioShmZFoeJJLECI/RkPQ15Cgk0kmzW6bwSCs+DCKhH1cwU39PpCiUchJ6ujNEaiTnvZn4n9dPVHDhpJTHiSIc54uChEEVwVkw0KeCYMUmGiAsqP4rxCMkEFY6vrIOwZ4/eRF0Tmt2vVa/Pas2roo4SuAQVMAxsME5aIAb0ARtgMEjeAav4M14Ml6Md+Mjb10yipkD8KeMzx8uZZqI</latexit> dit = ωT
+
+it → ωR
+
+it 
+
+Cross-Fitted  Style  Residualization 
+
+Split rollouts into -fold K
+
+1 2 Kk
+
+Raw disagreement 
+
+from fold :k dit
+
+Statistics from Other folds K − 1
+
+Token lookup <latexit sha1_base64="Vc70I6il02ooh9WYMOs82gbBp84=">AAACGnicbVDLSsNAFJ34tr6qLt0Ei6ALSyJSXYpuXFawD2himExv2qGTBzM3Ygj5Djf+ihsXirgTN/6N0zYLXwcunDnnXube4yeCK7SsT2Nmdm5+YXFpubKyura+Ud3caqs4lQxaLBax7PpUgeARtJCjgG4igYa+gI4/uhj7nVuQisfRNWYJuCEdRDzgjKKWvKodeg7CHeYYj4qb3BEQ4P7hyJF8MMSDYvrOvJxjUWpetWbVrQnMv8QuSY2UaHrVd6cfszSECJmgSvVsK0E3pxI5E1BUnFRBQtmIDqCnaURDUG4+Oa0w97TSN4NY6orQnKjfJ3IaKpWFvu4MKQ7Vb28s/uf1UgxO3ZxHSYoQselHQSpMjM1xTmafS2AoMk0ok1zvarIhlZShTrOiQ7B/n/yXtI/qdqPeuDqunZ2XcSyRHbJL9olNTsgZuSRN0iKM3JNH8kxejAfjyXg13qatM0Y5s01+wPj4AvhuohI=</latexit> m(→k)
+
+tok (yit )
+
+Context lookup <latexit sha1_base64="cEYrY9zrGj3qdTmxMBt56Jl+L3c=">AAACIXicbVDLSsNAFJ34rPVVdekmWAQFLYlIdVl047KCVaGJYTK9aYdOHszciCXkV9z4K25cKNKd+DNO0yx8HRjmzDn3cucePxFcoWV9GDOzc/MLi5Wl6vLK6tp6bWPzWsWpZNBhsYjlrU8VCB5BBzkKuE0k0NAXcOMPzyf+zT1IxePoCkcJuCHtRzzgjKKWvNpp6DkID5gxfMjvMkdAgHuHQ0fy/gD38+k78TKO+cGouErLq9WthlXA/EvsktRJibZXGzu9mKUhRMgEVaprWwm6GZXImYC86qQKEsqGtA9dTSMagnKzYsPc3NVKzwxiqU+EZqF+78hoqNQo9HVlSHGgfnsT8T+vm2Jw6mY8SlKEiE0HBakwMTYncZk9LoGhGGlCmeT6ryYbUEkZ6lCrOgT798p/yfVRw242mpfH9dZZGUeFbJMdskdsckJa5IK0SYcw8kieySt5M56MF+PdGE9LZ4yyZ4v8gPH5BdQApSk=</latexit> m(→k)
+
+ctx (pit , y it )
+
+Recurring style bias estimate <latexit sha1_base64="gCN9EIGwBImpiqFyZwBvAnWQcuo=">AAACQ3icbZBLSwMxFIUzPmt9VV26CRahopYZEXUjFN24rGCr2NYhk2ZsaOZBckctYf6bG/+AO/+AGxeKuBVMp12o7YXA4ZxzSfJ5seAKbPvFmpicmp6Zzc3l5xcWl5YLK6t1FSWSshqNRCSvPKKY4CGrAQfBrmLJSOAJdul1T/v55R2TikfhBfRi1grIbch9TgkYyy1cN+95m3UIaC91NYcUH+OmLwnVTqr30uBGl3a7W2mpl4VbeHtc6moKD2kpzjo7WA66bqFol+1s8KhwhqKIhlN1C8/NdkSTgIVABVGq4dgxtDSRwKlgab6ZKBYT2iW3rGFkSAKmWjpjkOJN47SxH0lzQsCZ+3tDk0CpXuCZZkCgo/5nfXNc1kjAP2ppHsYJsJAOLvITgSHCfaC4zSWjIHpGECq5eSumHWIYgcGeNxCc/18eFfW9snNQPjjfL1ZOhjhyaB1toBJy0CGqoDNURTVE0SN6Re/ow3qy3qxP62tQnbCGO2voz1jfP8htsWs=</latexit> ̂bit = 1
+
+2 m(→k)(yit ) + 1
+
+2 m(→k)
+
+ctx (pit , r it )
+
+⋯ ⋯
+
+Residualized disagreement <latexit sha1_base64="tqPPPyQ/GgZKDuNxcco84qFPCec=">AAACDXicbZDLSsNAFIYn9VbrLerSzWAVRLAkItWNUHTjsoK9QFvLZDJth04mYeZEKSEv4MZXceNCEbfu3fk2TtMutPrDwMd/zuHM+b1IcA2O82Xl5uYXFpfyy4WV1bX1DXtzq67DWFFWo6EIVdMjmgkuWQ04CNaMFCOBJ1jDG16O6407pjQP5Q2MItYJSF/yHqcEjNW19/zbw27CIcXn2J/AEW7fc58NCCRemlldu+iUnEz4L7hTKKKpql37s+2HNA6YBCqI1i3XiaCTEAWcCpYW2rFmEaFD0mctg5IETHeS7JoU7xvHx71QmScBZ+7PiYQEWo8Cz3QGBAZ6tjY2/6u1YuiddRIuoxiYpJNFvVhgCPE4GuxzxSiIkQFCFTd/xXRAFKFgAiyYENzZk/9C/bjklkvl65Ni5WIaRx7toF10gFx0iiroClVRDVH0gJ7QC3q1Hq1n6816n7TmrOnMNvol6+Mb/sabkA==</latexit> d→
+
+it = dit →̂ bit 
+
+Update the student 
+
+policy  πθ
+
+Resulting advantage <latexit sha1_base64="yaOut+0vvLxu/zcsBofye9VVlXA=">AAACSHicbVDLTttAFB2bPiB9GViyGRFVCotGdlXRbpB4bLoEiQBSJljjyXU8YvzQzHVLZJy/66bL7voN3bAAIXZMnCzapFcazdF56M6cqFDSoO//dtyVZ89fvFxda716/ebtO29948zkpRbQE7nK9UXEDSiZQQ8lKrgoNPA0UnAeXR1N9fNvoI3Ms1McFzBI+SiTsRQcLRV64UFYSawvGcI1VhpM3WGYAPIdukcZKHV52hjoB8q+yyEkHKuonlGMTSYTy6t8xAoZznKdcSPeJM21E3ptv+s3Q5dBMAdtMp/j0PvFhrkoU8hQKG5MP/ALHFRcoxQK6hYrDRRcXPER9C3MeApmUDVF1PS9ZYY0zrU9GdKG/TtR8dSYcRpZZ8oxMYvalPyf1i8x/jKoZFaUCJmYLYpLRTGn01bpUGoQqMYWcKGlfSsVCddcoO2+ZUsIFr+8DM4+doPd7u7Jp/b+4byOVbJFtkmHBOQz2SdfyTHpEUF+kD/kjtw7P51b58F5nFldZ57ZJP+M6z4BbiSz+A==</latexit> Ares 
+
+it (ω) = εT
+
+it →̂ bit 
+
+→ log ϑω (yit |hit )
+
+Residualized  OPD  update 
+
+# -
+
+Figure 2 | Overview of Lightning OPD 2.0. The SFT reference generates the frozen rollouts, which are scored by both the reference and the independently selected OPD teacher to obtain the raw teacher–reference disagreement. For each held-out fold, response-balanced token and context lookup tables fitted on the other folds estimate the recurring disagreement as an operational proxy for style-token bias. Subtracting this estimate yields a residualized signal for the reference-anchored Lightning OPD update. 
+
+Observable coordinates for recurring disagreement. Estimating a component that recurs across rollouts requires coordinates that are shared often enough to support reliable averaging but expressive enough to distinguish different uses of a token. Token identity captures lexical preference but treats every occurrence alike. At the other extreme, the full prefix identifies the local context precisely but rarely repeats across rollouts and may absorb problem-specific reasoning. We therefore complement token identity with a coarse context coordinate based on normalized response position and reference-policy surprisal. Normalized response position identifies the stage of the response. Reference-policy surprisal provides a low-dimensional summary of how typical the realized token is under the SFT reference, rather than a direct indicator of style. Together, these coordinates describe broad usage conditions without conditioning on the full prompt or prefix. Formally, let the reference-policy surprisal be 𝜉 𝑖𝑡 = −ℓ𝑅 𝑖𝑡 , the standard measure of how atypical a realized token is under a language model (Wilcox et al., 2023). A small value means that the token is natural under the SFT reference, while a large value means that the reference itself finds the token unexpected. We divide the response into 𝐵 pos normalized-position bins and the surprisal range into 𝐵 ref bins up to 𝜉 max . Coarse surprisal bins distinguish disagreement on reference-typical and reference-atypical tokens while preserving sufficient support across rollouts for stable estimation. Their zero-indexed identifiers are 
+
+𝑝 𝑖𝑡 =⌊︂ 𝐵 pos 
+
+𝑡 − 1
+
+𝐿 𝑖 ⌋︂ , 𝑟 𝑖𝑡 = min {︂ 𝐵 ref − 1,⌊︂ 𝐵 ref 
+
+𝜉 𝑖𝑡 
+
+𝜉 max ⌋︂}︂ . (6) We set 𝑧 tok 
+
+𝑖𝑡 = 𝑦 𝑖𝑡 , 𝑧 ctx 
+
+𝑖𝑡 = ( 𝑝 𝑖𝑡 , 𝑟 𝑖𝑡 ), and 𝑧 𝑖𝑡 = ( 𝑧 tok 
+
+𝑖𝑡 , 𝑧 ctx 
+
+𝑖𝑡 ). Binning pools comparable occurrences across responses of different lengths. We construct the token and context lookup tables separately rather than using their full cross product, which avoids fragmenting the cache into excessively sparse groups. 
+
+3.3. Cross-Fitted Estimation of Recurring Disagreement 
+
+Cross-fitting is a standard sample-splitting technique for constructing held-out predictions and preventing self-fitting (Chernozhukov et al., 2018; Guo et al., 2021). We use it only as an estimation device. We partition the cached rollouts into 𝐾 deterministic folds, keeping all rollouts originating from the same prompt in one fold. For a rollout in fold 𝑘 , we estimate all statistics using only the other 𝐾 − 1 folds. Neither that rollout nor another rollout from the same prompt can therefore contribute to its lookup tables. This exclusion prevents self-fitting but does not by itself identify the predicted component as style. 
+
+5Lightning OPD 2.0: Mitigating Style Bias in Cross-Teacher On-Policy Distillation for Large Reasoning Models 
+
+To prevent longer responses from dominating the estimates, we assign each response unit total weight, distributed uniformly over its active tokens, when fitting the lookup tables. The training loss uses the same reduction by averaging active-token contributions within each response and then averaging across responses. This response-balanced reduction is shared by all methods and is not a component of style residualization. Using the non-held-out folds, we build one lookup table for the mean disagreement of each token identity and another for each context coordinate. Rare groups are smoothed toward the global mean of the non-held-out folds, while unseen groups use that global mean directly. This prevents a rare token or context from receiving an unstable correction. Let 𝑚 (−𝑘 )tok and 𝑚 (−𝑘 )ctx denote the resulting smoothed lookup tables. For token (𝑖, 𝑡 ) in held-out fold 𝑘 , we use the equal-weight prediction ̂︀ 
+
+𝑏 𝑖𝑡 = 12 𝑚 (−𝑘 )tok (𝑧 tok  
+
+> 𝑖𝑡
+
+) + 12 𝑚 (−𝑘 )ctx (𝑧 ctx  
+
+> 𝑖𝑡
+
+). (7) The two lookup predictions receive equal coefficients, and averaging keeps their combination on the scale of a single disagreement estimate. Equation (7) is our concrete approximation to 𝑏 (𝑧 𝑖𝑡 ) in Equation (5) . At the conceptual level, both tables average the raw disagreement 𝑑 𝑖𝑡 . Because both lookup tables exclude the current rollout, ̂︀ 𝑏 𝑖𝑡 captures recurring disagreement that is predictable from other cached rollouts rather than variation fitted specifically to the current response. 
+
+3.4. Residualized Lightning OPD 
+
+The base advantage separates into the cross-teacher disagreement and a reference-anchoring term 
+
+𝐴 base  
+
+> 𝑖𝑡
+
+(𝜃 ) = 𝑑 𝑖𝑡 + ℓ𝑅 𝑖𝑡 − log 𝜋 𝜃 (𝑦 𝑖𝑡 | ℎ𝑖𝑡 ). (8) Because ̂︀ 𝑏 𝑖𝑡 estimates recurring teacher–reference disagreement, we residualize only 𝑑 𝑖𝑡 and leave the reference-anchoring term unchanged. We set 
+
+𝑑 * 
+
+> 𝑖𝑡
+
+= 𝑑 𝑖𝑡 −̂︀ 𝑏 𝑖𝑡 . (9) The resulting advantage is 
+
+𝐴 res  
+
+> 𝑖𝑡
+
+(𝜃 ) = 𝑑 * 
+
+> 𝑖𝑡
+
++ ℓ𝑅 𝑖𝑡 − log 𝜋 𝜃 (𝑦 𝑖𝑡 | ℎ𝑖𝑡 )= ℓ𝑇 𝑖𝑡 −̂︀ 𝑏 𝑖𝑡 − log 𝜋 𝜃 (𝑦 𝑖𝑡 | ℎ𝑖𝑡 ). (10) At initialization, 𝜋 𝜃 = 𝜋 𝑅 and 𝐴 res  
+
+> 𝑖𝑡
+
+= 𝑑 *
+
+> 𝑖𝑡
+
+. We retain the Lightning OPD objective form while replacing the raw cross-teacher disagreement with its residualized counterpart 
+
+𝐽 res (𝜃 ) = E𝑞 𝑖 ∼𝑝, 𝑥 𝑖 ∼𝜋 𝑅 [︃ 
+
+> 𝐿 𝑖
+
+∑︁ 
+
+> 𝑡 =1
+
+𝐴 res  
+
+> 𝑖𝑡
+
+(𝜃 )]︃ . (11) Equivalently, at the conceptual objective level, we define the fixed effective chosen-token teacher score ̃︀ 
+
+ℓ𝑇 𝑖𝑡 = ℓ𝑇 𝑖𝑡 −̂︀ 𝑏 𝑖𝑡 and use it in place of ℓ𝑇 𝑖𝑡 . This score and ̂︀ 𝑏 𝑖𝑡 are computed before training and remain fixed throughout optimization. 
+
+4. Experiments 
+
+Our experiments are organized into four parts. We first describe the two cross-teacher settings, training and evaluation protocols, and matched baselines. We then report the main results on mathematical reasoning and code generation under both settings. Next, we conduct a mechanism analysis that compares the cross-teacher training signal with its teacher-consistent counterpart and shows how Lightning OPD 2.0 removes the dominant style-token bias introduced by teacher inconsistency. Finally, we ablate the core algorithmic design points by removing the token-identity lookup, the context lookup, and prompt-level cross-fitting from the full method. 
+
+4.1. Experimental Setup Cross-teacher settings. We study two complementary settings. The Qwen3-4B setting starts from the Qwen3-4B SFT reference used by Lightning OPD, whose SFT demonstrations were generated by Qwen3-8B, 
+
+> 6Lightning OPD 2.0: Mitigating Style Bias in Cross-Teacher On-Policy Distillation for Large Reasoning Models
+
+Algorithm 1 Lightning OPD 2.0 with Cross-Fitted Style Residualization 
+
+Require: SFT reference 𝜋 𝑅 , frozen replay 𝒟 with scores ℓ𝑅 and ℓ𝑇 , and number of folds 𝐾  
+
+> 1:
+
+Compute 𝑑 𝑖𝑡 and the token and context coordinates defined in Section 3.2  
+
+> 2:
+
+Partition rollouts into 𝐾 folds, grouping those from the same prompt  
+
+> 3:
+
+for each held-out fold 𝑘 do  
+
+> 4:
+
+Fit response-balanced, smoothed tables 𝑚 (−𝑘 )tok and 𝑚 (−𝑘 )ctx on the other folds  
+
+> 5:
+
+Correct fold 𝑘 using Equation (7), setting ̃︀ ℓ𝑇 𝑖𝑡 = ℓ𝑇 𝑖𝑡 −̂︀ 𝑏 𝑖𝑡  
+
+> 6:
+
+end for  
+
+> 7:
+
+Initialize 𝜋 𝜃 ← 𝜋 𝑅  
+
+> 8:
+
+for each training step do  
+
+> 9:
+
+Compute 𝐴 res  
+
+> 𝑖𝑡
+
+on a minibatch from the corrected replay using Equation (10)  
+
+> 10:
+
+Update 𝜃 with the Lightning OPD policy surrogate  
+
+> 11:
+
+end for  
+
+> 12:
+
+return 𝜋 𝜃 
+
+and selects Qwen3-30B-A3B-Thinking-2507 as the OPD teacher. Its known provenance makes the source of cross-teacher style mismatch directly identifiable. The second setting uses Klear-Reasoner-8B-SFT (Kwai-Klear, 2026), which is trained from Qwen3-8B-Base using long-chain-of-thought SFT data distilled from DeepSeek-R1-0528 (DeepSeek-AI, 2025). It tests whether the same correction applies to a stronger SFT reference trained from a different initialization and data generator. Both settings use Qwen3-30B-A3B-Thinking-2507 (Yang et al., 2025) as the selected cross-teacher OPD teacher. 
+
+Training Settings. We train on two domains. Mathematical reasoning uses DAPO-Math-17k (Yu et al., 2025), which provides 17K competition-level math problems spanning a wide range of difficulty. Code generation uses KlearReasoner-CodeSub-15K (Kwai-Klear, 2026), which provides 15K carefully cleaned and filtered code problems. For each OPD prompt, we sample a single response from the SFT reference and precompute the corresponding selected-teacher log-probabilities once before training, following the pipeline of Lightning OPD (Wu et al., 2026). We use five prompt-level folds for cross-fitting. The training framework is built upon slime (THUDM, 2025), and we train each model for 150 steps using the Lightning OPD policy surrogate with a PPO clipping range of 0.2.
+
+Evaluation. For mathematical reasoning, we evaluate on AIME 2024 (AI-MO, 2024), AIME 2025 (Open-Compass, 2025), and HMMT February 2025 (Balunović et al., 2025). For code generation, we evaluate on LiveCodeBench v5 and v6 (Jain et al., 2024). We set the temperature to 0.6 and top-𝑝 to 0.95 throughout. The maximum generation length is 40,960 for all math and code benchmarks. Math uses 64 solutions per problem and code uses 8 solutions per problem, and we report average Pass@1. 
+
+Baselines. We compare Lightning OPD 2.0 with the SFT reference and three OPD baselines. Lightning OPD (Wu et al., 2026) applies the original token-level distillation objective without style correction. IW-OPD (Xie et al., 2026) addresses position bias by weighting tokens according to the accumulated teacher–student discrepancy, while TA-OPD (Wang et al., 2026) selects positions whose teacher signal is predicted to be learnable. For a controlled comparison, all OPD methods start from the same SFT reference and use the same rollouts, cached teacher log-probabilities, and training budget. Since IW-OPD and TA-OPD were originally formulated with online rollouts, we adapt their objectives to the frozen Lightning OPD replay. 
+
+4.2. Main Results 
+
+Table 1 presents evaluation results across five benchmarks under the two cross-teacher settings. Across both settings, Lightning OPD 2.0 consistently improves the SFT reference, whereas Lightning OPD and the two competing OPD baselines yield little or no aggregate improvement once teacher consistency is violated. In the Qwen3-4B setting, Lightning OPD 2.0 improves all five benchmarks, raising the average math and code scores over the SFT reference by 3.4 and 3.1 points, respectively. Compared with Lightning OPD, Lightning OPD 2.0 further improves average math and code performance by 3.1 and 1.4 points. It also achieves the 
+
+> 7Lightning OPD 2.0: Mitigating Style Bias in Cross-Teacher On-Policy Distillation for Large Reasoning Models
+
+Table 1 | Pass@1 (%) on math reasoning and code generation under two cross-teacher settings. Methods marked with ♢ are frozen-replay adaptations. Bold indicates the strongest result within each setting, and blue rows highlight Lightning OPD 2.0. 
+
+Method Math Reasoning Code Generation AIME 2024 AIME 2025 HMMT Feb. 2025 Avg. LCB v5 LCB v6 Avg. 
+
+Student: Qwen3-4B-SFT Teacher: Qwen3-30B-A3B-Thinking-2507 
+
+SFT reference 57.5 52.4 34.9 48.3 33.8 31.5 32.6 Lightning OPD 59.6 51.6 34.6 48.6 35.5 33.2 34.3 IW-OPD ♢ 60.8 49.9 33.8 48.2 37.2 33.8 35.5 TA-OPD ♢ 56.0 50.0 30.6 45.6 35.7 30.4 33.1 Lightning OPD 2.0 63.5 55.0 36.7 51.7 36.9 34.4 35.7 
+
+Student: Klear-Reasoner-8B-SFT Teacher: Qwen3-30B-A3B-Thinking-2507 
+
+Qwen3-8B 76.0 67.3 44.7 62.7 57.5 48.4 53.1 SFT reference 81.3 77.5 62.2 73.6 58.5 51.3 54.9 Lightning OPD 80.6 77.2 62.9 73.6 61.6 52.6 57.1 IW-OPD ♢ 81.9 77.6 62.3 73.9 61.0 53.8 57.4 TA-OPD ♢ 82.7 76.9 62.0 73.9 62.1 53.1 57.6 Lightning OPD 2.0 82.4 77.7 63.8 74.6 63.0 53.9 58.5 
+
+strongest average results among all methods, outperforming IW-OPD by 3.5 points on math and 0.2 points on code, and TA-OPD by 6.1 and 2.6 points. In the Klear-Reasoner-8B-SFT setting, Lightning OPD 2.0 similarly improves all five benchmarks, with average gains of 1.0 points on math and 3.6 points on code over the SFT reference. Compared with Lightning OPD, it improves average math and code performance by 1.0
+
+and 1.4 points, respectively, and remains stronger than IW-OPD and TA-OPD in both domains. Together, these results demonstrate that Lightning OPD 2.0 generalizes across SFT initializations and data-generation pipelines without requiring teacher consistency. 
+
+4.3. Mechanism Analysis of Style-Token Bias 
+
+We assess whether residualization moves the cross-teacher training signal toward the signal obtained under teacher consistency. Let 𝜋 𝐷 denote the model used for this post-hoc diagnostic and let ℓ𝐷 𝑖𝑡 be its chosen-token log-probability. For each scored response token in the cache, we measure the absolute deviation of the raw and residualized signals from the diagnostic reference signal 
+
+𝑜 𝑖𝑡 =⃒⃒ 𝑑 𝑖𝑡 −(︀ ℓ𝐷 𝑖𝑡 − ℓ𝑅 𝑖𝑡 )︀⃒⃒ , 𝑜 * 
+
+> 𝑖𝑡
+
+=⃒⃒ 𝑑 * 
+
+> 𝑖𝑡
+
+−(︀ ℓ𝐷 𝑖𝑡 − ℓ𝑅 𝑖𝑡 )︀⃒⃒ , (12) where 𝑑 𝑖𝑡 = ℓ𝑇 𝑖𝑡 − ℓ𝑅 𝑖𝑡 is the original cross-teacher disagreement and 𝑑 * 
+
+> 𝑖𝑡
+
+is its residualized counterpart. In the Qwen3-4B-SFT setting, 𝜋 𝐷 is Qwen3-8B, the provenance teacher 𝜋 𝐺 that generated the SFT demonstrations. The diagnostic reference is therefore the exact teacher-consistent signal in this setting. Exact teacher-consistent scores are unavailable in the Klear-Reasoner-8B-SFT setting, so we use Klear-Reasoner-8B (Kwai-Klear, 2026) as a diagnostic proxy. Neither diagnostic model contributes to correction estimation or student training. Figure 3 compares the empirical fractions of tokens satisfying 𝑜 𝑖𝑡 > 𝜏 and 𝑜 * 
+
+> 𝑖𝑡
+
+> 𝜏 as 𝜏 varies from 0.5 to 3.0
+
+nats. The after-correction curve lies below the before-correction curve at every evaluated threshold in both settings, showing that the result is not specific to a single cutoff. At 𝜏 = 1 , which we use as a representative reference point, residualization reduces the exceedance rate from 8.14% to 3.85% in the Qwen3-4B-SFT setting and from 7.19% to 2.02% in the Klear-Reasoner-8B-SFT setting. These changes correspond to relative reductions of 52 .8% and 71 .9% , respectively. The relative reduction grows at higher thresholds, showing that residualization reduces the prevalence of large deviations from the diagnostic reference signal. Figure 4 provides a complementary token-level view using two cached responses from the Qwen3-4B-SFT setting. For visualization, we color tokens with deviations of at most one nat in green and those above one nat in red, with darker shades denoting larger deviations. In these examples, several large raw deviations occur       
+
+> 8Lightning OPD 2.0: Mitigating Style Bias in Cross-Teacher On-Policy Distillation for Large Reasoning Models 0.5 1.0 1.5 2.0 2.5 3.0
+> Deviation threshold τ
+> 0
+> 4
+> 8
+> 12
+> 16
+> Tokens above deviation
+> threshold (%)
+
+Qwen3-4B-SFT           
+
+> 14.79
+> 8.14
+> 5.00
+> 3.24
+> 2.17 1.49
+> 13.70
+> 3.85
+> 1.66 0.92 0.58 0.39
+> 0.5 1.0 1.5 2.0 2.5 3.0
+> Deviation threshold τ
+> 0
+> 4
+> 8
+> 12
+> 16
+
+Klear-Reasoner-8B-SFT     
+
+> 12.41
+> 7.19
+> 4.62
+> 3.14
+> 2.20 1.58
+> 11.63
+> 2.02
+> 0.34 0.08 0.02 0.01
+> Before style bias correction
+> After style bias correction
+
+Figure 3 | Absolute-deviation threshold analysis. Each curve reports the fraction of scored response tokens whose absolute deviation from the diagnostic reference signal exceeds 𝜏 , using 𝑜 𝑖𝑡 before style-bias correction and 𝑜 * 
+
+> 𝑖𝑡
+
+after correction. The vertical line at 𝜏 = 1 marks the representative reference point used in the text. Qwen3-8B provides the exact teacher-consistent reference for Qwen3-4B-SFT, while Klear-Reasoner-8B provides a diagnostic proxy for Klear-Reasoner-8B-SFT. Both models are used only for this post-hoc analysis. on discourse markers and reasoning transitions. Most fall below the reference threshold after residualization, although some large deviations remain. The examples qualitatively illustrate the threshold-sweep result without treating the visualization threshold as part of the method. Together, the aggregate and token-level evidence supports our operational interpretation of the removed component as recurring style-token bias. 
+
+Figure 4 | Token-level examples of style-bias correction in the Qwen3-4B-SFT setting. Each row shows one cached response before correction on the left and after residualization on the right. Green denotes an absolute deviation of at most one nat from the diagnostic reference signal. Red denotes a deviation above one nat, with darker shades indicating larger values. The one-nat cutoff is used only for visualization. 
+
+4.4. Ablation Study 
+
+Table 2 ablates the three principal design choices in Lightning OPD 2.0. The context-only and token-only variants retain one lookup at unit weight, whereas the in-sample variant retains both lookups but removes prompt-level cross-fitting. Lightning OPD serves as the uncorrected baseline, and all variants otherwise share the same cache and training configuration within each setting. The full method yields the strongest overall reported point estimates. The effects of using a single coordinate family vary across settings, while in-sample estimation is generally weaker or tied. These results support combining lexical and coarse contextual estimates and retaining cross-fitting primarily as a safeguard against self-fitting. 
+
+> 9Lightning OPD 2.0: Mitigating Style Bias in Cross-Teacher On-Policy Distillation for Large Reasoning Models
+
+Table 2 | Component ablations of Lightning OPD 2.0 on AIME 2024 and HMMT February 2025. All entries report Pass@1 in percent. Checkmarks indicate retained components, and boldface marks the highest point estimate in each column. 
+
+Variant Components Qwen3-4B-SFT Klear-Reasoner-8B-SFT Token Context Cross-fitting AIME24 HMMT25 AIME24 HMMT25 
+
+Lightning OPD ✗ ✗ ✗ 59.6 34.6 80.6 62.9 Context only ✗ ✓ ✓ 61.5 36.6 82.3 62.6 Token only ✓ ✗ ✓ 61.3 35.4 82.1 61.8 In-sample estimation ✓ ✓ ✗ 62.7 36.7 81.8 63.1 Lightning OPD 2.0 ✓ ✓ ✓ 63.5 36.7 82.4 63.8 
+
+5. Conclusion 
+
+Teacher consistency is central to effective OPD, yet it is often unavailable when an SFT reference and a later distillation teacher are selected independently. We study this cross-teacher setting and find that chosen-token disagreement contains potentially useful context-specific teacher evidence together with a recurring component that is predictable across cached rollouts and associated with differences in wording, formatting, and reasoning cadence. Lightning OPD 2.0 estimates this component from other cached rollouts as an operational proxy for style-token bias and subtracts it before the reference-anchored offline OPD update, leaving the residual signal to drive distillation. Across the Qwen3-4B-SFT and Klear-Reasoner-8B-SFT settings, Lightning OPD 2.0 delivers consistent improvements over Lightning OPD on both mathematical reasoning and code generation tasks. While our evaluation is limited to these tasks and Qwen-family models, the consistent gains establish Lightning OPD 2.0 as a practical framework for efficient and effective cross-teacher OPD, enabling the SFT reference and distillation teacher to be selected independently. 
+
+References 
+
+Rishabh Agarwal, Nino Vieillard, Yongchao Zhou, Piotr Stanczyk, Sabela Ramos Garea, Matthieu Geist, and Olivier Bachem. On-policy distillation of language models: Learning from self-generated mistakes. In The Twelfth International Conference on Learning Representations , 2024. Arash Ahmadian, Chris Cremer, Matthias Gallé, Marzieh Fadaee, Julia Kreutzer, Olivier Pietquin, Ahmet Üstün, and Sara Hooker. Back to basics: Revisiting REINFORCE-style optimization for learning from human feedback in LLMs. arXiv preprint arXiv:2402.14740 , 2024. AI-MO. AIME 2024. https://huggingface.co/datasets/AI-MO/aimo-validation-aime , 2024. Mohammadreza Armandpour, Fatih Ilhan, David Harrison, Ajay Jaiswal, Duc N. M. Hoang, Fartash Faghri, Yizhe Zhang, Minsik Cho, and Mehrdad Farajtabar. Unmasking on-policy distillation: Where it helps, where it hurts, and why. arXiv preprint arXiv:2605.10889 , 2026. Mislav Balunović, Jasper Dekoninck, Ivo Petrov, Nikola Jovanović, and Martin Vechev. MathArena: Evaluating LLMs on uncontaminated math competitions. arXiv preprint arXiv:2505.23281 , 2025. Liang Chen, Xueting Han, Li Shen, Jing Bai, and Kam-Fai Wong. Beyond two-stage training: Cooperative SFT and RL for LLM reasoning. arXiv preprint arXiv:2509.06948 , 2025a. Yang Chen, Zhuolin Yang, Zihan Liu, Wenliang Dai, Boxin Wang, Sheng-Chieh Lin, Chankyu Lee, Mohammad Shoeybi, Bryan Catanzaro, and Wei Ping. Nemotron-cascade: Scaling cascaded reinforcement learning for general-purpose reasoning models. arXiv preprint arXiv:2512.13607 , 2025b. Victor Chernozhukov, Denis Chetverikov, Mert Demirer, Esther Duflo, Christian Hansen, Whitney Newey, and James Robins. Double/debiased machine learning for treatment and structural parameters. The Econometrics Journal , 21 (1):C1–C68, 2018. doi: 10.1111/ectj.12097. Ganqu Cui, Lifan Yuan, Zefan Wang, Hanbin Wang, Yuchen Zhang, Jiacheng Chen, Wendi Li, Bingxiang He, Yuchen Fan, Tianyu Yu, et al. Process reinforcement through implicit rewards. arXiv preprint arXiv:2502.01456 , 2025. DeepSeek-AI. DeepSeek-R1-0528. https://huggingface.co/deepseek-ai/DeepSeek-R1-0528 , 2025. 
+
+> 10 Lightning OPD 2.0: Mitigating Style Bias in Cross-Teacher On-Policy Distillation for Large Reasoning Models
+
+Hanze Dong, Wei Xiong, Deepanshu Goyal, Yihan Zhang, Winnie Chow, Rui Pan, Shizhe Diao, Jipeng Zhang, Kashun Shum, and Tong Zhang. RAFT: Reward ranked finetuning for generative foundation model alignment. Transactions on Machine Learning Research , 2023. Yuqian Fu, Haohuan Huang, Kaiwen Jiang, Yuanheng Zhu, and Dongbin Zhao. Revisiting on-policy distillation: Empirical failure modes and simple fixes. arXiv preprint arXiv:2603.25562 , 2026. Yuxian Gu, Li Dong, Furu Wei, and Minlie Huang. MiniLLM: Knowledge distillation of large language models. In The Twelfth International Conference on Learning Representations , 2024. Etash Guha, Ryan Marten, Sedrick Keh, Negin Raoof, Georgios Smyrnis, Hritik Bansal, Marianna Nezhurina, Jean Mercat, Trung Vu, Zayne Sprague, et al. Openthoughts: Data recipes for reasoning models. arXiv preprint arXiv:2506.04178 , 2025. Daya Guo, Dejian Yang, Haowei Zhang, Junxiao Song, Peiyi Wang, Qihao Zhu, Runxin Xu, Ruoyu Zhang, Shirong Ma, Xiao Bi, et al. Deepseek-r1: Incentivizing reasoning capability in llms via reinforcement learning. arXiv preprint arXiv:2501.12948 , 2025. Yongyi Guo, Dominic Coey, Mikael Konutgan, Wenting Li, Chris Schoener, and Matt Goldman. Machine learning for variance reduction in online experiments. In Advances in Neural Information Processing Systems , volume 34, 2021. Geoffrey Hinton, Oriol Vinyals, and Jeff Dean. Distilling the knowledge in a neural network. NIPS Deep Learning Workshop , 2015. Jian Hu. REINFORCE++: A simple and efficient approach for aligning large language models. arXiv preprint arXiv:2501.03262 , 2025. Jingcheng Hu, Yinmin Zhang, Qi Han, Daxin Jiang, Xiangyu Zhang, and Heung-Yeung Shum. Open-reasoner-zero: An open source approach to scaling up reinforcement learning on the base model. arXiv preprint arXiv:2503.24290 ,2025. Zeyu Huang, Tianhao Cheng, Zihan Qiu, Zili Wang, Yinghui Xu, Edoardo M. Ponti, and Ivan Titov. Blending supervised and reinforcement fine-tuning with prefix sampling. arXiv preprint arXiv:2507.01679 , 2025. Jonas Hübotter, Frederike Lübeck, Lejs Behric, Anton Baumann, Marco Bagatella, Daniel Marta, Ido Hakimi, Idan Shenfeld, Thomas Kleine Buening, Carlos Guestrin, et al. Reinforcement learning via self-distillation. arXiv preprint arXiv:2601.20802 , 2026. Naman Jain, King Han, Alex Gu, Wen-Ding Li, Fanjia Yan, Tianjun Zhang, Sida Wang, Armando Solar-Lezama, Koushik Sen, and Ion Stoica. LiveCodeBench: Holistic and contamination free evaluation of large language models for code. arXiv preprint arXiv:2403.07974 , 2024. Woogyeol Jin, Taywon Min, Yongjin Yang, Swanand Ravindra Kadhe, Yi Zhou, Dennis Wei, Nathalie Baracaldo, and Kimin Lee. Entropy-aware on-policy distillation of language models. arXiv preprint arXiv:2603.07079 , 2026. Amirhossein Kazemnejad, Milad Aghajohari, Eva Portelance, Alessandro Sordoni, Siva Reddy, Aaron Courville, and Nicolas Le Roux. VinePPO: Refining credit assignment in RL training of LLMs. arXiv preprint arXiv:2410.01679 ,2024. Junlong Ke, Zichen Wen, Weijia Li, Conghui He, and Linfeng Zhang. Respecting self-uncertainty in on-policy self-distillation for efficient LLM reasoning. arXiv preprint arXiv:2605.13255 , 2026. Yoon Kim and Alexander M Rush. Sequence-level knowledge distillation. In Proceedings of the 2016 Conference on Empirical Methods in Natural Language Processing , 2016. Kwai-Klear. Klear-Reasoner-8B-SFT. https://huggingface.co/Kwai-Klear/Klear-Reasoner-8B-SFT , 2026. Yaxuan Li, Yuxin Zuo, Bingxiang He, Jinqian Zhang, Chaojun Xiao, Cheng Qian, Tianyu Yu, Huan-ang Gao, Wenkai Yang, Zhiyuan Liu, and Ning Ding. Rethinking on-policy distillation of large language models: Phenomenology, mechanism, and recipe. arXiv preprint arXiv:2604.13016 , 2026. Ziniu Li, Tian Xu, Yushun Zhang, Yang Yu, Ruoyu Sun, and Zhi-Quan Luo. ReMax: A simple, effective, and efficient reinforcement learning method for aligning large language models. arXiv preprint arXiv:2310.10505 , 2023. Kun Liang, Clive Bai, Xin Xu, Chenming Tang, Sanwoo Lee, Weijie Liu, Saiyong Yang, and Yunfang Wu. Orbit: On-policy exploration-exploitation for controllable multi-budget reasoning. arXiv preprint arXiv:2601.08310 , 2026. 
+
+> 11 Lightning OPD 2.0: Mitigating Style Bias in Cross-Teacher On-Policy Distillation for Large Reasoning Models
+
+Aixin Liu, Bei Feng, Bing Xue, Bingxuan Wang, Bochao Wu, Chengda Lu, Chengqi Zhao, Chenggang Deng, Chengpeng Zhang, et al. DeepSeek-V3 technical report. arXiv preprint arXiv:2412.19437 , 2024. Mingyang Liu, Gabriele Farina, and Asuman Ozdaglar. UFT: Unifying supervised and reinforcement fine-tuning. arXiv preprint arXiv:2505.16984 , 2025a. Zichen Liu, Changyu Chen, Wenjun Li, Penghui Qi, Tianyu Pang, Chao Du, Wee Sun Lee, and Min Lin. Understanding R1-Zero-like training: A critical perspective. arXiv preprint arXiv:2503.20783 , 2025b. Kevin Lu and Thinking Machines Lab. On-policy distillation. Thinking Machines Lab: Connectionism , 2025. doi: 10.64434/tml.20251026. https://thinkingmachines.ai/blog/on-policy-distillation. Lu Ma, Hao Liang, Meiyi Qiang, Lexiang Tang, Xiaochen Ma, Zhen Hao Wong, Junbo Niu, Chengyu Shen, Runming He, Yanhao Li, Bin Cui, and Wentao Zhang. Learning what reinforcement learning can’t: Interleaved online fine-tuning for hardest questions. arXiv preprint arXiv:2506.07527 , 2026. MiniMax, Aonian Shan, Bangwei Gong, Bo Yang, et al. MiniMax-M1: Scaling test-time compute efficiently with lightning attention. arXiv preprint arXiv:2506.13585 , 2025. NVIDIA. Nvidia nemotron 3: Efficient and open intelligence. arXiv preprint arXiv:2512.20856 , 2025. OpenCompass. AIME 2025. https://github.com/open-compass/opencompass , 2025. Long Ouyang, Jeff Wu, Xu Jiang, Diogo Almeida, Carroll Wainwright, Pamela Mishkin, Chong Zhang, Sandhini Agarwal, Katarina Slama, Alex Ray, et al. Training language models to follow instructions with human feedback. In 
+
+Advances in Neural Information Processing Systems , volume 35, 2022. Emiliano Penaloza, Dheeraj Vattikonda, Nicolas Gontier, Alexandre Lacoste, Laurent Charlin, and Massimo Caccia. Privileged information distillation for language models. arXiv preprint arXiv:2602.04942 , 2026. Rafael Rafailov, Archit Sharma, Eric Mitchell, Christopher D Manning, Stefano Ermon, and Chelsea Finn. Direct preference optimization: Your language model is secretly a reward model. In Advances in Neural Information Processing Systems , volume 36, 2023. Miao Rang, Zhenni Bi, Hang Zhou, Hanting Chen, An Xiao, Tianyu Guo, Kai Han, Xinghao Chen, and Yunhe Wang. Revealing the power of post-training for small language models via knowledge distillation. arXiv preprint arXiv:2509.26497 , 2025. John Schulman, Filip Wolski, Prafulla Dhariwal, Alec Radford, and Oleg Klimov. Proximal policy optimization algorithms. arXiv preprint arXiv:1707.06347 , 2017. Zhihong Shao, Peiyi Wang, Qihao Zhu, Runxin Xu, Junxiao Song, Xiao Bi, Haowei Zhang, Mingchuan Zhang, YK Li, Yang Wu, et al. Deepseekmath: Pushing the limits of mathematical reasoning in open language models. arXiv preprint arXiv:2402.03300 , 2024. Idan Shenfeld, Jyothish Pari, and Pulkit Agrawal. Rl’s razor: Why online reinforcement learning forgets less. arXiv preprint arXiv:2509.04259 , 2025. Idan Shenfeld, Mehul Damani, Jonas Hübotter, and Pulkit Agrawal. Self-distillation enables continual learning. arXiv preprint arXiv:2601.19897 , 2026. Aaditya Singh, Adam Fry, Adam Perelman, Adam Tart, Adi Ganesh, Ahmed El-Kishky, Aidan McLaughlin, Aiden Low, AJ Ostrow, Akhila Ananthram, et al. Openai gpt-5 system card. arXiv preprint arXiv:2601.03267 , 2025. Mingyang Song and Mao Zheng. A survey of on-policy distillation for large language models. arXiv preprint arXiv:2604.00626 , 2026. Zhiquan Tan and Yinrong Hong. Self-supervised on-policy distillation for reasoning language models. arXiv preprint arXiv:2605.17497 , 2026. Kimi Team, Angang Du, Bofei Gao, Bowei Xing, Changjiu Jiang, et al. Kimi k1.5: Scaling reinforcement learning with LLMs. arXiv preprint arXiv:2501.12599 , 2025. Kimi Team, Tongtong Bai, Yifan Bai, Yiping Bao, SH Cai, Yuan Cao, Y Charles, HS Che, Cheng Chen, Guanduo Chen, et al. Kimi k2. 5: Visual agentic intelligence. arXiv preprint arXiv:2602.02276 , 2026. THUDM. slime: An SGLang-native post-training framework for RL scaling. https://github.com/THUDM/slime , 2025. 
+
+> 12 Lightning OPD 2.0: Mitigating Style Bias in Cross-Teacher On-Policy Distillation for Large Reasoning Models
+
+Yuanyi Wang, Su Lu, Yanggan Gu, Pengkai Wang, Yifan Yang, Zhaoyi Yan, Congkai Xie, Jianmin Wu, and Hongxia Yang. Not all disagreement is learnable: Token teachability in on-policy distillation. arXiv preprint arXiv:2605.26844 ,2026. Ethan G. Wilcox, Tiago Pimentel, Clara Meister, Ryan Cotterell, and Roger P. Levy. Testing the predictions of surprisal theory in 11 languages. Transactions of the Association for Computational Linguistics , 11:1451–1470, 2023. doi: 10.1162/tacl_a_00612. Yecheng Wu, Song Han, and Han Cai. Lightning OPD: Efficient post-training for large reasoning models with offline on-policy distillation. arXiv preprint arXiv:2604.13010 , 2026. Bangjun Xiao, Bingquan Xia, Bo Yang, Bofei Gao, Bowen Shen, Chen Zhang, Chenhong He, Chiheng Lou, Fuli Luo, Gang Wang, et al. Mimo-v2-flash technical report. arXiv preprint arXiv:2601.02780 , 2026. Yan Xie, Sijie Zhu, Tiansheng Wen, Bo Chen, and Yifei Wang. On the position bias of on-policy distillation. arXiv preprint arXiv:2606.22600 , 2026. Haoran Xu, Hongyu Wang, Yifei Gao, Jiaze Li, Xiaofeng Zhang, and Xiaosong Yuan. SG-OPD: Sign-gated on-policy distillation via sign-consistency gating and phased teacher sampling. arXiv preprint arXiv:2606.09304 , 2026. Wenda Xu, Rujun Han, Zifeng Wang, Long Le, Dhruv Madeka, Lei Li, William Yang Wang, Rishabh Agarwal, Chen-Yu Lee, and Tomas Pfister. Speculative knowledge distillation: Bridging the teacher-student gap through interleaved sampling. In The Thirteenth International Conference on Learning Representations , 2025. Jianhao Yan, Yafu Li, Zican Hu, Zhi Wang, Ganqu Cui, Xiaoye Qu, Yu Cheng, and Yue Zhang. Learning to reason under off-policy guidance. arXiv preprint arXiv:2504.14945 , 2025. An Yang, Beichen Zhang, Binyuan Hui, Bofei Gao, Bowen Yu, Chengpeng Li, Dayiheng Liu, Jianhong Tu, Jingren Zhou, Junyang Lin, et al. Qwen2.5-Math technical report: Toward mathematical expert model via self-improvement. 
+
+arXiv preprint arXiv:2409.12122 , 2024. An Yang, Anfeng Li, Baosong Yang, Beichen Zhang, Binyuan Hui, Bo Zheng, Bowen Yu, Chang Gao, Chengen Huang, Chenxu Lv, et al. Qwen3 technical report. arXiv preprint arXiv:2505.09388 , 2025. Wenkai Yang, Weijie Liu, Ruobing Xie, Kai Yang, Saiyong Yang, and Yankai Lin. Learning beyond teacher: Generalized on-policy distillation with reward extrapolation. arXiv preprint arXiv:2602.12125 , 2026a. Yuxiao Yang, Xiaoyun Wang, and Weitong Zhang. OGLS-SD: On-policy self-distillation with outcome-guided logit steering for LLM reasoning. arXiv preprint arXiv:2605.12400 , 2026b. Zhuolin Yang, Zihan Liu, Yang Chen, Wenliang Dai, Boxin Wang, Sheng-Chieh Lin, Chankyu Lee, Yangyi Chen, Dongfu Jiang, Jiafan He, Renjie Pi, Grace Lam, Nayeon Lee, Alexander Bukharin, Mohammad Shoeybi, Bryan Catanzaro, and Wei Ping. Nemotron-cascade 2: Post-training llms with cascade rl and multi-domain on-policy distillation. arXiv preprint arXiv:2603.19220 , 2026c. Tianzhu Ye, Li Dong, Zewen Chi, Xun Wu, Shaohan Huang, and Furu Wei. Black-box on-policy distillation of large language models. arXiv preprint arXiv:2511.10643 , 2025. Qiying Yu, Zheng Zhang, Ruofei Zhu, Yufeng Yuan, Xiaochen Zuo, Yu Yue, Weinan Dai, Tiantian Fan, Gaohong Liu, Lingjun Liu, et al. Dapo: An open-source llm reinforcement learning system at scale. arXiv preprint arXiv:2503.14476 ,2025. Yufeng Yuan, Yu Yue, Ruofei Zhu, Tiantian Fan, and Lin Yan. What’s behind PPO’s collapse in long-CoT? value optimization holds the secret. arXiv preprint arXiv:2503.01491 , 2025. Yang Yue, Zhiqi Chen, Rui Lu, Andrew Zhao, Zhaokai Wang, Shiji Song, and Gao Huang. Does reinforcement learning really incentivize reasoning capacity in llms beyond the base model? arXiv preprint arXiv:2504.13837 , 2025a. Yu Yue, Yufeng Yuan, Qiying Yu, Xiaochen Zuo, Ruofei Zhu, Wenyuan Xu, Jiaze Chen, Chengyi Wang, Tiantian Fan, Zhengyin Du, Xiangpeng Wei, et al. VAPO: Efficient and reliable reinforcement learning for advanced reasoning tasks. arXiv preprint arXiv:2504.05118 , 2025b. Aohan Zeng et al. GLM-5: From vibe coding to agentic engineering. arXiv preprint , 2026. Wenhao Zhang, Yuexiang Xie, Yuchang Sun, Yanxi Chen, Guoyin Wang, Yaliang Li, Bolin Ding, and Jingren Zhou. On-policy RL meets off-policy experts: Harmonizing supervised fine-tuning and reinforcement learning via dynamic weighting. arXiv preprint arXiv:2508.11408 , 2025. 
+
+> 13 Lightning OPD 2.0: Mitigating Style Bias in Cross-Teacher On-Policy Distillation for Large Reasoning Models
+
+Zhaoyang Zhang, Shuli Jiang, Yantao Shen, Yuting Zhang, Dhananjay Ram, Shuo Yang, Zhuowen Tu, Wei Xia, and Stefano Soatto. Reinforcement-aware knowledge distillation for LLM reasoning. arXiv preprint arXiv:2602.22495 ,2026. Siyan Zhao, Zhihui Xie, Mengchen Liu, Jing Huang, Guan Pang, Feiyu Chen, and Aditya Grover. Self-distilled reasoner: On-policy self-distillation for large language models. arXiv preprint arXiv:2601.18734 , 2026. Chujie Zheng, Shixuan Liu, Mingze Li, Xiong-Hui Chen, Bowen Yu, Chang Gao, Kai Dang, Yuqiong Liu, Rui Men, An Yang, Jingren Zhou, and Junyang Lin. Group sequence policy optimization. arXiv preprint arXiv:2507.18071 ,2025.
