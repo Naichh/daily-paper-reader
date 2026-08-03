@@ -1,0 +1,445 @@
+Title: DASH-OPD: Discrepancy-Aware Switching with Hysteresis for On-Policy Distillation
+
+URL Source: https://arxiv.org/pdf/2607.29078v1
+
+Published Time: Mon, 03 Aug 2026 00:36:14 GMT
+
+Number of Pages: 10
+
+Markdown Content:
+Working in Progress 
+
+# DASH-OPD: Discrepancy-Aware Switching with Hysteresis for On-Policy Distillation 
+
+Yuchen Xia 1,2 Qianguo Sun 2 Chao Song 2 Junlong Wu 3 Yiyan Qi 2∗ Yunjian Xu 1∗
+
+> 1
+
+The Chinese University of Hong Kong 2IDEA Research 3Emdoor Research Institute 
+
+> 1
+
+{ycxia,yjxu}@mae.cuhk.edu.hk 
+
+> 2
+
+{xiayuchen,sunqianguo,songchao,qiyiyan}@idea.edu.cn 
+
+> 3
+
+junlong.wu@emdoor.com 
+
+## Abstract 
+
+On-policy distillation (OPD) trains student models on their own rollouts to reduce exposure bias. However, in multi-turn agent scenarios, early student errors can lead a trajectory away from the teacher’s familiar domain. Existing curriculum learning methods regulate how much teacher support is used according to training progress, but cannot determine when it is needed. In light of this, we propose DASH-OPD, Discrepancy-Aware Switching with Hysteresis for OPD, a new agentic OPD method that can switch executors adaptively and bidirectionally. On each turn, DASH-OPD calculates a mean log-probability ratio between the two executors over action tokens as their discrepancy. Student-to-teacher ratios on student turns form drift signals, while teacher-to-student ratios on teacher turns form recovery signals. These signals are normalized and accumulated over multiple turns into drift and recovery evidence. DASH-OPD switches executors when the evidence exceeds its corresponding switching threshold. This multi-turn accumulation makes the switching hysteretic, preventing high-frequency switches caused by transient fluctuations. On ALFWorld, DASH-OPD outperforms all the baselines and demonstrates superior training and deployment efficiency. This paper is a work in progress. Code, training logs, and model checkpoints will be released later. 
+
+## 1 Introduction 
+
+Figure 1: Existing rollout curricula use fixed or random schedules for teacher intervention. Large language model (LLM) agents solve long-horizon tasks by interleaving reasoning, ac-tions, and environment feedback [ 1, 2, 3], but their strongest capabilities often reside in mod-els with excessively high deployment costs [ 4]. Knowledge distillation [ 5, 6, 7] can transfer such capabilities to smaller student models. On-policy distillation (OPD) [ 8] further trains on student-generated outputs to reduce the training-inference mismatch (i.e., exposure bias). How-ever, the advantage of OPD becomes fragile in multi-turn interactions: early student errors can push the trajectory outside the teacher’s familiar domain, thereby decreasing the teacher’s instruc-tion quality [9, 10]. Teacher-generated turns can repair a collapsing trajectory, but excessive intervention reduces 
+
+> ∗Corresponding authors arXiv:2607.29078v1 [cs.LG] 31 Jul 2026
+
+Figure 2: DASH-OPD accumulates teacher–student discrepancy into drift and recovery evidence, enabling adaptive and bidirectional switching between these two models. student state coverage and recreates the exposure bias. Recent agentic OPD methods seek to balance teacher and student control through rollout scheduling. As shown in Fig. 1, TCOD [ 9] progressively expands student-controlled segments in trajectories, while Guided-OPD [ 10 ] samples each turn’s executor randomly and gradually decays the teacher-intervention probability with training progress. These methods regulate how much teacher support is used, but not when it is needed. The need for teacher support can vary across different trajectories of the same training step, and across different segments of the same trajectory [11, 12]. To address this issue, we propose DASH-OPD: Discrepancy-Aware Switching with Hysteresis for OPD. The overall pipeline of DASH-OPD is shown in Fig. 2. After the current executor generates one turn, the other model scores the action in response, yielding a mean log-probability ratio between the two executors of this turn. The ratio quantifies teacher-student discrepancy. On student turns, the student-to-teacher ratios form drift signals, measuring how the student departs from the teacher’s familiar domain. On teacher turns, the teacher-to-student ratios form recovery signals, measuring how the student re-enters the teacher’s familiar domain. These two types of signals are normalized and accumulated over multiple turns into two kinds of evidence, respectively. The drift signals form drift evidence, building a support debt for the teacher. The recovery signals form recovery evidence, building a return credit for the student. DASH-OPD switches between the teacher and the student by comparing the drift and recovery evidence with their corresponding switching thresholds. Following Guided-OPD, we train DASH-OPD over all response tokens with a reverse-KL distillation loss on student turns and a forward-KL distillation loss on teacher turns. The switching mechanism of DASH-OPD is hysteretic because it acts on the evidence accumulated over multiple turns rather than on an instantaneous signal. The teacher support is only provided when sustained drift signals push the drift evidence beyond the support threshold. Likewise, control returns to the student only when sustained recovery signals push the recovery evidence beyond the return threshold. Therefore, transient fluctuations are insufficient to change the executor, preventing high-frequency switches. To the best of our knowledge, DASH-OPD is the first agentic OPD method that can switch executors adaptively and bidirectionally. This capability directs teacher support to where it is most needed and yields improved performance. On ALFWorld [ 13 ], DASH-OPD achieves the highest success rate across all evaluation splits and student scales, while requiring the fewest interaction rounds in five of six settings (ranking second in the remaining one). DASH-OPD also demonstrates substantially greater training and deployment efficiency: it reduces teacher-generated turns by 35.4% and executor 2switches by 77.1% relative to Guided-OPD, and it Pareto-dominates every OPD baseline in success rate and generation cost. 
+
+## 2 Related work 
+
+Agentic OPD. Turn-level rollout scheduling has become a research frontier in agentic OPD. TCOD [9 ] controls how far the student can advance in a trajectory as training progresses. It progressively expands student-controlled segments according to a fixed temporal curriculum. Guided-OPD [ 10 ]instead schedules who generates each turn. It samples the teacher or the student at turn boundaries, using a gradually decreasing teacher-intervention probability. Both methods regulate teacher support according to a predefined curriculum [ 14 ], rather than switching executors adaptively. TurnOPD [ 15 ] uses probe-based turn statistics to adapt the rollout depth, stopping once later turns are unlikely to provide useful supervision. This improves the flexibility of rollout scheduling, but it does not leverage the benefits of teacher support during rollout. 
+
+General OPD. Token-level rollout scheduling has also been studied in general OPD [ 16 ]. AdaSwitch [ 17 ] replaces a fixed switching threshold with a context-dependent one, but permits only a single student-to-teacher handoff, after which the teacher completes the response. Other work schedules how long the student rollout lasts. POPD and TOPD [ 18 ] both control the student rollout length through predetermined horizons: POPD progressively expands the horizon with training progress, whereas TOPD keeps it fixed. ESR [ 19 ] similarly distills only the first fixed number of response tokens. 
+
+## 3 Preliminaries 
+
+3.1 Multi-turn agents 
+
+Unlike static generation, a multi-turn agent operates in a dynamic environment where each response influences the next [ 20 ]. At turn t, an environment emits observation ot, and the agent conditions on history ht = ( x, o 1, y 1, . . . , o t), where x is the task prompt and yt is a response whose parsed action produces ot+1 . The response yt = ( yt, 1, . . . , y t,L t ) is generated autoregressively by a policy π:
+
+π(yt | ht) = 
+
+> Lt
+
+Y
+
+> i=1
+
+π(yt,i | ht, y t,<i ), (1) where Lt is the response length and yt,<i = ( yt, 1, . . . , y t,i −1).
+
+3.2 On-policy distillation (OPD) 
+
+Unlike conventional distillation, OPD directly optimizes the policy on the data it generates, mitigating the exposure bias. A trainable student policy πθ and a frozen teacher policy πT are used in the training process (evaluation is student-only). Conventional distillation minimizes forward KL on teacher-induced contexts [5, 21]: 
+
+Lforward = X
+
+> t
+
+Eht∼qtπT
+
+DKL (πT ∥πθ ), (2) whereas a common OPD minimizes reverse KL on student-induced contexts [8]: 
+
+Lreverse = X
+
+> t
+
+Eht∼qtπθ
+
+DKL (πθ ∥πT ). (3) Here, qtπT and qtπθ denote the history distributions induced by the teacher and student policies, respectively. In practice, training trajectories are generated by a frozen snapshot π¯θ of the student. 
+
+## 4 Method 
+
+4.1 Overview 
+
+DASH-OPD switches the rollout executor adaptively and bidirectionally according to the discrepancy between the teacher and the student. Let mt ∈ { S, T } denote the executor at turn t. Exactly one 3model generates the response: 
+
+yt ∼
+
+π¯θ (· | ht), mt = S, πT (· | ht), mt = T. (4) The other model scores the action in this response under the same context, yielding a mean log-probability ratio. This ratio forms a discrepancy signal of turn t and updates an evidence variable used to select the executor at turn t + 1 .The switching process has two directions. On student turns, DASH-OPD accumulates drift signals into drift evidence, which represents the teacher’s support debt. The teacher provides support when the student progressively departs from the teacher’s familiar domain. On teacher turns, DASH-OPD accumulates recovery signals into recovery evidence, which represents the student’s return credit. The control returns to the student when it re-enters the teacher’s familiar domain. Because a switch depends on evidence accumulated over multiple turns, rather than on an instantaneous discrepancy, the switching mechanism of DASH-OPD is hysteretic. 
+
+4.2 Directional discrepancy signals 
+
+To detect the teacher-student discrepancy, DASH-OPD compares the two models on their responses. On student turn t, a student-to-teacher mean log-probability ratio is computed as: 
+
+dSt = 1
+
+N At
+
+X
+
+> i
+
+At,i [log π¯θ (yt,i | ht, y t,<i ) − log πT (yt,i | ht, y t,<i )] , yt ∼ π¯θ , (5) where At,i equals one when token i belongs to the parsed action content, and N At = P 
+
+> i
+
+At,i is the number of action tokens. Thus, the discrepancy only considers the action portion of the response. On teacher turns, the ratio is computed in the opposite direction using the same action-only mask: 
+
+dTt = 1
+
+N At
+
+X
+
+> i
+
+At,i [log πT (yt,i | ht, y t,<i ) − log π¯θ (yt,i | ht, y t,<i )] , yt ∼ πT . (6) In expectation, dSt and dTt estimate reverse and forward KL, respectively. A large dSt indicates that a student response is less familiar to the teacher and hence forms a drift signal. A decreasing dTt
+
+indicates that the student re-enters the teacher’s familiar domain and hence forms a recovery signal. These two signals are kept separate because they are observed from different executors and describe different switching evidence. 
+
+4.3 Drift and recovery evidence 
+
+On student turn t, DASH-OPD updates drift-signal statistics RSt = ( μSt , v St ), where μSt is the mean of the drift signals observed previously, and vSt is the variance. On teacher turns, the recovery-signal statistics RTt = ( μTt , v Tt ) are also updated [ 22 ]. To detect multi-turn trends in the drift and recovery signals, DASH-OPD normalizes each signal by the corresponding statistics: 
+
+¯dmt 
+
+> t
+
+= clip dmt 
+
+> t
+
+− μmt
+
+> t−1
+
+pmax( vmt
+
+> t−1
+
+, v min ) , − ¯dmax , ¯dmax 
+
+!
+
+, mt ∈ { S, T }, (7) where vmin denotes a small positive constant that prevents division by zero, and ¯dmax bounds extreme signals. The first turn of each executor in a trajectory initializes the mean and receives a normalized signal of zero. The statistics are retained when the same executor appears in multiple segments of a trajectory. The two types of normalized signals are accumulated into two evidence variables, drift evidence Dt
+
+and recovery evidence Rt, respectively [23]. On student turn t, DASH-OPD updates Dt by: 
+
+Dt = max( ρD t−1 + ¯dSt − κS , 0) , mt = S, (8) where ρ ∈ [0 , 1] retains historical evidence and κS , κ T ≥ 0 filter small fluctuations. On teacher turns, DASH-OPD updates Rt by: 
+
+Rt = max( ρR t−1 − ¯dTt − κT , 0) , mt = T. (9) 4Positive normalized drift signals ¯dSt increase drift evidence, and negative normalized recovery signals 
+
+¯dTt increase recovery evidence. The rectification removes evidence in the opposite direction. As a result, several moderate but consistent signals can trigger a switch, whereas a transient fluctuation is usually insufficient. 
+
+4.4 Switching mechanism 
+
+The drift and recovery evidence mainly control the two switching directions. The teacher-support and student-return thresholds are denoted by τon and τoff , respectively. A trajectory with maximum length Tmax has a teacher budget Hmax = ⌊qT max ⌋, where q ∈ [0 , 1] . When the teacher budget is exhausted, control returns to the student. A teacher segment has a minimum length ℓmin . A teacher intervention is disallowed when the remaining teacher budget cannot support a complete segment of 
+
+ℓmin turns. After a student turn, the condition for teacher support is: 
+
+support t = ( Dt > τ on ∨ gt) ∧ (Hmax − Ht ≥ ℓmin ), (10) where Ht denotes the total number of teacher-generated turns, and gt denotes a flag that detects stagnation. This flag is activated when an action or an observation repeats for K consecutive student turns. If support t holds, DASH-OPD sets mt+1 = T and resets the drift evidence to zero. After a teacher turn, the condition for returning control to the student is: 
+
+return t = ( Rt > τ off ∨ Ht ≥ Hmax ) ∧ ℓt ≥ ℓmin , (11) where ℓt denotes the length of the ongoing teacher segment. If return t holds, DASH-OPD sets 
+
+mt+1 = S and resets the recovery evidence to zero. 
+
+Rollout initialization. For each trajectory, the executor of the first turn is selected randomly. The probability of selecting the teacher decreases linearly as training progresses: 
+
+pT (s) = 1 − s/S max , (12) where s is the current training step and Smax is the maximum number of training steps. This warm start gives more teacher-generated initial states early in training and decays linearly as the student improves. It affects only the first turn, and all later switches follow Eqs. (10) and (11). 
+
+4.5 Role-aware distillation 
+
+Following Guided-OPD [ 10 ], we use reverse-KL distillation on student turns and forward-KL distillation on teacher turns. Let LSt,i and LTt,i denote the corresponding per-token losses, and let 
+
+ISt = I[mt = S], ITt = I[mt = T ]. The overall objective is: 
+
+Loverall =
+
+P 
+
+> t,i
+
+Mt,i 
+
+ ISt LSt,i + λT ITt LTt,i 
+
+
+
+max 
+
+P 
+
+> t,i
+
+Mt,i , 1
+
+ , (13) where λT controls the contribution of teacher-generated tokens, and Mt,i denotes the mask for the 
+
+i-th token in the response of the t-th turn. Mt,i covers all valid response tokens and is distinct from the action-only discrepancy mask At,i . The executor selected at each turn also determines the distillation direction. 
+
+4.6 Algorithm and cost 
+
+Algorithm 1 presents the pseudocode of DASH-OPD. Computing the directional discrepancy costs 
+
+O(Lt) for a response of length Lt. All subsequent controller operations take O(1) time per turn and 
+
+O(1) trajectory-local memory. 
+
+## 5 Experiments 
+
+5.1 Experimental setup Environment and metrics. We evaluate DASH-OPD and baselines on ALFWorld [ 13 ], a text-based household environment that requires an agent to complete compositional tasks through multi-turn 5Algorithm 1 DASH-OPD for one training trajectory 
+
+Require: Student πθ and its snapshot π¯θ , teacher πT , environment E, training step s, and controller hyperparameters  
+
+> 1:
+
+Initialize Hmax ← ⌊ qT max ⌋, D, R, H, ℓ ← 0, and RS , RT ← ∅  
+
+> 2:
+
+Sample m1 by Eq. (12) if Hmax ≥ ℓmin ; otherwise set m1 ← S 
+
+> 3:
+
+for t = 1 , . . . , T max do  
+
+> 4:
+
+Generate yt by Eq. (4) and obtain its log-probabilities under π¯θ and πT 
+
+> 5:
+
+Compute dmt 
+
+> t
+
+and ¯dmt 
+
+> t
+
+by Eqs. (5) to (7); update Rmt 
+
+> 6:
+
+Parse action at from yt; record (ht, y t, m t) and token log-probabilities  
+
+> 7:
+
+if mt = S then  
+
+> 8:
+
+Update gt from repetitions within the current student segment  
+
+> 9:
+
+Update D by Eq. (8) and evaluate support t by Eq. (10)  
+
+> 10:
+
+(mt+1 , D ) ← (T, 0) if support t; otherwise mt+1 ← S 
+
+> 11:
+
+else  
+
+> 12:
+
+H ← H + 1 ; ℓ ← ℓ + 1 ; update R by Eq. (9)  
+
+> 13:
+
+Evaluate return t by Eq. (11)  
+
+> 14:
+
+(mt+1 , R, ℓ ) ← (S, 0, 0) if return t; otherwise mt+1 ← T 
+
+> 15:
+
+end if  
+
+> 16:
+
+Advance E with at; break if terminal  
+
+> 17:
+
+end for  
+
+> 18:
+
+Update πθ by Eq. (13) interaction. Following Guided-OPD [ 10 ], we use all 140 IID tasks and all 134 OOD tasks in ALFWorld. Each task is attempted once with a maximum of 30 interaction turns. We report success rate (SR, higher is better) and the mean number of interaction turns (Round, lower is better). 
+
+Models and optimization. We study Qwen3-1.7B and Qwen3-4B students with a frozen Qwen3-30B-A3B teacher [ 24 ]. At each student scale, every distilled policy is trained for 250 optimizer steps with a rollout batch size of 16, a training batch size of 64, a learning rate of 10 −6, and a KL coefficient of 1.0. Training rollouts use temperature 1.0 and a maximum response length of 512 tokens. All experiments are conducted on 8 NVIDIA A100 GPUs with 80GB memory each. 
+
+DASH-OPD configuration. We use ρ = 1 , vmin = 10 −6, no signal bound, and no slack ( κS =
+
+κT = 0 ). The switching thresholds are (τon , τ off ) = (3 , 1) , the minimum teacher-segment length is 
+
+ℓmin = 2 , and the stagnation threshold is K = 3 . The teacher budget spans the full 30-turn horizon (q = 1 ). The same controller configuration is used at both student model scales. 
+
+Evaluation protocol. All distilled policies are evaluated student-only, without access to the teacher. We use eight parallel workers, temperature 0.4, top-p = 1 , no top-k or min-p truncation, a 4,096-token response limit, a two-turn observation–action history, and seed 42. All the methods use the same evaluation configuration. 
+
+Baselines and reporting convention. We compare against the zero-shot student, vanilla OPD [ 8], TCOD [ 9], and Guided-OPD [ 10 ]. The zero-shot teacher is included as a reference. Vanilla OPD generates complete training trajectories with the student. TCOD progressively expands the student-controlled suffix according to training progress. Guided-OPD samples the executor at each turn with a decaying teacher-intervention probability. Each baseline uses its official implementation and training configuration. 
+
+5.2 Main results Overall performance. Table 1 shows that DASH-OPD attains the highest or tied-highest SR on every split at both student model scales. With the 1.7B student, DASH-OPD achieves 32.85% overall SR, exceeding the strongest baseline, TCOD, by 5.84 percentage points. With the 4B student, it reaches 41.24% overall SR, improving over the strongest baseline, Guided-OPD, by 3.28 points. The 4B DASH-OPD student even exceeds the 30B-A3B zero-shot teacher on the overall SR. DASH-OPD 6Table 1: Full-set ALFWorld success rates (SR, %). Overall combines the IID and OOD splits and excludes the ALFWorld hard set. Bold and underline mark the best and second-best students, respectively. The teacher reference is not included in this ranking. 
+
+Method IID (140 tasks) OOD (134 tasks) Overall (274 tasks) SR ↑ Round ↓ SR ↑ Round ↓ SR ↑ Round ↓
+
+Qwen3-30B-A3B teacher 
+
+Zero-shot 45.00% 23.13 36.57% 24.27 40.88% 23.69 
+
+Qwen3-1.7B student 
+
+Zero-shot 2.86% 29.28 0.00% 30.00 1.46% 29.63 Vanilla OPD 23.57% 25.47 29.10% 25.01 26.28% 25.25 TCOD 22.86% 25.64 31.34% 24.99 27.01% 25.32 Guided-OPD 22.86% 26.17 29.10% 25.10 25.91% 25.65 
+
+DASH-OPD (ours) 31.43% 24.98 34.33% 24.69 32.85% 24.84 
+
+Qwen3-4B student 
+
+Zero-shot 31.43% 24.49 36.57% 23.83 33.94% 24.16 Vanilla OPD 34.29% 24.38 38.81% 24.40 36.50% 24.39 TCOD 37.86% 23.59 32.84% 24.29 35.40% 23.93 Guided-OPD 35.00% 23.86 41.04% 23.10 37.96% 23.49 
+
+DASH-OPD (ours) 41.43% 22.86 41.04% 23.46 41.24% 23.15 
+
+also requires the fewest mean interaction rounds in five of the six settings and ranks second in the remaining one. 
+
+Deployment efficiency. Figure 3 shows that DASH-OPD strictly Pareto-dominates every distilled baseline at both student scales: it achieves higher SR while generating fewer response tokens per evaluation trajectory. For the 1.7B student, DASH-OPD reaches 32.85% SR with 1,433.1 tokens per trajectory. Relative to Guided-OPD, the strongest baseline in Figure 3, this corresponds to a 6.94 percentage point SR gain with 89.9 fewer tokens. For the 4B student, DASH-OPD obtains 41.24% SR with 1,218.2 tokens, improving over Guided-OPD by 3.28 points on SR while using 12.1 fewer tokens. The 4B DASH-OPD student also exceeds the teacher reference by 0.36 points on SR while generating 68.5 fewer tokens. 
+
+Teacher intervention efficiency. Figure 4 compares the teacher intervention profiles of DASH-OPD and Guided-OPD with 4B students. Guided-OPD accumulates teacher turns throughout training rapidly, while its switching count increases markedly after approximately 50 steps. DASH-OPD 1250 1300 1350 1400 1450 1500 1550 1600        
+
+> Mean response tokens / trajectory
+> 25.0
+> 27.5
+> 30.0
+> 32.5
+> 35.0
+> 37.5
+> 40.0
+> 42.5
+> Success rate (%)
+> Vanilla OPD
+> TCOD
+> Guided-OPD
+> DASH-OPD
+> Teacher
+> better
+> (a) Qwen3-1.7B student
+> 1220 1240 1260 1280 1300 1320 1340
+> Mean response tokens / trajectory
+> 35
+> 36
+> 37
+> 38
+> 39
+> 40
+> 41
+> 42
+> Success rate (%)
+> Vanilla OPD TCOD
+> Guided-OPD
+> DASH-OPD
+> Teacher
+> better
+> (b) Qwen3-4B student
+
+Figure 3: Deployment efficiency on the full ALFWorld validation set. Overall SR is plotted against the mean number of generated response tokens per trajectory over 274 tasks. The star denotes the zero-shot teacher reference, and the upper-left direction is preferable. DASH-OPD lies above and to the left of every OPD baseline at both student model scales. 70 50 100 150 200 250       
+
+> Training steps
+> 0
+> 5
+> 10
+> 15
+> 20
+> 25
+> 30
+> 35
+> 40
+> Cumulative teacher turns (×10 3) (a) Teacher turns
+> 050 100 150 200 250
+> Training steps
+> 0.0
+> 2.5
+> 5.0
+> 7.5
+> 10.0
+> 12.5
+> 15.0
+> 17.5
+> Cumulative executor switches (×10 3)
+> (b) Executor switches
+> Guided-OPD DASH-OPD
+
+Figure 4: Teacher intervention profiles for the Qwen3-4B student. We plot the cumulative number of teacher-generated turns (left) and the number of teacher–student switches (right) over 250 training steps. Both vertical axes are in thousands. DASH-OPD requires substantially fewer teacher turns and executor switches than Guided-OPD by the end of training. follows a lower curve for teacher turns and a more gradual switching curve that remains below Guided-OPD after approximately 75 steps. By the end of training, DASH-OPD uses 23,543 teacher turns, compared with 36,444 for Guided-OPD, reducing teacher intervention by 12,901 turns (35.4%). DASH-OPD also reduces executor switches from 17,254 for Guided-OPD to 3,947, eliminating 13,307 events (77.1%). Hence, DASH-OPD’s discrepancy-aware switching utilizes teacher support more efficiently than Guided-OPD’s random sampling strategy. 
+
+Persistence after returning student control. Figure 5 examines whether a return to the student initiates a sustained segment or an immediate reversal. After control returns to the 1.7B student, the student remains in control for at least three turns in 84% of cases, and for at least five turns in 54% of cases. These rates rise to 91% and 73% for the 4B student. The mean post-return student span similarly increases from 8.0 turns for 1.7B to 11.7 turns for 4B. Together with the 77.1% reduction in total switches for the 4B run, these persistent student segments are consistent with the intended hysteretic behavior: evidence-based returns restore student control without frequent teacher–student oscillation. Moreover, the higher persistence of the student suggests stronger student capabilities and more effective teacher intervention. 3 turns 5 turns   
+
+> 0
+> 20
+> 40
+> 60
+> 80
+> 100
+> Student survival rate (%)
+> 84
+> 54
+> 91
+> 73
+> (a) Post-return student survival rate
+> 1.7B 4B
+> 0
+> 2
+> 4
+> 6
+> 8
+> 10
+> 12
+> 14
+> Mean student turns
+> 8.0
+> 11.7
+> (b) Post-return student span
+> 1.7B 4B
+
+Figure 5: Persistence after returning control to the student during DASH-OPD training. Left: the fraction of returns followed by at least three or five student turns (task completion before the respective horizon also counts as persistence). Right: the mean number of consecutive student turns following each return, measured until the next teacher takeover or trajectory termination. 86 Conclusion and limitations 
+
+Conclusion. We presented DASH-OPD, an adaptive, bidirectional switching method for multi-turn OPD. It accumulates directional teacher–student discrepancy into drift and recovery evidence, then applies thresholds to decide teacher intervention and student return hysteretically. On ALFWorld, DASH-OPD attains the best success rate across all splits and student scales. It also demonstrates substantially greater training and deployment efficiency. These results show that DASH-OPD establishes a new state-of-the-art for agentic OPD. 
+
+Limitations. Student-teacher discrepancy is an imperfect proxy for risk: shared errors may remain undetected, whereas benign differences may trigger intervention. Future work could explore more sophisticated risk metrics, such as those based on model uncertainty or environment feedback. 
+
+## References 
+
+[1] S. Yao, J. Zhao, D. Yu, N. Du, I. Shafran, K. Narasimhan, and Y. Cao, “ReAct: Synergizing reasoning and acting in language models,” in International Conference on Learning Representations , 2023. [Online]. Available: https://openreview.net/forum?id=WE_vluYUL-X [2] R. Wang, P. Jansen, M.-A. Côté, and P. Ammanabrolu, “ScienceWorld: Is your agent smarter than a 5th grader?” in Proceedings of the 2022 Conference on Empirical Methods in Natural Language Processing . Association for Computational Linguistics, 2022, pp. 11 279–11 298. [Online]. Available: https://aclanthology.org/2022.emnlp-main.775/ [3] S. Yao, H. Chen, J. Yang, and K. Narasimhan, “WebShop: Towards scalable real-world web interaction with grounded language agents,” in Advances in Neural Information Processing Systems , vol. 35, 2022, pp. 20 744–20 757. [Online]. Available: https://proceedings.neurips.cc/ paper_files/paper/2022/hash/82ad13ec01f9fe44c01cb91814fd7b8c-Abstract-Conference.html [4] L. Chen, M. Zaharia, and J. Zou, “FrugalGPT: How to use large language models while reducing cost and improving performance,” Transactions on Machine Learning Research , 2024. [Online]. Available: https://openreview.net/forum?id=cSimKw5p6R [5] G. Hinton, O. Vinyals, and J. Dean, “Distilling the knowledge in a neural network,” arXiv preprint arXiv:1503.02531 , 2015. [Online]. Available: https://arxiv.org/abs/1503.02531 [6] Y. Kim and A. M. Rush, “Sequence-level knowledge distillation,” in Proceedings of the 2016 Conference on Empirical Methods in Natural Language Processing .Association for Computational Linguistics, 2016, pp. 1317–1327. [Online]. Available: https://aclanthology.org/D16-1139/ [7] Y. Gu, L. Dong, F. Wei, and M. Huang, “MiniLLM: Knowledge distillation of large language models,” in International Conference on Learning Representa-tions , 2024. [Online]. Available: https://proceedings.iclr.cc/paper_files/paper/2024/hash/ 8ac015d409635f196f9e3e9dcfb9a94e-Abstract-Conference.html [8] R. Agarwal, N. Vieillard, Y. Zhou, P. Stanczyk, S. R. Garea, M. Geist, and O. Bachem, “On-policy distillation of language models: Learning from self-generated mistakes,” in International Conference on Learning Representations , 2024. [Online]. Available: https://openreview.net/forum?id=3zKtaqxLhW [9] J. Wang, W. Zhang, W. Shi, Y. Li, and J. Cheng, “TCOD: Exploring temporal curriculum in on-policy distillation for multi-turn autonomous agents,” arXiv preprint arXiv:2604.24005 ,2026. [Online]. Available: https://arxiv.org/abs/2604.24005 [10] G. Li, M. Zheng, M. Song, R. Liu, T. Yang, J. Sun, Q. Zhong, H. Guo, J. Fang, D. Zhang, and J. Wang, “On-policy distillation with curriculum turn-level guidance for multi-turn agents,” 
+
+arXiv preprint arXiv:2606.15912 , 2026. [Online]. Available: https://arxiv.org/abs/2606.15912 [11] R. Hoque, A. Balakrishna, E. Novoseller, A. Wilcox, D. S. Brown, and K. Goldberg, “ThriftyDAgger: Budget-aware novelty and risk gating for interactive imitation learning,” in Proceedings of the 5th Conference on Robot Learning , ser. Proceedings of Machine Learning Research, vol. 164. PMLR, 2022, pp. 598–608. [Online]. Available: https://proceedings.mlr.press/v164/hoque22a.html 9[12] H. Cai, Z. Peng, and B. Zhou, “Robot-gated interactive imitation learning with adaptive intervention mechanism,” in Proceedings of the 42nd International Conference on Machine Learning , ser. Proceedings of Machine Learning Research, vol. 267. PMLR, 2025, pp. 6243–6256. [Online]. Available: https://proceedings.mlr.press/v267/cai25e.html [13] M. Shridhar, X. Yuan, M.-A. Côté, Y. Bisk, A. Trischler, and M. Hausknecht, “ALFWorld: Aligning text and embodied environments for interactive learning,” in International Conference on Learning Representations , 2021. [Online]. Available: https://arxiv.org/abs/2010.03768 [14] Y. Bengio, J. Louradour, R. Collobert, and J. Weston, “Curriculum learning,” in Proceedings of the 26th Annual International Conference on Machine Learning . ACM, 2009, pp. 41–48. [Online]. Available: https://icml.cc/Conferences/2009/papers/119.pdf [15] Y. Zhou, K. Zheng, H. Li, D. Peng, C. Xu, and J. Chen, “TurnOPD: Making on-policy distillation turn-aware for efficient long-horizon agent training,” arXiv preprint arXiv:2607.05804 , 2026. [Online]. Available: https://arxiv.org/abs/2607.05804 [16] J. Koo, Y. Hwang, Y. Kim, T. Kang, H. Bae, and K. Jung, “SWITCH: Studying with teacher for knowledge distillation of large language models,” in Findings of the Association for Computational Linguistics: NAACL 2025 . Association for Computational Linguistics, 2025, pp. 3733–3746. [Online]. Available: https://aclanthology.org/2025.findings-naacl.206/ [17] J. Peng, M. Wang, H. Cai, Y. Li, K. Zhang, S. Wang, D. Yin, and X. Zhao, “AdaSwitch: Balancing exploration and guidance in knowledge distillation via adaptive switching,” arXiv preprint arXiv:2510.07842 , 2025. [Online]. Available: https://arxiv.org/abs/2510.07842 [18] Y. Zhang, J. Chai, Y. Fu, S. Tu, X. Wang, W. Lin, G. Yin, Q. Zhang, Y. Zhu, and D. Zhao, “Are full rollouts necessary for on-policy distillation?” arXiv preprint arXiv:2605.31490 , 2026. [Online]. Available: https://arxiv.org/abs/2605.31490 [19] Z. Zhou, J. Li, H. Tang, Y. N. Wu, and D. Terzopoulos, “Less is more: Early stopping rollout for on-policy distillation,” arXiv preprint arXiv:2605.27028 , 2026. [Online]. Available: https://arxiv.org/abs/2605.27028 [20] X. Liu, H. Yu, H. Zhang, Y. Xu, X. Lei, H. Lai, Y. Gu, H. Ding, K. Men, K. Yang, S. Zhang, X. Deng, A. Zeng, Z. Du, C. Zhang, S. Shen, T. Zhang, Y. Su, H. Sun, M. Huang, Y. Dong, and J. Tang, “AgentBench: Evaluating LLMs as agents,” in International Conference on Learning Representations , 2024. [Online]. Available: https://proceedings.iclr.cc/paper_files/paper/2024/ hash/e9df36b21ff4ee211a8b71ee8b7e9f57-Abstract-Conference.html [21] S. Kullback and R. A. Leibler, “On information and sufficiency,” The Annals of Mathematical Statistics , vol. 22, no. 1, pp. 79–86, 1951. [Online]. Available: https://projecteuclid.org/euclid.aoms/1177729694 [22] B. P. Welford, “Note on a method for calculating corrected sums of squares and products,” 
+
+Technometrics , vol. 4, no. 3, pp. 419–420, 1962. [23] E. S. Page, “Continuous inspection schemes,” Biometrika , vol. 41, no. 1/2, pp. 100–115, 1954. [24] A. Yang, A. Li, B. Yang, B. Zhang, B. Hui, B. Zheng, B. Yu, C. Gao, C. Huang, C. Lv 
+
+et al. , “Qwen3 technical report,” arXiv preprint arXiv:2505.09388 , 2025. [Online]. Available: https://arxiv.org/abs/2505.09388 10

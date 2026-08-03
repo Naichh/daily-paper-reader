@@ -1,0 +1,1857 @@
+Title: SAF-OPD: Stable Advantage Fusion for On-Policy Distillation
+
+URL Source: https://arxiv.org/pdf/2607.29209v1
+
+Published Time: Mon, 03 Aug 2026 00:40:30 GMT
+
+Number of Pages: 23
+
+Markdown Content:
+# SAF-OPD: Stable Advantage Fusion for On-Policy Distillation 
+
+Yifan Ding 1,2 ∗
+
+, Xincheng Wei 2,3 ∗, Yoshua Y. Li 2∗† 
+
+Ziheng Li 2, Yuquan Lu 2, Siyu Zhang 2
+
+Dongsheng Ma 2,4 , Rongxiang Weng 2, Xunliang Cai 2, Yun Chen 1†
+
+1Shanghai University of Finance and Economics 2Meituan, LongCat Team 
+
+3The Chinese University of Hong Kong, Shenzhen 4Peking University 
+
+dingyii2002@gmail.com, yoshua_li@meituan.com, yunchen@sufe.edu.cn 
+
+Abstract 
+
+Reinforcement learning with verifiable rewards (RLVR) broadcasts a single response-level reward to every token, while on-policy distillation (OPD) scores each token against a stronger teacher for a dense advantage but caps performance at teacher quality and discourages exploration beyond it. Their complementarity makes combining RLVR and OPD promising, but we find that fusing the two advantages with a fixed coefficient triggers entropy collapse from two miscalibrations: a magnitude mismatch , where token-level OPD advantages can spike far beyond the bounded RLVR advantage and erase its signal, and a temporal mismatch ,where sustained full-strength OPD keeps pulling the student toward the teacher and limits exploration needed to surpass it. We propose SAF, a Stable Advantage Fusion framework that resolves both issues via a lightweight, four-stage pipeline applied only to the OPD advantage: a sparsify-then-compress mechanism for magnitude control paired with a warm-up-then-anneal mechanism for temporal control, with each stage independently switchable and adding negligible overhead. Instantiating RLVR with GRPO, we evaluate SAF across seven mathematical reasoning and code generation benchmarks with Qwen3-1.7B/4B/8B: SAF avoids entropy collapse and consistently outperforms fixed-coefficient GRPO+OPD fusion, improving the aggregate score by 0.51–2.70% across all six model–domain settings while achieving more stable training. 
+
+1 Introduction Problem: Naive Fusion Stable Advantage Fusion     
+
+> Ai, ttotal =AiGRPO +Ai, tOPD ❌
+> Magnitude Mismatch Temporal Mismatch
+> policy entropy
+
+⚠           
+
+> critic score capped early
+> Entropy collapses early in training
+> OPD stays strong, crowding out exploration and capping the student's ceiling
+> Ai, ttotal =AiGRPO + opd_coef( s) · scale( s) · Ai, tOPD,tanh ✅
+> Entropy Stays Healthy Exploration Ceiling Raised
+> policy entropy
+> SAF (ours) Naive Fusion
+> ✓✓
+> SAF keeps entropy stable throughout training Preserved exploration lifts the final performance ceiling above naive fusion
+> critic score
+> SAF (ours) Naive Fusion
+> training steps training steps training steps training steps
+
+Figure 1 | Fixed-coefficient fusion versus SAF. SAF pairs the OPD advantage’s magnitude and temporal mismatches with dedicated control mechanisms, avoiding entropy collapse, preserving exploration, and improving final performance. 
+
+With the development of reinforcement learning with verifiable rewards (RLVR), large language models (LLMs) have demonstrated remarkable capabilities in complex reasoning tasks such as mathematics and code generation Zhang et al. [2025]. Among RLVR algorithms, group-relative policy optimization (GRPO) Shao et al. [2024], Guo et al. [2025] is a widely adopted and representative instantiation: it scores each rollout with a rule-based verifier and nor-malizes the score within its sampling group into a sin-gle response-level advantage AGRPO 
+
+i , broadcast iden-tically to every token in that rollout; we adopt GRPO as our RLVR instantiation. This broadcast is what makes GRPO simple but also coarse: AGRPO 
+
+i treats every token as equally responsible for the outcome, so a long correct derivation and its single decisive step receive the same credit. On-policy distillation (OPD) instead scores each student-generated token under a stronger teacher, providing a vector of token-level advantages AOPD 
+
+i,t = log πT (yi,t | si,t ) − log πθ (yi,t | si,t ), re-computed at every update, giving dense, teacher-relative feedback on problems the student could not yet solve 
+
+> ∗
+
+Equal contribution. 
+
+> †
+
+Corresponding author. arXiv:2607.29209v1 [cs.LG] 31 Jul 2026 SAF-OPD independently Agarwal et al. [2024], Gu et al. [2024], Liu et al. [2026]. Yet OPD alone has a complementary weakness: because AOPD  
+
+> i,t
+
+is defined purely relative to the teacher’s own token-level likelihood, it rewards matching the teacher’s distribution regardless of whether the teacher itself is correct, so its performance ceiling is implicitly capped by teacher quality unless the reward is explicitly reshaped to extrapolate past it Yang et al. [2026a]; without a ground-truth response-level verifier reward, sustained teacher-matching also offers no pressure to explore beyond the teacher, an outcome an independently verified RLVR reward can directly supply Cui et al. [2025a]. Since RLVR supplies a sparse but verified signal and OPD a dense but teacher-relative one, the two appear complementary by construction, motivating a growing line of work that fuses them by simply adding the two advantages with a fixed mixing coefficient Wang et al. [2026a], MiMo Core Team [2026]. However, treating this fusion as a simple additive combination glosses over a basic asymmetry between the two terms. AGRPO  
+
+> i
+
+is a single scalar per rollout, produced once by normalizing a bounded response-level verifier reward against its own sampling group, so its magnitude is self-calibrating Shao et al. [2024]. AOPD  
+
+> i,t
+
+,by contrast, is a token-level quantity recomputed from a log-probability gap at every update. Its magnitude is not bounded by group-relative normalization and can become large for individual tokens, a known source of training pathologies such as reward spikes and length inflation in OPD-style systems Wang et al. [2026b], Xing et al. [2026], Zhao et al. [2026], Luo et al. [2026]. While this gap itself faithfully tracks the local student-teacher discrepancy Liu et al. [2026], a fixed fusion coefficient does not adapt the contribution of this signal to the student’s evolving distance from the teacher: it implicitly assumes the two advantages remain commensurate at every token and step, even as one is normalized once per rollout and the other is unnormalized and re-estimated online. This paper asks whether that assumption holds, and if not, how to fuse the two advantages once it is dropped. As a preliminary study, we instantiate this recipe with the simplest possible choice, a fixed fusion of AGRPO 
+
+> i
+
+and AOPD  
+
+> i,t
+
+, and find that the asymmetry above is not merely a theoretical concern: it destabilizes training in practice. Policy entropy collapses early in training and stays low thereafter, a failure mode widely reported to stall exploration and cap final accuracy in RLVR Cui et al. [2025a]; the student is also pulled toward the teacher more aggressively than intended, and later-stage accuracy plateaus below what a better-controlled fusion can reach (Section 4.4). Diagnosing this failure, we trace it to two distinct, coexisting forms of miscalibration that a single fixed coefficient cannot simultaneously address. The first is a magnitude mismatch : unlike the bounded, group-normalized AGRPO  
+
+> i
+
+, the token-level AOPD  
+
+> i,t
+
+is unbounded and heavy-tailed, consistent with reports that unconstrained teacher–student log-ratio signals can spike to extreme magnitudes on individual tokens Zhao et al. [2026], so a small fraction of tokens can carry advantages far larger than any RLVR term and numerically dominate the fused update. The second is a temporal mismatch : the value of full-strength teacher guidance is not constant over training, since once the student has internalized much of what the teacher offers, continuing to apply full-strength OPD guidance over-constrains the policy and caps its performance ceiling. Because both mismatches act on different axes, one on the token-level scale and one on the training-time schedule, neither can be resolved by simply retuning that coefficient; Section 4.4 reports the full empirical evidence underlying this diagnosis. Motivated by this diagnosis, we propose SAF (Stable Advantage Fusion), which pairs the magnitude mismatch 
+
+and the temporal mismatch with one dedicated mechanism each, rather than tuning a single global coefficient. For the magnitude mismatch, a token-level magnitude controller sparsifies and bounds the empirical OPD advantage distribution within each response, so heavy-tailed tokens can no longer dominate the update. For the temporal mismatch, a training-stage controller tracks the online student–teacher KL divergence to detect when the OPD signal has served its purpose, then anneals its global coefficient accordingly, so full-strength guidance is applied only while it remains useful. Relative to the RLVR+OPD fixed-coefficient baseline, SAF introduces no additional model or auxiliary loss and can be applied as a lightweight transformation of the sampled OPD advantage; Section 3 details the four constituent stages and their composition into the complete fusion rule. We summarize our contributions as follows. 
+
+• We identify a basic asymmetry between a bounded, once-normalized RLVR advantage and an unbounded, online-recomputed OPD advantage, and show that fusing them with a fixed coefficient manifests this asymmetry as two related but distinct forms of miscalibration, one on token-level magnitude and one on training-time scheduling, neither resolved by coefficient tuning alone. 
+
+• We propose SAF, a lightweight, four-stage advantage fusion pipeline that pairs a sparsify-then-compress mechanism for magnitude control with a warm-up-then-anneal mechanism for temporal control. Every stage 2SAF-OPD is independently switchable, and the annealing horizon is determined relative to the observed warm-up endpoint rather than fixed in advance. 
+
+• Using GRPO as our RLVR instantiation, extensive experiments across seven mathematical-reasoning and code-generation benchmarks with Qwen3-8B, Qwen3-4B, and Qwen3-1.7B show that SAF: 1) improves the aggregate score over fixed-coefficient GRPO+OPD in every one of the six model–domain settings, with gains of 0.51–2.70%; and 2) as shown by our training-dynamics analysis, effectively avoids the entropy collapse induced by fixed-coefficient fusion, preserving the policy’s exploration capacity throughout training and thereby raising the ceiling on final task performance. 
+
+2 Related Work 
+
+2.1 RLVR and coarse credit assignment 
+
+Reinforcement learning with verifiable rewards (RLVR) trains LLM reasoning with a critic-free, group-normalized response-level advantage broadcast to every token, most commonly instantiated via GRPO Shao et al. [2024], Guo et al. [2025], Schulman et al. [2017]; follow-ups such as Dr.GRPO, DAPO, and GSPO refine this scalar’s normalization, clipping, or importance weighting but leave its coarse granularity unchanged Liu et al. [2025], Yu et al. [2025], Zheng et al. [2025]. This granularity is most limiting exactly where rollouts are least informative: on hard problems where the sampling group rarely contains a correct response, every token receives the same near-zero advantage, so GRPO provides little signal precisely where the student most needs to improve. Process reward models and entropy- or uncertainty-based reweighting target this granularity directly but rely on signals internal to the student, so they cannot guide problems it cannot yet solve Lightman et al. [2023], Wang et al. [2024], Cui et al. [2025a]. 
+
+2.2 On-policy distillation and its combination with RLVR 
+
+Unlike offline distillation on fixed teacher targets Hinton et al. [2015], Kim and Rush [2016], on-policy distillation (OPD) scores student-generated trajectories with teacher token probabilities, reducing train– generation mismatch and enabling dense, token-level feedback Agarwal et al. [2024], Gu et al. [2024]; it is now a common post-training stage Song and Zheng [2026], Zhang [2026], and we adopt its sampled-token variant for a cheaper single-token estimate Ko et al. [2024]. One line regulates this signal in isolation under teacher–student mismatch—restricting distillation to reliable states, adapting the divergence to local uncertainty, relaxing strict imitation, shifting supervision to intermediate representations, or reducing estimator variance, while G-OPD instead reinterprets OPD as KL-constrained RL Zhong et al. [2026], Jin et al. [2026], Ko et al. [2026], Xing et al. [2026], Wang et al. [2026b], Yang et al. [2026a,b], Oh et al. [2026]—but none combines OPD with an RLVR signal. A second line fuses OPD with RLVR but leaves the resulting miscalibration unaddressed: KDRL sums the two losses Xu et al. [2025], and MiMo-V2-Flash adds a token-level teacher– student advantage to the GRPO advantage at a fixed strength MiMo Core Team [2026]—the fixed-coefficient fusion whose entropy collapse motivates this paper (Section 1). RLSD, SDAR, and others move beyond a fixed coefficient but only gate or schedule the whole OPD term via a coarse, response-level statistic Yang et al. [2026c], Liu et al. [2026], Lu et al. [2026], Tan et al. [2026], Pan et al. [2026], Wang et al. [2026c]; none bounds an individual token’s OPD advantage relative to AGRPO  
+
+> i
+
+, so heavy-tailed magnitudes can still dominate after coarse gating. SAF instead pairs each mismatch with a matched-granularity mechanism, bounding each token’s influence and adapting OPD strength from the online student–teacher KL divergence rather than a response-level statistic. 
+
+3 Method 
+
+3.1 Preliminary: Advantage Fusion Problem 
+
+Given a prompt q, GRPO samples a group of G responses {o1, . . . , o G} from the rollout policy and assigns each response a single scalar reward from a rule-based verifier, normalized against the group’s own statistics into a response-level advantage AGRPO  
+
+> i
+
+that is broadcast identically to every token in response oi. AGRPO  
+
+> i
+
+is therefore bounded and verified, but carries no information about which token within oi was responsible for the outcome. In parallel, OPD minimizes the reverse KL divergence from the student policy πθ to the teacher policy 
+
+πT on student-generated trajectories, where si,t = ( xi, yi,<t ) denotes the token context. Under the next-token approximation used in recent OPD systems MiMo Core Team [2026], Yang et al. [2026a], comparison with 3SAF-OPD SAF: Stable Advantage Fusion for On-Policy Distillation                                          
+
+> 1 · On-policy rollout
+> Prompt
+> q∼D
+> Student policy
+> πθ
+> Sample Gresponses
+> oi= ( y1, …, yT)
+> Shared student trajectories
+> 2 · Complementary advantages Rule-based verifier
+> reward rifor each response
+> Teacher policy
+> πT
+> GRPO advantage
+> AiGRPO
+> sequence-level · bounded broadcast to all tokens
+> OPD advantage
+> Ai,tOPD = log πT(yi,t|si,t)− log πθ(yi,t|si,t)
+> token-level · dense · unbounded
+> Accurate but coarse +Dense but scale-sensitive
+> 3 · SAF controller (applied only to OPD)
+> Magnitude control
+> ①Sparsify · top-k% selection
+> τk(i)
+> gray tokens →0salient tokens retained
+> ②Compress · tanh bounding
+> +c
+> −c
+> preserve order bound every spike
+> Temporal control
+> ③Warm-up · KL-triggered
+> (KL 0−KL s)/ KL 0≥δ
+> stop early
+> scale( s)
+> 0→adaptive peak avoid early collapse
+> ④Anneal · remaining steps
+> cmin
+> swR=S−swS
+> teacher guidance ↓
+> GRPO exploration ↑
+> 4 · Fuse & optimize
+> Stable advantage fusion
+> Ai,ttotal
+> =AiGRPO
+> + opd_coef( s) · scale( s)·Ai,tOPD,tanh
+> Policy-gradient update
+> update student πθwith fused signal
+> Stable training
+> retain teacher guidance enable reward exploration
+
+Figure 2 | Overview of SAF. SAF modifies only the OPD branch through four stages before it is added to the unchanged GRPO advantage for the policy-gradient update. the policy-gradient form identifies the negative token-level log-probability gap as the OPD advantage: 
+
+AOPD 
+
+i,t = log πT (yi,t | si,t ) − log πθ (yi,t | si,t ), (1) so a token receives a positive advantage when the teacher assigns it a higher probability than the student and a negative advantage otherwise. Unlike AGRPO 
+
+i , AOPD 
+
+i,t is recomputed independently at every token t, so its magnitude is not bounded by any group-relative normalization. Notably, G-OPD Yang et al. [2026a] shows that OPD is theoretically a special case of dense KL-constrained RL, with AOPD 
+
+i,t itself an implicit reward under this view, grounding AGRPO 
+
+i and AOPD 
+
+i,t as two reward signals within the same RL formulation and justifying their summation into a single fused advantage. Our goal is to construct a fused signal Atotal 
+
+i,t for the policy-gradient update that (i) bounds the absolute influence of any single token’s AOPD 
+
+i,t and prevents it from numerically overwhelming the sequence-level AGRPO 
+
+i , and (ii) adapts the overall strength of the OPD contribution over training. SAF addresses these two requirements with four independently switchable stages applied only to AOPD 
+
+i,t , leaving AGRPO 
+
+i untouched: Section 3.2 presents a magnitude controller (top-k% sparsification followed by bounded tanh compression), Section 3.3 presents a temporal controller (KL-triggered warm-up followed by linear annealing), and Section 3.4 composes the four stages into the complete fusion rule. 
+
+3.2 Magnitude Control: Sparsify-then-Compress 
+
+A remaining problem after fixing AOPD 
+
+i,t as in Section 3.1 is that its token-level magnitude is unconstrained: because it is recomputed independently at every token from a log-probability difference, a small number of tokens can produce values an order of magnitude larger than AGRPO 
+
+i , letting a handful of tokens dominate the gradient for the entire sequence once incorporated into Atotal 
+
+i,t . We address this with a sparsification stage that removes low-salience tokens and a compression stage that bounds the magnitude of the tokens that remain. 
+
+Stage 1: Top-k% sparsification. As shown in Figure 3 (Section 4.4), the empirical distribution of |AOPD 
+
+i,t |
+
+is highly concentrated near zero, with substantially larger magnitudes occurring at only a small number of tokens. For each sequence i, we therefore retain only the tokens whose magnitude exceeds the (1 − k%) 
+
+quantile within that sequence, zeroing out the rest: 
+
+Mi,t = 1|AOPD 
+
+i,t | ≥ τk(i) ,
+
+4SAF-OPD where τk(i) is the (1 − k%) quantile of {| AOPD  
+
+> i,t
+
+|} over sequence i and k is a hyperparameter ( topk_percent ). This yields the filtered signal AOPD , top-k% 
+
+> i,t
+
+= Mi,t · AOPD  
+
+> i,t
+
+. Because τk(i) is recomputed per sequence, the filter adapts to each sequence’s own OPD magnitude distribution rather than applying a single global cutoff; setting 
+
+k = 100 disables filtering entirely, so this stage strictly generalizes the unfiltered signal. 
+
+Stage 2: Bounded tanh compression. Even after Stage 1 removes the least salient tokens, the magnitudes of the surviving tokens can still differ substantially, with occasional extreme outliers. We optionally pass the filtered signal through a bounded, tunable-scale transform: 
+
+AOPD ,tanh  
+
+> i,t
+
+= c tanh 
+
+
+
+AOPD , top-k%
+
+> i,t
+
+
+
+, (2) where c is a tunable coefficient. Since tanh maps R into (−1, 1) , the compressed signal is confined to (−c, c )
+
+regardless of the pre-compression magnitude, while remaining close to linear near the origin so relative ordering of small-to-moderate signals is preserved. This stage is elementwise, adds negligible overhead, and can be switched off independently. Together, the two stages bound the magnitude mismatch : Stage 1 decides 
+
+which tokens contribute based on salience relative to their own sequence, and Stage 2 decides how large acontribution any surviving token can make. 
+
+3.3 Temporal Control: Warm-up-then-Anneal 
+
+A separate problem is that the appropriate strength of AOPD  
+
+> i,t
+
+changes over training. Injecting it at full strength from the first update can prematurely collapse policy entropy Cui et al. [2025a], whereas maintaining that strength after the student has absorbed most of the teacher’s guidance can pin the policy to teacher behavior, crowd out GRPO exploration, and even destabilize generation altogether Luo et al. [2026]. We therefore first ramp the OPD strength linearly from zero, allowing the observed student–teacher KL drop to terminate this warm-up early, and then reduce the OPD coefficient linearly over the remaining steps so GRPO progressively regains control. 
+
+Stage 3: KL-triggered warm-up. We scale the output of Stage 2 by a factor that increases linearly with the global step s:scale (s) = min 
+
+ sSwarmup 
+
+, 1.0
+
+
+
+,
+
+where Swarmup is the maximum warm-up duration. Rather than relying solely on a pre-specified step budget, we monitor a sampled-token estimate of the reverse KL divergence from student to teacher, computed on the same student-generated responses used for policy optimization (Appendix C). Letting KL 0 denote this estimate at the onset of warm-up and KL s its value at step s, we terminate warm-up early once 
+
+KL 0 − KL s
+
+KL 0
+
+≥ δ, δ > 0,
+
+freezing scale (s) at its current value. This early-stop criterion uses the observed reduction in sampled student-to-teacher reverse KL, rather than a fixed step count, to determine when the ramp should stop, since the required reduction varies substantially across models and tasks. It also guards against over-imitation: the teacher’s own competence is not unbounded and its token-level scores can be miscalibrated Yang et al. [2026a], so once the student has closed most of the reachable gap, prolonging full-strength guidance mainly risks fitting the teacher’s errors rather than yielding further benefit. 
+
+Stage 4: Linear annealing over the remaining steps. Let S denote the total training budget and let sw be the step at which warm-up ends, either naturally or via the KL-triggered condition. We start a local counter 
+
+ta = 0 at sw, increment it after each subsequent update, and define the OPD coefficient over the remaining budget R = S − sw as opd_coef (s) = 
+
+
+
+1, s < s w,cmin + (1 − cmin )
+
+
+
+1 − ta
+
+R
+
+
+
+, s ≥ sw, (3) where 0 ≤ ta ≤ R and cmin is a small floor preserving a residual OPD contribution. Annealing thus begins at coefficient 1 when warm-up ends and reaches cmin at the final step; an earlier KL-triggered termination enlarges R and makes the decay more gradual. When warm-up is disabled, we set sw = 0 and anneal over the full training budget. 5SAF-OPD Mathematical Reasoning Code Generation Method AIME-24 AIME-25 HMMT25-Feb HMMT25-Nov Avg. HumanEval+ MBPP+ LiveCodeBench Avg.                                                                                                                                                 
+
+> Teacher: Qwen3-30B-A3B-Instruct-2507 73.65 61.98 43.85 57.81 59.32 82.93 78.31 45.00 68.75
+> Student: Qwen3-8B
+> Base 26.56 21.25 11.35 9.79 17.24 80.49 72.49 23.71 58.90 GRPO-only 61.15 49.06 28.65 37.50 44.09 81.10 72.22 28.85 60.72 OPD-only 59.58 50.52 27.60 40.73 44.61 84.15 71.96 33.29 63.13 GRPO+OPD (fixed) 60.83 51.25 28.44 43.33 45.96 78.66 71.69 34.86 61.74
+> SAF (ours) 64.79 51.25 30.00 41.67 46.93 81.10 71.69 37.43 63.41
+> Student: Qwen3-4B
+> Base 23.02 21.88 11.67 9.17 16.44 79.27 63.49 24.57 55.78 GRPO-only 58.96 50.62 30.10 37.60 44.32 80.49 68.78 32.14 60.47 OPD-only 57.81 51.56 29.38 37.71 44.12 78.66 69.31 30.71 59.56 GRPO+OPD (fixed) 57.19 51.98 29.90 38.44 44.38 79.88 66.14 33.86 59.96
+> SAF (ours) 60.21 53.96 31.15 38.23 45.89 82.93 70.63 34.43 62.66
+> Student: Qwen3-1.7B
+> Base 12.81 10.83 5.94 3.54 8.28 60.98 54.23 15.14 43.45 GRPO-only 36.25 31.35 17.19 16.88 25.42 65.24 53.70 17.57 45.50 OPD-only 35.10 28.54 15.83 16.35 23.96 70.73 58.73 25.86 51.77
+> GRPO+OPD (fixed) 34.79 29.69 17.50 16.56 24.64 70.12 56.08 26.43 50.88
+> SAF (ours) 36.67 31.98 18.02 19.27 26.49 70.73 57.14 26.29 51.39
+
+Table 1 | Results on mathematical reasoning and code generation. All entries are accuracies (%). Within each model scale and column, the best result is bold and the second best is underlined. 
+
+3.4 Overall Fusion and Implementation 
+
+Composing the four stages in order (Stage 1 → Stage 2 → Stage 3 → Stage 4) gives the final fused advantage 
+
+Atotal  
+
+> i,t
+
+= AGRPO  
+
+> i
+
++ opd_coef (s) · scale (s) AOPD ,tanh  
+
+> i,t
+
+. (4) Each disabled stage reduces to the identity; disabling all four recovers the fixed fusion AGRPO  
+
+> i
+
++ AOPD  
+
+> i,t
+
+. SAF therefore modifies only the advantage-fusion step and introduces no additional model, loss, or forward pass: Stage 1 computes one quantile per sequence, Stage 3 stores KL 0 to evaluate (KL 0 − KL s)/KL 0, and the temporal controller maintains only sw and ta, so SAF can be inserted into an existing GRPO+OPD training loop as a drop-in replacement. 
+
+4 Experiments 
+
+4.1 Experimental Setup Models and training. We implement SAF in a GRPO+OPD pipeline based on verl Sheng et al. [2025], initializing the student from Qwen3-8B, Qwen3-4B, or Qwen3-1.7B with Qwen3-30B-A3B-Instruct-2507 as the teacher Yang et al. [2025] that supplies the token-level log probabilities for AOPD  
+
+> i,t
+
+. All methods at a given scale share the same initialization, teacher, and training data: 57K DeepMath He et al. [2025] problems with difficulty ≥ 6 for mathematics and the 25K-problem Eurus-RL-Code dataset Cui et al. [2025b] for code, with on-policy student responses, verifiable rewards driving the GRPO signal, and teacher scores driving the OPD signal. OPD-only uses a dedicated distillation configuration, while the other methods share a separate configuration (Appendix A). We compare SAF against four controls: the untrained Base model; GRPO-only 
+
+(removes AOPD  
+
+> i,t
+
+); OPD-only (removes AGRPO  
+
+> i
+
+); and GRPO+OPD (fixed) , which fixes the OPD coefficient at 1 and disables SAF’s controls. Unless stated otherwise, SAF uses k = 20 , c = 0 .1, Swarmup = 100 , δ = 0 .2, and 
+
+cmin = 0 .
+
+Evaluation. We evaluate mathematical reasoning on AIME24 AI-MO [2024], AIME25 OpenCompass [2025], and HMMT25 (February and November) Balunović et al. [2025], and code generation on HumanEval+, MBPP+ Liu et al. [2023], and LiveCodeBench (v6, February ∼May 2025) Jain et al. [2024]. Math answers are validated with Math-Verify 1, and code is scored with the benchmark-provided unit tests; we report the unweighted mean per domain. Full decoding and sampling settings are in Appendix A. 
+
+> 1
+
+https://github.com/huggingface/Math-Verify 
+
+6SAF-OPD 
+
+4.2 Main Results 
+
+Table 1 shows that SAF consistently improves the aggregate score over fixed-coefficient fusion across both domains and all three model scales. On mathematical reasoning, SAF improves over GRPO+OPD (fixed) by 0.97% for Qwen3-8B, 1.51% for Qwen3-4B, and 1.85% for Qwen3-1.7B. On code generation, the corresponding gains are 1.67%, 2.70%, and 0.51%. Averaged over the six model–domain settings, SAF reaches 49.46%, outperforming GRPO+OPD (fixed), GRPO-only, and OPD-only by 1.54%, 2.71%, and 1.60%, respectively. These consistent aggregate gains indicate that controlling the OPD signal is more effective than either discarding it or injecting it at a full strength. The improvements are broad but not uniform. Qwen3-8B SAF is best (or tied for best) on four of seven benchmarks, improving the domain average by 2.84% over GRPO-only on mathematics and 2.69% on code; the exception is MBPP+, where SAF trails GRPO-only and OPD-only by no more than 0.53% while still improving over fixed fusion on average. Qwen3-4B SAF is best on six of seven benchmarks, improving over GRPO-only by 1.57% on mathematics and 2.19% on code. For Qwen3-1.7B, SAF is best or tied for best on five of seven benchmarks and improves over GRPO-only by 1.07% on mathematics and 5.89% on code; on 1.7B code, OPD-only attains the highest average (51.77%) followed by SAF (51.39%), which still exceeds fixed fusion by 0.51%. These exceptions make clear that SAF consistently improves over fixed fusion at the aggregate level without dominating every baseline at every scale. 
+
+4.3 Ablation Study 
+
+We next examine representative Qwen3-4B mathematical-reasoning runs under the same 300-step budget. Table 2 shows that magnitude control alone performs similarly to fixed fusion (44.35% versus 44.38%), and adding warm-up without the complete temporal controller is also insufficient (44.07%). This does not negate the need for top-k filtering and tanh compression: Figure 3 and Appendix D directly expose the near-zero mass and extreme token-level magnitudes these operations regulate. Rather, correcting this magnitude mismatch alone is insufficient for final accuracy. When annealing is enabled, the average rises to 45.23%. With the full SAF configuration, the selected threshold δ = 0 .2 reaches 45.89%, whereas increasing it to δ = 0 .3
+
+yields 44.51%. Since a larger δ requires a bigger KL drop before warm-up ends, raising δ from 0.2 to 0.3 prolongs full-strength OPD guidance yet lowers accuracy by 1.38%, consistent with the student approaching the ceiling of what a fallible teacher can offer, so continuing to chase it mainly reinforces the teacher’s own errors. This supports selecting δ = 0 .2. The evidence thus supports complementary roles: top-k filtering and 
+
+tanh compression make the OPD signal suitable for fusion, while the temporal controller determines when and how strongly it should influence optimization. The full SAF configuration improves over fixed fusion and the magnitude-only variant by 1.51% and 1.54%, respectively. Configuration AIME-24 AIME-25 HMMT25-Feb HMMT25-Nov Avg. GRPO+OPD (fixed) 57.19 51.98 29.90 38.44 44.38 + top-k and tanh (fixed weight) 58.75 50.94 30.10 37.60 44.35 + warm-up (no annealing) 58.96 51.46 29.69 36.15 44.07 + annealing 59.27 52.60 31.25 37.81 45.23 
+
+SAF ( δ = 0 .2, selected) 60.21 53.96 31.15 38.23 45.89 
+
+SAF ( δ = 0 .3) 58.75 52.81 29.38 37.08 44.51 Table 2 | Representative SAF ablations on Qwen3-4B mathematical reasoning after 300 training steps. 
+
+4.4 Analysis of Training Dynamics 
+
+This subsection reports the preliminary study that motivates SAF’s design (Section 1): we instantiate the fixed fusion AGRPO  
+
+> i
+
++ AOPD  
+
+> i,t
+
+on Qwen3-4B mathematical reasoning, diagnose why it destabilizes training, and trace the resulting magnitude mismatch and temporal mismatch through the raw OPD advantage distribution and the optimization trajectories it produces, then analyze why SAF improves over this fusion once both mismatches are controlled. 
+
+OPD advantage distribution. We first quantify the magnitude mismatch between AOPD  
+
+> i,t
+
+and AGRPO  
+
+> i
+
+that Stages 1–2 are designed to regulate. Figure 3 bins |AOPD  
+
+> i,t
+
+| collected during the first ten training steps of Qwen3-7SAF-OPD 0 50 100 150 200 250 300 
+
+> step
+> 0.300
+> 0.325
+> 0.350
+> 0.375
+> 0.400
+> 0.425
+> 0.450
+> 0.475
+> actor/entropy
+> GRPO
+> OPD
+> GRPO+OPD
+> SAF
+
+(a) Actor entropy 0 50 100 150 200 250 300  
+
+> step
+> 0.0014
+> 0.0016
+> 0.0018
+> 0.0020
+> 0.0022
+> 0.0024
+> 0.0026
+> student-teacher KL divergence
+> GRPO
+> OPD
+> GRPO+OPD
+> SAF
+
+(b) Student–teacher KL divergence 0 50 100 150 200 250 300  
+
+> step
+> 0.50
+> 0.55
+> 0.60
+> 0.65
+> 0.70
+> 0.75
+> 0.80
+> 0.85
+> critic/score/mean
+> GRPO
+> OPD
+> GRPO+OPD
+> SAF
+
+(c) Critic score 0 50 100 150 200 250 300 
+
+> step
+> 2000
+> 3000
+> 4000
+> 5000
+> 6000
+> 7000
+> 8000
+> response_length/mean
+> GRPO
+> OPD
+> GRPO+OPD
+> SAF
+
+(d) Response length 0 50 100 150 200 250 300  
+
+> step
+> 0.25
+> 0.30
+> 0.35
+> 0.40
+> 0.45
+> 0.50
+> 0.55
+> 0.60
+> val-core/aime24/acc/mean@32
+> GRPO
+> OPD
+> GRPO+OPD
+> SAF
+
+(e) AIME-24 accuracy 0 50 100 150 200 250 300  
+
+> step
+> 0.25
+> 0.30
+> 0.35
+> 0.40
+> 0.45
+> 0.50
+> val-core/aime25/acc/mean@32  GRPO
+> OPD
+> GRPO+OPD
+> SAF
+
+(f) AIME-25 accuracy 
+
+Figure 4 | Training dynamics of Qwen3-4B on mathematical reasoning tasks over 300 optimization steps: (a) actor entropy, (b) student–teacher KL divergence, (c) mean critic score, (d) mean response length, (e) AIME-24 accuracy, and (f) AIME-25 accuracy. Curves compare GRPO, OPD, fixed-coefficient GRPO+OPD, and SAF under the same task setting. 4B, and Appendix D reports representative token-level values over five additional steps. Both views show the same pattern: the overwhelming majority of tokens carry near-zero advantage, while a small subset is one to two orders of magnitude larger. Concretely, every one of the 180 largest-magnitude OPD tokens inspected in Appendix D exceeds the GRPO magnitude of its own sequence, with OPD extremes reaching 20 .3585 against a largest co-occurring GRPO magnitude of only 2.4749 . Under fixed fusion, such tokens numerically dominate the update for their entire sequence despite the two advantages being nominally weighted 1:1. This distribution is the basis for the per-sequence top-k% filter and bounded tanh compression introduced in Section 3.2. 
+
+Figure 3 | Empirical distribution of the absolute token-level OPD advantages, |AOPD  
+
+> i,t
+
+|, collected during the first 10 training steps of Qwen3-4B on mathematical reasoning tasks. 
+
+Training dynamics across the four regimes. We next compare how this magnitude mismatch prop-agates into optimization. Figure 4 tracks Qwen3-4B on mathematical reasoning under GRPO, OPD, fixed-coefficient GRPO+OPD, and SAF over 300 opti-mization steps, along five diagnostics: actor entropy, student–teacher KL divergence, critic score, response length, and validation accuracy. Fixed-coefficient fusion rapidly reduces actor entropy from approx-imately 0.35 to 0.30 and keeps it near that level, and it also drives the student–teacher KL to the lowest value among the four regimes, consistent with unreg-ulated, heavy-tailed OPD tokens repeatedly pulling the student toward the teacher. GRPO-only, receiving no teacher signal, sits at the opposite end: its entropy rises above 0.42 and its KL remains the highest. SAF sits between these extremes, maintaining an inter-mediate entropy of roughly 0.35 –0.38 and gradually reducing KL without tracking the teacher as tightly as fixed fusion, matching the intended effect of pairing magnitude control with the warm-up-then-anneal schedule from Section 3.3. 
+
+Connecting dynamics to task performance. This intermediate regime translates into measurable down-stream benefits rather than merely more randomness. SAF’s critic score recovers rapidly and ends around 0.84 ,8SAF-OPD close to the strongest GRPO trajectory, whereas fixed fusion plateaus lower, around 0.77 . Response length shows a matching pattern: after a common early transient, fixed fusion settles near 4.5k tokens, while SAF continues producing responses of roughly 5.3k– 6.2k tokens, avoiding the short-response regime of the low-entropy fixed-fusion policy without expanding to the approximately 7k-token responses of GRPO. Validation accuracy reflects the same ordering: SAF keeps improving late in training and finishes above fixed fusion on both AIME-24 (approximately 0.59 versus 0.57 ) and AIME-25 (approximately 0.53 versus 0.51 ). Notably, fixed fusion tracks the teacher most closely (lowest KL) yet ends with the lowest accuracy and earliest plateau, so closer imitation does not translate into better performance; this is consistent with the teacher being an imperfect proxy, with prolonged full-strength imitation overfitting to that proxy instead of the verifiable reward. Taken together, these diagnostics support a single account: unregulated, full-strength distillation drives KL down at the cost of entropy, response length, and an earlier accuracy plateau, whereas SAF’s controls preserve enough teacher guidance to stabilize training while leaving room for continued reward-driven exploration. We treat this analysis as diagnostic; Table 2 isolates the causal contribution of each component, and Appendix B reports additional parameter-space evidence consistent with this diagnosis. 
+
+4.5 Analysis Across Scales and Domains 
+
+SAF’s advantage over fixed fusion persists in all six model–domain settings spanning Qwen3-8B, Qwen3-4B, and Qwen3-1.7B, ranging from 0.51% to 2.70%. The gain is not tied to a single capacity regime: on mathematical reasoning, the margin increases monotonically as the student shrinks (0.97% at 8B, 1.51% at 4B, 1.85% at 1.7B), consistent with smaller students relying more on the denser OPD signal once controlled. On code generation the pattern is not monotonic—largest at 4B (2.70%), still substantial at 8B (1.67%), and smallest at 1.7B (0.51%, where OPD-only is already the strongest baseline)—indicating scale interacts with domain rather than acting as a single axis of difficulty. Together with the ablation, these results suggest that temporally controlling a bounded token-level distillation signal is useful across model scales and task domains, while stopping short of claiming robustness to untested teachers, hyperparameters, or scales beyond the 1.7B–8B range studied here. 
+
+5 Conclusion 
+
+This paper studies how to fuse a response-level GRPO advantage with a token-level OPD advantage without either one destabilizing the other. Naive fixed-coefficient summation suffers from a magnitude mismatch, where token-level OPD advantages spike far beyond the bounded GRPO advantage, and a temporal mismatch, where the value of full-strength guidance drifts as the student converges toward the teacher. SAF addresses both via a four-stage, switchable pipeline pairing top-k sparsify-then-tanh -compress magnitude control with warm-up-then-anneal temporal control, adding no auxiliary model, teacher query, or loss term. Across mathematical reasoning and code generation with Qwen3-8B, Qwen3-4B, and Qwen3-1.7B, SAF improves over fixed-coefficient GRPO+OPD in all six settings by 0.51–2.70%, avoiding the early entropy collapse and lowest accuracy plateau of the fixed-coefficient baseline despite the latter tracking the teacher most tightly. Fusing a sparse, verified reward with a dense, proxy-based signal should thus not reduce to a single mixing coefficient, but calls for separately controlling its magnitude and trust over training. 
+
+References 
+
+Kaiyan Zhang, Yuxin Zuo, Bingxiang He, Youbang Sun, Runze Liu, Che Jiang, Yuchen Fan, Kai Tian, Guoli Jia, Pengfei Li, Yu Fu, Xingtai Lv, Yuchen Zhang, Sihang Zeng, Shang Qu, Haozhan Li, Shijie Wang, Yuru Wang, Xinwei Long, Fangfu Liu, Xiang Xu, Jiaze Ma, Xuekai Zhu, Ermo Hua, Yihao Liu, Zonglin Li, Huayu Chen, Xiaoye Qu, Yafu Li, Weize Chen, Zhenzhao Yuan, Junqi Gao, Dong Li, Zhiyuan Ma, Ganqu Cui, Zhiyuan Liu, Biqing Qi, Ning Ding, and Bowen Zhou. A survey of reinforcement learning for large reasoning models, 2025. URL https://arxiv.org/abs/2509.08827 .Zhihong Shao, Peiyi Wang, Qihao Zhu, Runxin Xu, Junxiao Song, Xiao Bi, Haowei Zhang, Mingchuan Zhang, Y. K. Li, Y. Wu, and Daya Guo. Deepseekmath: Pushing the limits of mathematical reasoning in open language models, 2024. URL https://arxiv.org/abs/2402.03300 .Daya Guo, Dejian Yang, Haowei Zhang, Junxiao Song, Peiyi Wang, Qihao Zhu, Runxin Xu, Ruoyu Zhang, Shirong Ma, Xiao Bi, Xiaokang Zhang, Xingkai Yu, Yu Wu, Z. F. Wu, Zhibin Gou, Zhihong Shao, Zhuoshu Li, Ziyi Gao, Aixin Liu, Bing Xue, Bingxuan Wang, Bochao Wu, Bei Feng, Chengda Lu, Chenggang Zhao, Chengqi Deng, Chong Ruan, Damai Dai, Deli Chen, Dongjie Ji, Erhang Li, Fangyun Lin, Fucong Dai, Fuli 9SAF-OPD Luo, Guangbo Hao, Guanting Chen, Guowei Li, H. Zhang, Hanwei Xu, Honghui Ding, Huazuo Gao, Hui Qu, Hui Li, Jianzhong Guo, Jiashi Li, Jingchang Chen, Jingyang Yuan, Jinhao Tu, Junjie Qiu, Junlong Li, J. L. Cai, Jiaqi Ni, Jian Liang, Jin Chen, Kai Dong, Kai Hu, Kaichao You, Kaige Gao, Kang Guan, Kexin Huang, Kuai Yu, Lean Wang, Lecong Zhang, Liang Zhao, Litong Wang, Liyue Zhang, Lei Xu, Leyi Xia, Mingchuan Zhang, Minghua Zhang, Minghui Tang, Mingxu Zhou, Meng Li, Miaojun Wang, Mingming Li, Ning Tian, Panpan Huang, Peng Zhang, Qiancheng Wang, Qinyu Chen, Qiushi Du, Ruiqi Ge, Ruisong Zhang, Ruizhe Pan, Runji Wang, R. J. Chen, R. L. Jin, Ruyi Chen, Shanghao Lu, Shangyan Zhou, Shanhuang Chen, Shengfeng Ye, Shiyu Wang, Shuiping Yu, Shunfeng Zhou, Shuting Pan, S. S. Li, Shuang Zhou, Shaoqing Wu, Tao Yun, Tian Pei, Tianyu Sun, T. Wang, Wangding Zeng, Wen Liu, Wenfeng Liang, Wenjun Gao, Wenqin Yu, Wentao Zhang, W. L. Xiao, Wei An, Xiaodong Liu, Xiaohan Wang, Xiaokang Chen, Xiaotao Nie, Xin Cheng, Xin Liu, Xin Xie, Xingchao Liu, Xinyu Yang, Xinyuan Li, Xuecheng Su, Xuheng Lin, X. Q. Li, Xiangyue Jin, Xiaojin Shen, Xiaosha Chen, Xiaowen Sun, Xiaoxiang Wang, Xinnan Song, Xinyi Zhou, Xianzu Wang, Xinxia Shan, Y. K. Li, Y. Q. Wang, Y. X. Wei, Yang Zhang, Yanhong Xu, Yao Li, Yao Zhao, Yaofeng Sun, Yaohui Wang, Yi Yu, Yichao Zhang, Yifan Shi, Yiliang Xiong, Ying He, Yishi Piao, Yisong Wang, Yixuan Tan, Yiyang Ma, Yiyuan Liu, Yongqiang Guo, Yuan Ou, Yuduan Wang, Yue Gong, Yuheng Zou, Yujia He, Yunfan Xiong, Yuxiang Luo, Yuxiang You, Yuxuan Liu, Yuyang Zhou, Y. X. Zhu, Yanping Huang, Yaohui Li, Yi Zheng, Yuchen Zhu, Yunxian Ma, Ying Tang, Yukun Zha, Yuting Yan, Z. Z. Ren, Zehui Ren, Zhangli Sha, Zhe Fu, Zhean Xu, Zhenda Xie, Zhengyan Zhang, Zhewen Hao, Zhicheng Ma, Zhigang Yan, Zhiyu Wu, Zihui Gu, Zijia Zhu, Zijun Liu, Zilin Li, Ziwei Xie, Ziyang Song, Zizheng Pan, Zhen Huang, Zhipeng Xu, Zhongyu Zhang, and Zhen Zhang. Deepseek-r1 incentivizes reasoning in llms through reinforcement learning. Nature , 645(8081):633–638, 2025. ISSN 1476-4687. doi: 10.1038/s41586-025-09422-z. URL 
+
+http://dx.doi.org/10.1038/s41586-025-09422-z .Rishabh Agarwal, Nino Vieillard, Yongchao Zhou, Piotr Stanczyk, Sabela Ramos, Matthieu Geist, and Olivier Bachem. On-policy distillation of language models: Learning from self-generated mistakes, 2024. URL 
+
+https://arxiv.org/abs/2306.13649 .Yuxian Gu, Li Dong, Furu Wei, and Minlie Huang. MiniLLM: Knowledge distillation of large language models. In The Twelfth International Conference on Learning Representations , 2024. URL https://openreview.net/ forum?id=5h0qf7IBZZ .Yifeng Liu, Shiyuan Zhang, Yifan Zhang, and Quanquan Gu. Self-distilled policy gradient, 2026. URL 
+
+https://arxiv.org/abs/2606.04036 .Wenkai Yang, Weijie Liu, Ruobing Xie, Kai Yang, Saiyong Yang, and Yankai Lin. Learning beyond teacher: Generalized on-policy distillation with reward extrapolation. arXiv preprint arXiv:2602.12125 , 2026a. Ganqu Cui, Yuchen Zhang, Jiacheng Chen, Lifan Yuan, Zhi Wang, Yuxin Zuo, Haozhan Li, Yuchen Fan, Huayu Chen, Weize Chen, et al. The entropy mechanism of reinforcement learning for reasoning language models, 2025a. URL https://arxiv.org/abs/2505.22617 .Chen Wang, Zhaochun Li, Jionghao Bai, Yining Zhang, Hexuan Deng, Ge Lan, and Yue Wang. Distilled reinforcement learning for llm post-training, 2026a. URL https://arxiv.org/abs/2607.17247 .MiMo Core Team. Mimo-v2-flash technical report, 2026. URL https://arxiv.org/abs/2601.02780 .Rui Wang, Hongru Wang, Yi Chen, Boyang Xue, Tianqing Fang, Wenhao Yu, and Kam-Fai Wong. Demystifying on-policy distillation: Roles, pathologies, and regulations, 2026b. URL https://arxiv.org/abs/2607.13399 .Xingrun Xing, Haoqing Wang, Boyan Gao, Ziheng Li, and Yehui Tang. Trust region on-policy distillation, 2026. URL https://arxiv.org/abs/2606.01249 .Anhao Zhao, Junlong Tong, Yingqi Fan, Ping Nie, Wenjie Li, and Xiaoyu Shen. Poweropd: Stabilizing on-policy distillation with bounded power transformation, 2026. URL https://arxiv.org/abs/2606.17199 .Feng Luo, Yu-Neng Chuang, Guanchu Wang, Zicheng Xu, Xiaotian Han, Tianyi Zhang, and Vladimir Braverman. Demystifying opd: Length inflation and stabilization strategies for large language models, 2026. URL 
+
+https://arxiv.org/abs/2604.08527 .John Schulman, Filip Wolski, Prafulla Dhariwal, Alec Radford, and Oleg Klimov. Proximal policy optimization algorithms, 2017. URL https://arxiv.org/abs/1707.06347 .Zichen Liu, Changyu Chen, Wenjun Li, Penghui Qi, Tianyu Pang, Chao Du, Wee Sun Lee, and Min Lin. Understanding r1-zero-like training: A critical perspective, 2025. URL https://arxiv.org/abs/2503. 20783 .Qiying Yu, Zheng Zhang, Ruofei Zhu, Yufeng Yuan, Xiaochen Zuo, Yu Yue, Weinan Dai, Tiantian Fan, Gaohong Liu, Lingjun Liu, et al. Dapo: An open-source llm reinforcement learning system at scale, 2025. URL 
+
+https://arxiv.org/abs/2503.14476 .10 SAF-OPD Chujie Zheng, Shixuan Liu, Mingze Li, Xiong-Hui Chen, Bowen Yu, Chang Gao, Kai Dang, Yuqiong Liu, Rui Men, An Yang, et al. Group sequence policy optimization, 2025. URL https://arxiv.org/abs/2507.18071 .Hunter Lightman, Vineet Kosaraju, Yura Burda, Harri Edwards, Bowen Baker, Teddy Lee, Jan Leike, John Schulman, Ilya Sutskever, and Karl Cobbe. Let’s verify step by step, 2023. URL https://arxiv.org/abs/ 2305.20050 .Peiyi Wang, Lei Li, Zhihong Shao, R. X. Xu, Damai Dai, Yifei Li, Deli Chen, Y. Wu, and Zhifang Sui. Math-shepherd: Verify and reinforce llms step-by-step without human annotations, 2024. URL https://arxiv. org/abs/2312.08935 .Geoffrey Hinton, Oriol Vinyals, and Jeff Dean. Distilling the knowledge in a neural network, 2015. URL 
+
+https://arxiv.org/abs/1503.02531 .Yoon Kim and Alexander M. Rush. Sequence-level knowledge distillation, 2016. URL https://arxiv.org/ abs/1606.07947 .Mingyang Song and Mao Zheng. A survey of on-policy distillation for large language models, 2026. URL 
+
+https://arxiv.org/abs/2604.00626 .Bowen Zhang. A formula-driven survey and research agenda for on-policy distillation, 2026. URL https: //arxiv.org/abs/2606.22793 .Jongwoo Ko, Sungnyun Kim, Tianyi Chen, and Se-Young Yun. Distillm: Towards streamlined distillation for large language models, 2024. URL https://arxiv.org/abs/2402.03898 .Qiyong Zhong, Mao Zheng, Mingyang Song, Xin Lin, Jie Sun, Houcheng Jiang, Xiang Wang, and Junfeng Fang. Sod: Step-wise on-policy distillation for small language model agents. arXiv preprint arXiv:2605.07725 ,2026. Woogyeol Jin, Taywon Min, Yongjin Yang, Dennis Wei, Yi Zhou, Swanand Ravindra Kadhe, Nathalie Baracaldo, and Kimin Lee. Entropy-aware on-policy distillation of language models, 2026. URL https://arxiv.org/ abs/2603.07079 .Jongwoo Ko, Sara Abdali, Young Jin Kim, Tianyi Chen, and Pashmina Cameron. Scaling reasoning efficiently via relaxed on-policy distillation, 2026. URL https://arxiv.org/abs/2603.11137 .Shenzhi Yang, Guangcheng Zhu, Bowen Song, Haobo Wang, Mingxuan Xia, Xing Zheng, Yingfan Ma, Zhongqi Chen, Weiqiang Wang, Junbo Zhao, and Gang Chen. Oprd: On-policy representation distillation, 2026b. URL https://arxiv.org/abs/2606.06021 .Minjae Oh, Sangjun Song, Gyubin Choi, Yunho Choi, and Yohan Jo. Kl for a kl: On-policy distillation with control variate baseline, 2026. URL https://arxiv.org/abs/2605.07865 .Hongling Xu, Qi Zhu, Heyuan Deng, Jinpeng Li, Lu Hou, Yasheng Wang, Lifeng Shang, Ruifeng Xu, and Fei Mi. Kdrl: Post-training reasoning llms via unified knowledge distillation and reinforcement learning, 2025. URL 
+
+https://arxiv.org/abs/2506.02208 .Chenxu Yang, Chuanyu Qin, Qingyi Si, Minghui Chen, Naibin Gu, Dingyu Yao, Zheng Lin, Weiping Wang, Jiaqi Wang, and Nan Duan. Self-distilled rlvr, 2026c. URL https://arxiv.org/abs/2604.03128 .Zhengxi Lu, Zhiyuan Yao, Zhuowen Han, Zi-Han Wang, Jinyang Wu, Qi Gu, Xunliang Cai, Weiming Lu, Jun Xiao, Yueting Zhuang, and Yongliang Shen. Self-distilled agentic reinforcement learning, 2026. URL 
+
+https://arxiv.org/abs/2605.15155 .Qitai Tan, Zefang Zong, Yang Li, and Peng Chen. Atod: Annealed turn-aware on-policy distillation for multi-turn autonomous agents, 2026. URL https://arxiv.org/abs/2606.27814 .Leyi Pan, Shuchang Tao, Yunpeng Zhai, Lingzhe Zhang, Zhaoyang Liu, Bolin Ding, Aiwei Liu, and Lijie Wen. Rlcsd: Reinforcement learning with contrastive on-policy self-distillation, 2026. URL https://arxiv.org/ abs/2606.11709 .Jiaxuan Wang, Xuan Ouyang, Zhiyu Chen, Yulan Hu, Zheng Pan, Xin Li, and Lan-Zhe Guo. Trace: Distilling where it matters via token-routed self on-policy alignment, 2026c. URL https://arxiv.org/abs/2605. 10194 .Guangming Sheng, Chi Zhang, Zilingfeng Ye, Xibin Wu, Wang Zhang, Ru Zhang, Yanghua Peng, Haibin Lin, and Chuan Wu. Hybridflow: A flexible and efficient rlhf framework. In Proceedings of the Twentieth European Conference on Computer Systems , pages 1279–1297. ACM, 2025. doi: 10.1145/3689031.3696075. An Yang, Anfeng Li, Baosong Yang, Beichen Zhang, Binyuan Hui, Bo Zheng, Bowen Yu, Chang Gao, Chengen Huang, Chenxu Lv, et al. Qwen3 technical report, 2025. URL https://arxiv.org/abs/2505.09388 .11 SAF-OPD Zhiwei He, Tian Liang, Jiahao Xu, Qiuzhi Liu, Xingyu Chen, Yue Wang, Linfeng Song, Dian Yu, Zhenwen Liang, Wenxuan Wang, et al. Deepmath-103k: A large-scale, challenging, decontaminated, and verifiable mathematical dataset for advancing reasoning. arXiv preprint arXiv:2504.11456 , 2025. Ganqu Cui, Lifan Yuan, Zefan Wang, Hanbin Wang, Wendi Li, Bingxiang He, Yuchen Fan, Tianyu Yu, Qixin Xu, Weize Chen, et al. Process reinforcement through implicit rewards. arXiv preprint arXiv:2502.01456 , 2025b. AI-MO. Aime 2024. https://huggingface.co/datasets/AI-MO/aimo-validation-aime , 2024. OpenCompass. Aime 2025. https://huggingface.co/datasets/opencompass/AIME2025 , 2025. Mislav Balunović, Jasper Dekoninck, Ivo Petrov, Nikola Jovanović, and Martin Vechev. Matharena: Evaluating llms on uncontaminated math competitions, 2025. URL https://matharena.ai/ .Jiawei Liu, Chunqiu Steven Xia, Yuyao Wang, and Lingming Zhang. Is your code generated by chatGPT really correct? rigorous evaluation of large language models for code generation. In Thirty-seventh Conference on Neural Information Processing Systems , 2023. URL https://openreview.net/forum?id=1qvx610Cu7 .Naman Jain, King Han, Alex Gu, Wen-Ding Li, Fanjia Yan, Armando Solar-Lezama, Koushik Sen, and Ion Stoica. Livecodebench: Holistic and contamination free evaluation of large language models for code. arXiv preprint arXiv:2403.07974 , 2024. Yuchen Cai, Ding Cao, Liang Lin, Chunxi Luo, Xin Xu, Kai Yang, Weijie Liu, Saiyong Yang, Tianxiang Zhao, Guangzhong Sun, Guiquan Liu, and Junfeng Fang. Learning to foresee: Unveiling the unlocking efficiency of on-policy distillation, 2026. URL https://arxiv.org/abs/2605.11739 .12 SAF-OPD 
+
+A Detailed Experiment Settings 
+
+We use Qwen3-30B-A3B-Instruct-2507 as the teacher and initialize the student from Qwen3-8B, Qwen3-4B, or Qwen3-1.7B. Math training uses the filtered DeepMath split containing 57K problems of difficulty level at least 6, while code training uses the 25K-problem Eurus-RL-Code dataset. A rule-based verifier assigns reward 1 when the final mathematical answer is correct or all code unit tests pass, and 0 otherwise. Student responses are sampled on policy, and the teacher scores those same responses token by token rather than generating separate trajectories. 
+
+GRPO-based methods. GRPO-only, GRPO+OPD (fixed), and SAF use the same optimization and rollout configuration at a given student scale and domain; only their advantage construction differs. We optimize these methods for 300 steps on mathematics and 200 steps on code. Table 3 lists their shared hyperparameters. Hyperparameter Mathematics Code Train batch size 128 128 Micro batch size 128 128 Responses per prompt ( G) 8 8Maximum prompt length 2,048 2,048 Maximum response length 16,384 8,192 Rollout temperature 1.0 1.0 Rollout top-p 1.0 1.0 Actor learning rate 1 × 10 −6 1 × 10 −6
+
+Optimization steps 300 200 Actor KL-loss coefficient 0.0 0.0 Table 3 | Training hyperparameters of the GRPO-based methods: GRPO-only, GRPO+OPD (fixed), and SAF. 
+
+OPD-only. OPD-only uses separate configurations for mathematical reasoning and code generation, as summarized in Table 4. Both domains use a batch size of 1,024, one student rollout per prompt, and a learning rate of 1 × 10 −6. We optimize OPD-only for 100 steps on mathematics and 50 steps on code; the corresponding maximum response lengths are 16,384 and 8,192 tokens. Hyperparameter Mathematics Code Batch size 1,024 1,024 Responses per prompt 1 1Maximum prompt length 2,048 2,048 Maximum response length 16,384 8,192 Rollout temperature 1.0 1.0 Rollout top-p 1.0 1.0 Learning rate 1 × 10 −6 1 × 10 −6
+
+Optimization steps 100 50 Table 4 | Training hyperparameters of OPD-only for mathematical reasoning and code generation. 
+
+Advantage configurations. For GRPO-only, we set the OPD term to zero. For OPD-only, we set the verifier-derived GRPO advantage to zero. GRPO+OPD (fixed) uses a unit OPD coefficient, corresponding to the 1:1 fusion AGRPO  
+
+> i
+
++ AOPD  
+
+> i,t
+
+, with all four SAF controls disabled. Full SAF starts from the same unit coefficient and applies the settings in Table 5. The top-k threshold is recomputed independently for every response. Warm-up lasts at most 100 optimization steps and may terminate earlier when the relative student–teacher KL decrease reaches 0.2. After warm-up, the local annealing counter spans all remaining steps, so the OPD coefficient reaches zero at the end of the domain-specific training budget rather than using a separately tuned decay duration. 
+
+Evaluation settings. For every model, we use a temperature of 1.0, top-p of 1.0, and a maximum generation length of 16,384 tokens, except that HumanEval+ and MBPP+ use greedy decoding. We sample 32 solutions 13 SAF-OPD Hyperparameter Value Per-response retention ratio k 20% 
+
+tanh compression coefficient c 0.1 Maximum warm-up steps Swarmup 100 Relative KL-drop threshold δ 0.2 Initial OPD coefficient 1.0 Annealing floor cmin 0.0 Annealing duration Remaining training steps Table 5 | Method-specific hyperparameters for the selected SAF configuration. per problem on each mathematics benchmark (AIME-24, AIME-25, HMMT25-Feb, and HMMT25-Nov) and report the average accuracy across samples, whereas on LiveCodeBench v6 (February–May 2025) we sample four solutions per problem and report pass@1, i.e., a problem counts as solved if at least one sampled solution passes. Mathematical answers are checked with Math-Verify, while code submissions are scored by the benchmark-provided unit tests. These decoding and scoring settings are held fixed across Base, all baselines, and SAF. 
+
+Computing infrastructure. All experiments are run on a single node equipped with 8 ×NVIDIA H200 GPUs (140GB HBM3e memory per GPU, Hopper architecture), 96 physical CPU cores (184 logical cores), and 1.5TB of system memory. 
+
+B Training Dynamics: Supplementary Parameter-Space Analysis 
+
+Section 4.4 reports the optimization trajectories of Qwen3-4B trained on mathematical reasoning tasks under GRPO, OPD, fixed-coefficient GRPO+OPD, and SAF (Figure 4), based on entropy, student–teacher KL, critic score, response length, and validation accuracy. This appendix complements that analysis with a more exploratory, parameter-space view of the same training regimes. 
+
+Parameter-space update geometry (supplementary). The diagnostics in Section 4.4 are all computed on the advantage signal or on training curves. As an additional, more exploratory piece of evidence, we also inspected the parameter-space update matrices ∆W (t) = W (t) 
+
+> trained
+
+−Wbase produced by the same GRPO-only and OPD-only checkpoints reported in Tables 3 and 4, restricted to the first 300 optimization steps and analyzed with layer-wise SVD. Figure 5 summarizes three quantities computed over the first 100 shared optimization steps (the horizon at which OPD-only, which trains for 100 steps on mathematics, was checkpointed): (a) the mean stable rank ∥∆W ∥2 
+
+> F
+
+/∥∆W ∥2op of each method’s update matrices, (b) the cross-method overlap of their left singular subspaces (output/“write” directions), and (c) the cross-method overlap of their right singular subspaces (input/“read” directions). Consistent with the qualitative roles assigned to the two signals in Section 4.4, OPD’s updates exhibit a substantially lower stable rank than GRPO’s throughout this horizon, indicating that its update energy is more concentrated along a small number of directions, while GRPO’s updates remain comparatively higher-rank and more diffuse. The two methods’ updates also read from similar input subspaces (higher right-singular overlap) while writing to largely different output subspaces (markedly lower left-singular overlap), suggesting that GRPO and OPD attend to overlapping input features but push the policy in different directions. We report this as a supplementary, exploratory observation at the level of parameter geometry, rather than as evidence directly supporting SAF’s advantage-level design; we did not build any part of SAF’s magnitude or temporal control on this analysis, and a rigorous treatment connecting update-matrix geometry to advantage-fusion design is left to future work Cai et al. [2026]. 
+
+Metric definitions. We define the four quantities used throughout this appendix (stable rank, left/right singular-subspace overlap, and the two weight-drift statistics) precisely below, all computed layer-by-layer from the per-step update matrix ∆W (t) 
+
+> ℓ
+
+= W (t) 
+
+> trained ,ℓ
+
+− W 0 
+
+> ℓ
+
+, where ℓ indexes a 2D weight matrix ( q/k/v/o_proj 
+
+or gate/up/down_proj ) at a given transformer layer and W 0 
+
+> ℓ
+
+is the corresponding base-model weight. Every 
+
+∆W (t) 
+
+> ℓ
+
+is factorized with the (economy) singular value decomposition ∆W (t) 
+
+> ℓ
+
+= U (t) 
+
+> ℓ
+
+Σ(t) 
+
+> ℓ
+
+(V (t) 
+
+> ℓ
+
+)⊤, with singular values σ1 ≥ σ2 ≥ · · · ≥ σr ≥ 0 (r = min( m, n )); ∥∆W ∥F = ∥σ∥2 =  P  
+
+> i
+
+σ2
+
+> i
+
+1/2 denotes the Frobenius norm 14 SAF-OPD 0 50 100 150 200 250 300 
+
+> Training Step
+> 4
+> 5
+> 6
+> 7
+> 8
+> 9
+> 10
+> 11
+> Mean Stable Rank
+> 4b-grpo
+> 4b-opd
+
+(a) Stable rank 20 40 60 80 100  
+
+> Training Step
+> 0.0
+> 0.2
+> 0.4
+> 0.6
+> 0.8
+> 1.0
+> Mean Cross-Method
+> Subspace Overlap (k=1..20)
+
+(b) Output-subspace overlap 20 40 60 80 100  
+
+> Training Step
+> 0.0
+> 0.2
+> 0.4
+> 0.6
+> 0.8
+> 1.0
+> Mean  Vh Cross-Method
+> Overlap (k=1..20)
+
+(c) Input-subspace overlap 
+
+Figure 5 | Supplementary parameter-space update geometry for the GRPO-only and OPD-only checkpoints of Qwen3-4B on mathematical reasoning: (a) mean stable rank of the update matrices, (b) output (left-singular) subspace overlap, and (c) input (right-singular) subspace overlap between the two methods. and ∥∆W ∥op = σ1 the operator (spectral) norm. Columns of U (t) 
+
+> ℓ
+
+span the output (“write”) subspace and rows of (V (t) 
+
+> ℓ
+
+)⊤ span the input (“read”) subspace of the update. 
+
+Stable rank. For a single matrix, the stable rank is the energy-weighted effective dimensionality 
+
+StableRank  ∆W (t)
+
+> ℓ
+
+ = ∥∆W (t) 
+
+> ℓ
+
+∥2
+
+> F
+
+∥∆W (t) 
+
+> ℓ
+
+∥2op 
+
+=
+
+Pri=1 σ2
+
+> i
+
+σ21
+
+∈ [1 , r ], (5) which equals 1 when all update energy is concentrated in the top singular direction and equals r when energy is spread uniformly across all directions; the curves in Figure 5(a) average this quantity over all 2D weight matrices at a given step for each method. 
+
+Cross-method subspace overlap. Let U (t) 
+
+> X,k
+
+∈ Rm×k (resp. V (t) 
+
+> X,k
+
+∈ Rn×k) collect the top-k left (resp. right) singular vectors of method X ∈ { GRPO , OPD }’s update matrix for the same layer at step t, with k=20 throughout. The Grassmann-style overlap between the two methods’ output subspaces is the mean singular value of their cross-projection, 
+
+Overlap U (t) = 1
+
+k
+
+> k
+
+X
+
+> j=1
+
+sj
+
+ U (t)GRPO ,k 
+
+⊤U (t)OPD ,k 
+
+
+
+∈ [0 , 1] , (6) where sj (·) denotes the j-th singular value; Overlap U (t) ≈ 1 indicates the two methods write to nearly identical output directions, while Overlap U (t) ≈ 0 indicates (near-)orthogonal output subspaces. The input-subspace overlap Overlap V (t) is defined identically with V (t) 
+
+> X,k
+
+in place of U (t)
+
+> X,k
+
+. Both quantities are averaged over layers and over the 2D weight matrices within each layer before plotting Figure 5(b)–(c). 
+
+Weight drift. Writing θ(t) 
+
+> ℓ
+
+for the flattened parameter vector of layer ℓ at step t and θ0 
+
+> ℓ
+
+for its base-model counterpart, the absolute L2 drift reported in Figure 6 is 
+
+∥∆W (t) 
+
+> ℓ
+
+∥2 = θ(t) 
+
+> ℓ
+
+− θ0 
+
+> ℓ2
+
+, (7) and the scale-normalized relative drift reported in Figure 7 is 
+
+∥∆W (t) 
+
+> ℓ
+
+∥2
+
+∥W 0 
+
+> ℓ
+
+∥2 + ϵ = θ(t) 
+
+> ℓ
+
+− θ0 
+
+> ℓ2
+
+θ0  
+
+> ℓ2
+
++ ϵ , (8) with ϵ = 10 −8 preventing division by zero. When a layer contains multiple named parameter tensors (e.g., separate q/k/v/o_proj matrices), the layer-level value is the arithmetic mean of the metric over that layer’s parameter tensors. 
+
+Layer-wise weight drift across all four training regimes (supplementary). To further contextualize the update-matrix geometry above, Figure 6 visualizes the per-layer, per-step L2 weight drift ∥∆W (t) 
+
+> ℓ
+
+∥2 for all four training regimes compared in the main text: GRPO-only, OPD-only, fixed-coefficient GRPO+OPD, and SAF, using the same Qwen3-4B mathematical-reasoning checkpoints as Figure 4. Each surface plots drift magnitude against transformer layer index and optimization step; note that the z-axis and step-axis ranges differ across 15 SAF-OPD 0123456789 
+
+> 10
+> 11
+> 12
+> 13
+> 14
+> 15
+> 16
+> 17
+> 18
+> 19
+> 20
+> 21
+> 22
+> 23
+> 24
+> 25
+> 26
+> 27
+> 28
+> 29
+> 30
+> 31
+> 32
+> 33
+> 34
+> 35
+> Layer 50
+> 100
+> 150
+> 200
+> 250
+> 300
+> Step
+> 0.000
+> 0.005
+> 0.010
+> 0.015
+> 0.020
+> 0.025
+> 0.030
+> L2 Drift
+> 0.0150
+> 0.0175
+> 0.0200
+> 0.0225
+> 0.0250
+> 0.0275
+> 0.0300
+> 0.0325
+> l2_drift
+
+(a) GRPO-only 0123456789  
+
+> 10
+> 11
+> 12
+> 13
+> 14
+> 15
+> 16
+> 17
+> 18
+> 19
+> 20
+> 21
+> 22
+> 23
+> 24
+> 25
+> 26
+> 27
+> 28
+> 29
+> 30
+> 31
+> 32
+> 33
+> 34
+> 35
+> Layer 10
+> 20
+> 30
+> 40
+> 50
+> 60
+> 70
+> 80
+> 90
+> 100
+> Step
+> 0.00
+> 0.01
+> 0.02
+> 0.03
+> 0.04
+> 0.05
+> 0.06
+> 0.07
+> L2 Drift
+> 0.02
+> 0.03
+> 0.04
+> 0.05
+> 0.06
+> 0.07
+> l2_drift
+
+(b) OPD-only 0123456789  
+
+> 10
+> 11
+> 12
+> 13
+> 14
+> 15
+> 16
+> 17
+> 18
+> 19
+> 20
+> 21
+> 22
+> 23
+> 24
+> 25
+> 26
+> 27
+> 28
+> 29
+> 30
+> 31
+> 32
+> 33
+> 34
+> 35
+> Layer 50
+> 100
+> 150
+> 200
+> 250
+> 300
+> Step
+> 0.00
+> 0.02
+> 0.04
+> 0.06
+> 0.08
+> 0.10
+> L2 Drift
+> 0.04
+> 0.05
+> 0.06
+> 0.07
+> 0.08
+> 0.09
+> 0.10
+> l2_drift
+
+(c) Fixed GRPO+OPD 0123456789  
+
+> 10
+> 11
+> 12
+> 13
+> 14
+> 15
+> 16
+> 17
+> 18
+> 19
+> 20
+> 21
+> 22
+> 23
+> 24
+> 25
+> 26
+> 27
+> 28
+> 29
+> 30
+> 31
+> 32
+> 33
+> 34
+> 35
+> Layer 50
+> 100
+> 150
+> 200
+> 250
+> 300
+> Step
+> 0.000
+> 0.005
+> 0.010
+> 0.015
+> 0.020
+> 0.025
+> 0.030
+> 0.035
+> 0.040
+> L2 Drift
+> 0.020
+> 0.025
+> 0.030
+> 0.035
+> 0.040
+> l2_drift
+
+(d) SAF (ours) 
+
+Figure 6 | Layer-wise L2 weight drift ∥∆W (t)
+
+ℓ ∥2 over transformer layers (x-axis) and optimization steps (y-axis) for the four training regimes of Qwen3-4B on mathematical reasoning: (a) GRPO-only, (b) OPD-only, (c) fixed-coefficient GRPO+OPD, and (d) SAF. panels, since GRPO-only, fixed fusion, and SAF are shown over their full 300-step budget while OPD-only is shown over its own full 100-step training horizon. GRPO-only accumulates drift gradually and reaches its largest values only around step 300, with a magnitude (peak ≈ 0.03 ) well below the other regimes. OPD-only, in contrast, drifts much faster per step, reaching a comparable or larger magnitude (peak ≈ 0.07 ) within only 100 steps, consistent with the denser, token-level supervision it receives at every update. Fixed-coefficient GRPO+OPD compounds both effects: because it applies full-strength OPD guidance on top of the GRPO update at every step, its drift grows the fastest and reaches the largest magnitude of all four regimes (peak 
+
+≈ 0.10 ) by step 300, concentrated in the later layers. SAF, which applies the same magnitude control and temporal annealing described in Section 3, keeps the drift substantially smaller (peak ≈ 0.04 ) than fixed fusion despite training for the same number of steps, while still exceeding GRPO-only, indicating that SAF’s controllers curb, without eliminating, the excess parameter movement induced by an unregulated distillation signal. This pattern is consistent with, and provides an additional parameter-space view of, the entropy and student–teacher KL trajectories already discussed in Figure 4: the regime with the least-controlled OPD signal (fixed fusion) also drifts the most in parameter space, while SAF’s controllers rein in this drift without fully suppressing it. As with Figure 5, we report this as a supplementary, exploratory observation rather than as a mechanism SAF’s design was derived from. 
+
+Layer-wise relative weight drift across all four training regimes (supplementary). The absolute L2 drift in Figure 6 is influenced by the parameter count of each layer, which makes cross-layer comparisons within a single regime less direct. As a complementary, scale-normalized view, Figure 7 reports the relative weight drift ∥∆W (t)
+
+ℓ ∥2/(∥W 0
+
+ℓ ∥2 + ϵ) for the same four regimes and checkpoints. Normalizing by the base-parameter norm removes the confound of layer size and yields a picture consistent with, but sharper than, Figure 6: GRPO-only stays the most conservative throughout training, with its layer-averaged relative drift rising from about 2.3 × 10 −4 at step 50 to about 3.6 × 10 −4 at step 300 (a 1.6× increase). OPD-only again shows the fastest per-step growth, moving from about 2.2 × 10 −4 at step 10 to about 6.8 × 10 −4 at step 100 (a 3.2× increase in one third of the steps), with its largest relative drift concentrated in the deepest layers (e.g., layer 35). Fixed-coefficient GRPO+OPD attains both the fastest growth rate and the largest final magnitude, reaching a layer-averaged relative drift of about 1.0 × 10 −3 by step 300 (a 4.8× increase from step 10), again concentrated in the later layers. SAF closely tracks the same qualitative shape but is uniformly compressed relative to fixed fusion, reaching only about 4.6 × 10 −4 by step 300 despite a comparable 4.1× relative increase from its own step-10 starting point, confirming on a scale-normalized basis that SAF’s controllers curb the magnitude of parameter movement rather than merely its layer distribution. 
+
+C Student–Teacher KL Computation 
+
+The temporal controller uses a sampled-token estimate of the reverse KL divergence from the student policy πθ
+
+to the teacher policy πT . The estimate is computed on the same student-generated responses used for policy optimization, avoiding a full-vocabulary KL evaluation at every response position. Let si,t = ( xi, yi,<t ) denote the context at token t of response i. For the sampled token yi,t , we first compute the clipped teacher-to-student log-probability ratio 
+
+di,t = clip   log πT (yi,t | si,t ) − log πθ (yi,t | si,t ),
+
+− 20 , 20 . (9) 16 SAF-OPD 0123456789 
+
+> 10
+> 11
+> 12
+> 13
+> 14
+> 15
+> 16
+> 17
+> 18
+> 19
+> 20
+> 21
+> 22
+> 23
+> 24
+> 25
+> 26
+> 27
+> 28
+> 29
+> 30
+> 31
+> 32
+> 33
+> 34
+> 35
+> Layer 50
+> 100
+> 150
+> 200
+> 250
+> 300
+> Step
+> 0.00000
+> 0.00005
+> 0.00010
+> 0.00015
+> 0.00020
+> 0.00025
+> 0.00030
+> 0.00035
+> 0.00040
+> Relative Drift
+> 0.000200
+> 0.000225
+> 0.000250
+> 0.000275
+> 0.000300
+> 0.000325
+> 0.000350
+> 0.000375
+> 0.000400
+> relative_drift
+
+(a) GRPO-only 0123456789  
+
+> 10
+> 11
+> 12
+> 13
+> 14
+> 15
+> 16
+> 17
+> 18
+> 19
+> 20
+> 21
+> 22
+> 23
+> 24
+> 25
+> 26
+> 27
+> 28
+> 29
+> 30
+> 31
+> 32
+> 33
+> 34
+> 35
+> Layer 10
+> 20
+> 30
+> 40
+> 50
+> 60
+> 70
+> 80
+> 90
+> 100
+> Step
+> 0.0000
+> 0.0001
+> 0.0002
+> 0.0003
+> 0.0004
+> 0.0005
+> 0.0006
+> 0.0007
+> 0.0008
+> Relative Drift
+> 0.0003
+> 0.0004
+> 0.0005
+> 0.0006
+> 0.0007
+> 0.0008
+> relative_drift
+
+(b) OPD-only 0123456789  
+
+> 10
+> 11
+> 12
+> 13
+> 14
+> 15
+> 16
+> 17
+> 18
+> 19
+> 20
+> 21
+> 22
+> 23
+> 24
+> 25
+> 26
+> 27
+> 28
+> 29
+> 30
+> 31
+> 32
+> 33
+> 34
+> 35
+> Layer 50
+> 100
+> 150
+> 200
+> 250
+> 300
+> Step
+> 0.0000
+> 0.0002
+> 0.0004
+> 0.0006
+> 0.0008
+> 0.0010
+> 0.0012
+> Relative Drift
+> 0.0005
+> 0.0006
+> 0.0007
+> 0.0008
+> 0.0009
+> 0.0010
+> 0.0011
+> 0.0012
+> relative_drift
+
+(c) Fixed GRPO+OPD 0123456789  
+
+> 10
+> 11
+> 12
+> 13
+> 14
+> 15
+> 16
+> 17
+> 18
+> 19
+> 20
+> 21
+> 22
+> 23
+> 24
+> 25
+> 26
+> 27
+> 28
+> 29
+> 30
+> 31
+> 32
+> 33
+> 34
+> 35
+> Layer 50
+> 100
+> 150
+> 200
+> 250
+> 300
+> Step
+> 0.0000
+> 0.0001
+> 0.0002
+> 0.0003
+> 0.0004
+> 0.0005
+> Relative Drift
+> 0.00025
+> 0.00030
+> 0.00035
+> 0.00040
+> 0.00045
+> 0.00050
+> relative_drift
+
+(d) SAF (ours) 
+
+Figure 7 | Layer-wise relative weight drift ∥∆W (t)
+
+ℓ ∥2/(∥W 0
+
+ℓ ∥2 + ϵ) over transformer layers (x-axis) and optimization steps (y-axis) for the same four training regimes and checkpoints as Figure 6: (a) GRPO-only, (b) OPD-only, (c) fixed-coefficient GRPO+OPD, and (d) SAF. Following the low-variance k3 estimator, we then define the token-level contribution as 
+
+bDi,t = clip(exp( di,t ) − di,t − 1, −10 , 10) . (10) Without clipping, Eq. 10 reduces to the non-negative estimator r − log r − 1, where r = πT (yi,t | si,t )/π θ (yi,t |
+
+si,t ). Its expectation under yi,t ∼ πθ (· | si,t ) equals DKL (πθ (· | si,t ) ∥ πT (· | si,t )) . The clipping operations are implementation safeguards against numerical overflow and extreme finite-sample contributions. Let mi,t ∈ { 0, 1} be the response mask, which excludes prompt and padding positions. We aggregate valid token contributions using a token mean: 
+
+KL s =
+
+P
+
+i,t mi,t bDi,t 
+
+P
+
+i,t mi,t 
+
+. (11) This scalar is logged as actor/kl_loss . In our configuration, use_kl_loss=True enables its computation, whereas kl_loss_coef=0 prevents it from contributing an additional KL regularization term to the actor objective. It therefore serves only as an observable student–teacher alignment statistic. The warm-up controller records its initial value as KL 0 and applies the relative decrease (KL 0 − KL s)/KL 0 in the early-stop criterion of Section 3.3. 
+
+D token-level Raw Signal Analysis 
+
+This appendix inspects the two unprocessed training advantages over the first five consecutive training steps. We use the notation from Section 3.1: AOPD 
+
+i,t = log πT (yi,t | si,t ) − log πθ (yi,t | si,t ) denotes the token-level OPD advantage, and AGRPO 
+
+i denotes the response-level GRPO advantage shared by all tokens in response i.These quantities correspond to the implementation fields raw_opd and raw_grpo , respectively. For each training step, we select three representative responses: (a) the response with the most negative 
+
+AGRPO 
+
+i (incorrect), (b) a response with near-zero AGRPO 
+
+i (neutral/mixed), and (c) the response with the most positive AGRPO 
+
+i (correct). For each response, we report the 12 positions with the largest |AOPD 
+
+i,t |, the first 15 response tokens for local context, and summary statistics over all response tokens. In each response block, the two token-level tables place token positions along the horizontal axis, followed by a compact summary table. 
+
+D.1 Training Step 1 (a) Response 189 ( AGRPO 
+
+i = −2.4749 , incorrect, 3148 tokens) Top 12 by |AOPD 
+
+i,t | (ordered by position): 
+
+Position 189 346 540 641 847 946 994 1383 1847 3091 3092 3134 Token several 2 will term E 7 cancel } \ Now take –-←-←-AOPD 
+
+i,t -13.7876 -17.4881 -10.5098 -13.9257 -14.4314 -9.0760 -8.5954 -10.7748 -9.3498 -10.9243 -10.2098 -8.9048 
+
+17 SAF-OPD 
+
+First 15 response tokens (with context): 
+
+Position 0 1 2 3 4 5 6 7 8 9 10 11 12 13 14 Token We are given the infinite product :←-←- $$ ←- \ prod _{ n = 2
+
+AOPD  
+
+> i,t
+
++0.0000 +0.0004 -4.6245 +0.0068 +0.0007 +0.0000 +0.0005 +0.0000 +0.0000 +0.0019 +0.0000 +0.0000 +0.0000 +0.0000 +0.0000 
+
+Summary (3148 tokens): 
+
+Stat. AOPD  
+
+> i,t
+
+AGRPO 
+
+> i
+
+mean -0.2594 -2.4749 std +1.2329 0.0000 min -17.4881 -2.4749 max +5.6796 -2.4749 
+
+(b) Response 0 ( AGRPO 
+
+i = +0 .3536 , neutral, 363 tokens) Top 12 by |AOPD 
+
+i,t | (ordered by position): 
+
+Position 66 92 94 107 110 120 132 136 177 258 347 362 Token find This an exponential ** $ over real variables our Final <|im_end|> 
+
+AOPD  
+
+> i,t
+
+-8.4885 -6.3400 -6.1097 -5.9964 -8.8939 -8.1489 -6.5749 -10.1239 -7.3847 -5.4155 -9.6873 -5.2518 
+
+First 15 response tokens (with context): 
+
+Position 0 1 2 3 4 5 6 7 8 9 10 11 12 13 14 Token We are given a joint density function :←-←- $$ ←- f (x , y ,
+
+AOPD  
+
+> i,t
+
++0.0000 +0.0001 +0.0139 -0.0141 +0.1487 -1.6046 +0.0000 -2.2116 +0.0000 +0.0000 +0.0000 +0.0001 -1.1151 +0.0000 +0.0000 
+
+Summary (363 tokens): 
+
+Stat. AOPD  
+
+> i,t
+
+AGRPO 
+
+> i
+
+mean -0.5425 +0.3536 std +1.6162 0.0000 min -10.1239 +0.3536 max +1.8588 +0.3536 
+
+(c) Response 135 ( AGRPO 
+
+i = +2 .4749 , correct, 695 tokens) Top 12 by |AOPD 
+
+i,t | (ordered by position): 
+
+Position 23 89 183 219 224 247 248 259 274 327 356 636 Token ** function equal } since ** zero (g permutation Half number Final 
+
+AOPD  
+
+> i,t
+
+-7.6053 -8.7120 -10.3569 -11.7299 -6.7478 -8.6477 -11.7095 -8.4914 -8.5523 -7.0024 -14.7974 -9.8838 
+
+First 15 response tokens (with context): 
+
+Position 0 1 2 3 4 5 6 7 8 9 10 11 12 13 14 Token We are asked to determine whether the following statement is ** true for all $
+
+AOPD  
+
+> i,t
+
++0.0001 +0.0002 +0.4287 +0.0065 +0.0016 +0.0023 +0.0028 +0.3882 +0.0249 +0.0000 -1.9667 +0.0000 +0.0067 +0.0000 -0.6986 
+
+Summary (695 tokens): 
+
+Stat. AOPD  
+
+> i,t
+
+AGRPO 
+
+> i
+
+mean -0.3897 +2.4749 std +1.5458 0.0000 min -14.7974 +2.4749 max +1.9325 +2.4749 
+
+D.2 Training Step 2 (a) Response 8 ( AGRPO 
+
+i = −2.4749 , incorrect, 733 tokens) 
+
+18 SAF-OPD 
+
+Top 12 by |AOPD 
+
+i,t | (ordered by position): 
+
+Position 68 118 137 160 249 287 289 498 554 571 719 721 Token term ( }←- \ 1 + Therefore Then –-←-←- Final 
+
+AOPD  
+
+> i,t
+
+-7.2954 -9.7388 -7.1736 -11.2268 -17.9447 -16.4380 -10.4996 -15.2381 -8.4721 -8.6563 -9.9507 -10.2704 
+
+First 15 response tokens (with context): 
+
+Position 0 1 2 3 4 5 6 7 8 9 10 11 12 13 14 Token We are asked to evaluate the limit :←-←- $$ ←- \ lim _{ n \
+
+AOPD  
+
+> i,t
+
++0.0000 +0.0008 +0.1321 +0.0000 +0.0027 +0.0053 +0.0085 +0.0053 +0.0000 +0.0000 +0.0000 +0.0000 +0.0000 +0.0000 -3.3742 
+
+Summary (733 tokens): 
+
+Stat. AOPD  
+
+> i,t
+
+AGRPO 
+
+> i
+
+mean -0.4116 -2.4749 std +1.7312 0.0000 min -17.9447 -2.4749 max +2.5161 -2.4749 
+
+(b) Response 4 ( AGRPO 
+
+i = +0 .3536 , neutral, 602 tokens) Top 12 by |AOPD 
+
+i,t | (ordered by position): 
+
+Position 318 334 359 379 432 447 477 497 571 574 587 590 Token $←-←- 1 looks + approx Thus Therefore $←-←- Therefore final –- Final 
+
+AOPD  
+
+> i,t
+
+-10.7052 -6.9898 -7.0174 -9.4997 -7.7371 -12.4224 -11.3634 -7.8916 -10.2927 -9.2755 -7.8828 -8.2090 
+
+First 15 response tokens (with context): 
+
+Position 0 1 2 3 4 5 6 7 8 9 10 11 12 13 14 Token We are asked to evaluate the limit :←-←- $$ ←- \ lim _{ n \
+
+AOPD  
+
+> i,t
+
++0.0000 +0.0008 +0.1333 +0.0000 +0.0027 +0.0052 +0.0150 +0.0053 +0.0000 +0.0000 +0.0000 +0.0000 +0.0000 +0.0000 -4.1184 
+
+Summary (602 tokens): 
+
+Stat. AOPD  
+
+> i,t
+
+AGRPO 
+
+> i
+
+mean -0.4214 +0.3536 std +1.6275 0.0000 min -12.4224 +0.3536 max +2.0158 +0.3536 
+
+(c) Response 37 ( AGRPO 
+
+i = +2 .4749 , correct, 1383 tokens) Top 12 by |AOPD 
+
+i,t | (ordered by position): 
+
+Position 148 154 205 329 336 528 530 650 713 749 814 991 Token space can F measurable also can associated However This power can Since 
+
+AOPD  
+
+> i,t
+
+-8.0621 -7.8963 -10.5909 -20.3585 -13.4059 -12.1148 -8.4644 -9.0888 -7.9808 -10.7333 -11.8686 -12.1417 
+
+First 15 response tokens (with context): 
+
+Position 0 1 2 3 4 5 6 7 8 9 10 11 12 13 14 Token We are asked to find the ** card inality ** of the set of ** 
+
+AOPD  
+
+> i,t
+
++0.0015 +0.0082 +0.0010 +0.0000 +0.0779 +0.0001 +0.0004 -0.0000 +0.0000 +0.0007 -0.0001 +0.0000 +0.0019 +0.0000 -0.0332 
+
+Summary (1383 tokens): 
+
+Stat. AOPD  
+
+> i,t
+
+AGRPO 
+
+> i
+
+mean -0.4614 +2.4749 std +1.5323 0.0000 min -20.3585 +2.4749 max +2.5852 +2.4749 
+
+19 SAF-OPD 
+
+D.3 Training Step 3 (a) Response 152 ( AGRPO 
+
+i = −2.4749 , incorrect, 1033 tokens) Top 12 by |AOPD 
+
+i,t | (ordered by position): 
+
+Position 42 231 318 416 450 457 546 559 881 940 946 985 Token ( + \ very approx So left ←- Take < So something 
+
+AOPD  
+
+> i,t
+
+-12.3997 -6.8740 -7.9706 -8.4695 -10.7473 -8.2718 -7.1454 -7.7500 -7.3970 -7.7376 -12.9474 -9.0241 
+
+First 15 response tokens (with context):                                    
+
+> Position 012345678910 11 12 13 14 Token We are given arecursive sequence defined by :←-←-$$ ←-b_1=
+> AOPD
+> i,t +0.0000 +0.0002 +0.0028 +0.0797 +0.2692 +0.0007 -2.8324 +0.2013 +0.0022 +0.0273 +0.0000 +0.0000 +0.0000 +0.0000 +0.0000
+
+Summary (1033 tokens): 
+
+Stat. AOPD  
+
+> i,t
+
+AGRPO 
+
+> i
+
+mean -0.2942 -2.4749 std +1.2957 0.0000 min -12.9474 -2.4749 max +2.9957 -2.4749 
+
+(b) Response 2 ( AGRPO 
+
+i = −0.3536 , neutral, 552 tokens) Top 12 by |AOPD 
+
+i,t | (ordered by position): 
+
+Position 6 54 87 206 227 261 280 311 362 422 519 551 Token ( to important is subset is subset The - ring Conclusion <|im_end|> 
+
+AOPD  
+
+> i,t
+
+-7.2268 -7.1247 -6.3155 -9.5342 -7.9704 -7.0191 -16.1068 -9.0377 -8.4210 -6.8585 -9.7430 -9.3995 
+
+First 15 response tokens (with context): 
+
+Position 0 1 2 3 4 5 6 7 8 9 10 11 12 13 14 Token We are given a ** local ( not No ether ian ) domain ** $
+
+AOPD  
+
+> i,t
+
++0.0001 +0.0000 +0.0256 +0.1121 +0.3423 +0.0000 -7.2268 +0.0141 -4.0181 +0.0000 +0.0000 -1.3005 +0.0001 -0.0074 -0.0000 
+
+Summary (552 tokens): 
+
+Stat. AOPD  
+
+> i,t
+
+AGRPO 
+
+> i
+
+mean -0.4796 -0.3536 std +1.6198 0.0000 min -16.1068 -0.3536 max +2.2114 -0.3536 
+
+(c) Response 16 ( AGRPO 
+
+i = +2 .4749 , correct, 921 tokens) Top 12 by |AOPD 
+
+i,t | (ordered by position): 
+
+Position 118 155 173 259 283 577 594 708 712 765 874 901 Token such solutions pairs unity only Now the the :←-←- This So –-←-←-AOPD  
+
+> i,t
+
+-6.7144 -6.9551 -15.1645 -7.5274 -6.8762 -6.7637 -5.8708 -7.6130 -11.5820 -7.2075 -8.5703 -8.0519 
+
+First 15 response tokens (with context): 
+
+Position 0 1 2 3 4 5 6 7 8 9 10 11 12 13 14 Token We are given a ** con gr u ence equation ** :←-←- $$ ←- x
+
+AOPD  
+
+> i,t
+
++0.0000 -0.0002 -3.5894 +0.2090 -1.3109 -0.0987 +0.0000 +0.0000 +0.0000 -0.0027 -0.0141 -0.0475 -0.0001 +0.0000 +0.0000 
+
+20 SAF-OPD 
+
+Summary (921 tokens): 
+
+Stat. AOPD  
+
+> i,t
+
+AGRPO 
+
+> i
+
+mean -0.3583 +2.4749 std +1.3354 0.0000 min -15.1645 +2.4749 max +3.4178 +2.4749 
+
+D.4 Training Step 4 (a) Response 34 ( AGRPO 
+
+i = −2.4749 , incorrect, 1397 tokens) Top 12 by |AOPD 
+
+i,t | (ordered by position): 
+
+Position 26 112 129 212 217 319 580 1041 1283 1311 1329 1396 Token $ b for :←-←- + expression = }←- / / Thus <|im_end|> 
+
+AOPD  
+
+> i,t
+
+-9.9835 -12.5009 -15.3752 -12.1700 -12.9890 -11.4401 -11.1801 -13.6017 -9.9589 -12.8283 -11.2880 -10.1182 
+
+First 15 response tokens (with context): 
+
+Position 0 1 2 3 4 5 6 7 8 9 10 11 12 13 14 Token We are given a sequence $( a _n ) _{ n \ ge 1
+
+AOPD  
+
+> i,t
+
++0.0000 +0.0001 +0.0000 +0.0983 +0.0002 +0.0564 +0.0000 +0.0000 +0.0052 +0.0000 +0.0000 +0.0005 +0.0000 -0.1782 +0.0000 
+
+Summary (1397 tokens): 
+
+Stat. AOPD  
+
+> i,t
+
+AGRPO 
+
+> i
+
+mean -0.3822 -2.4749 std +1.5979 0.0000 min -15.3752 -2.4749 max +4.9387 -2.4749 
+
+(b) Response 21 ( AGRPO 
+
+i = +0 .3536 , neutral, 1023 tokens) Top 12 by |AOPD 
+
+i,t | (ordered by position): 
+
+Position 232 345 391 401 441 513 547 589 889 917 947 951 Token f Ideal ann dimension nil Coordinate f elements So These Step Conclusion 
+
+AOPD  
+
+> i,t
+
+-8.2226 -11.8967 -9.0663 -8.3018 -8.8799 -8.2837 -10.0756 -9.4204 -9.2330 -11.6286 -8.6771 -12.8161 
+
+First 15 response tokens (with context): 
+
+Position 0 1 2 3 4 5 6 7 8 9 10 11 12 13 14 Token We are asked to determine the ** dimension ** of the quotient ring ←- $$ 
+
+AOPD  
+
+> i,t
+
++0.0002 +0.0001 +0.6647 +0.0000 +0.0742 +0.0000 +0.1900 +0.0000 +0.3095 +0.0122 +0.0000 +0.0892 +0.0000 +0.5187 -0.0000 
+
+Summary (1023 tokens): 
+
+Stat. AOPD  
+
+> i,t
+
+AGRPO 
+
+> i
+
+mean -0.5035 +0.3536 std +1.5621 0.0000 min -12.8161 +0.3536 max +2.1031 +0.3536 
+
+(c) Response 52 ( AGRPO 
+
+i = +2 .4749 , correct, 2310 tokens) Top 12 by |AOPD 
+
+i,t | (ordered by position): 
+
+Position 64 365 449 859 863 935 1095 1466 1707 1771 1819 2214 Token .←- T T \ - tr first ˆn maximum –-←-←- triangle Final 
+
+AOPD  
+
+> i,t
+
+-14.9193 -8.8550 -10.1490 -14.4367 -10.2472 -10.0332 -8.7231 -10.6075 -9.5449 -8.4645 -10.9428 -10.9494 
+
+First 15 response tokens (with context): 
+
+Position 0 1 2 3 4 5 6 7 8 9 10 11 12 13 14 Token We are given a linear operator $ T : \ ell ˆ 2 \ rightarrow 
+
+AOPD  
+
+> i,t
+
++0.0002 +0.0000 +0.0229 +0.0025 +0.0516 +0.0000 +0.0006 +0.0000 +0.1267 +0.0000 +0.0000 +0.0000 +0.0000 +0.0007 -3.0091 
+
+21 SAF-OPD 
+
+Summary (2310 tokens): 
+
+Stat. AOPD  
+
+> i,t
+
+AGRPO 
+
+> i
+
+mean -0.3849 +2.4749 std +1.3496 0.0000 min -14.9193 +2.4749 max +4.1275 +2.4749 
+
+D.5 Training Step 5 (a) Response 93 ( AGRPO 
+
+i = −2.4749 , incorrect, 1616 tokens) Top 12 by |AOPD 
+
+i,t | (ordered by position): 
+
+Position 111 118 284 287 293 319 461 522 578 587 1342 1448 Token ( a stretch plane each .←-←- no f This function If conclusion 
+
+AOPD  
+
+> i,t
+
+-10.7766 -10.9075 -10.9272 -8.3615 -9.5392 -8.6375 -8.6105 -8.3328 -7.7441 -8.6470 -10.8534 -8.9139 
+
+First 15 response tokens (with context): 
+
+Position 0 1 2 3 4 5 6 7 8 9 10 11 12 13 14 Token We are given :←-←- > If $ f (x , y ) = 0
+
+AOPD  
+
+> i,t
+
++0.0000 +0.0000 +0.0658 -4.9537 +0.0067 +0.1240 -0.0001 +0.0000 +0.0000 +0.0000 +0.0000 +0.0000 +0.0000 +0.0000 +0.0000 
+
+Summary (1616 tokens): 
+
+Stat. AOPD  
+
+> i,t
+
+AGRPO 
+
+> i
+
+mean -0.4781 -2.4749 std +1.4702 0.0000 min -10.9272 -2.4749 max +5.1961 -2.4749 
+
+(b) Response 1 ( AGRPO 
+
+i = +0 .3536 , neutral, 546 tokens) Top 12 by |AOPD 
+
+i,t | (ordered by position): 
+
+Position 21 115 117 153 177 220 244 279 395 444 458 489 Token asked Consider Equation A So \ that that $ $ Conclusion :←-←-AOPD  
+
+> i,t
+
+-6.6305 -8.5071 -5.7975 -10.1694 -5.5674 -4.6801 -6.9888 -5.6696 -4.6985 -7.5715 -6.0161 -7.9329 
+
+First 15 response tokens (with context):                                  
+
+> Position 012345678910 11 12 13 14 Token We are given the matrix equation :←-←-$$ ←-Aˆ2+A=
+> AOPD
+> i,t +0.0000 +0.0001 -0.2871 -0.1381 +0.2385 +0.0001 -0.0001 +0.0000 +0.0000 +0.0000 +0.0000 +0.0000 +0.0000 +0.0000 +0.0000
+
+Summary (546 tokens): 
+
+Stat. AOPD  
+
+> i,t
+
+AGRPO 
+
+> i
+
+mean -0.2358 +0.3536 std +1.1496 0.0000 min -10.1694 +0.3536 max +2.7361 +0.3536 
+
+(c) Response 55 ( AGRPO 
+
+i = +2 .4749 , correct, 2845 tokens) Top 12 by |AOPD 
+
+i,t | (ordered by position): 
+
+Position 590 826 969 1012 1452 1625 1709 2074 2440 2738 2837 2844 Token y 0 = Int which ] = $ - Each The <|im_end|> 
+
+AOPD  
+
+> i,t
+
+-7.7754 -8.1879 -8.0133 -14.2993 -7.8828 -7.1504 -7.6268 -9.1528 -6.9237 -9.4345 -10.6689 -8.4856 
+
+22 SAF-OPD 
+
+First 15 response tokens (with context):                                    
+
+> Position 012345678910 11 12 13 14 Token We are asked to evaluate the double integral :←-←-$$ ←-\iint _E
+> AOPD
+> i,t +0.0000 +0.0001 +0.3269 +0.0000 +0.0115 +0.0001 +0.1603 +0.0000 -0.7045 -0.0000 +0.0000 +0.0004 +0.0000 +0.0000 +0.0022
+
+Summary (2845 tokens):           
+
+> Stat. AOPD
+> i,t AGRPO
+> i
+> mean -0.2342 +2.4749 std +1.0454 0.0000 min -14.2993 +2.4749 max +3.8790 +2.4749
+
+Cross-response observation. Across the 15 representative responses above (three responses from each of five consecutive steps), every one of the 180 reported top-magnitude token positions satisfies |AOPD  
+
+> i,t
+
+| > |AGRPO  
+
+> i
+
+|.For example, the reported OPD extremes reach 20 .3585 , whereas the largest absolute GRPO advantage among these responses is 2.4749 . Thus, whenever a salient OPD token is active in the fixed 1:1 fusion, its contribution can exceed the verifier-derived response-level contribution by a wide margin and locally dominate the fused update. This selected-token analysis establishes the existence and persistence of the magnitude mismatch 
+
+across response types and consecutive steps; it does not claim that most tokens in the full batch are large, since Figure 3 conversely shows that most raw OPD values are concentrated near zero. Together, the near-zero mass and the few dominant active tokens motivate sparsifying first and then bounding the retained values. 23
