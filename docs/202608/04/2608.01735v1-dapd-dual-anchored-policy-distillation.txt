@@ -1,0 +1,959 @@
+Title: DAPD: Dual-Anchored Policy Distillation
+
+URL Source: https://arxiv.org/pdf/2608.01735v1
+
+Published Time: Tue, 04 Aug 2026 01:51:56 GMT
+
+Number of Pages: 15
+
+Markdown Content:
+# DAPD: Dual-Anchored Policy Distillation 
+
+## Jianyu Wu 1,2 , Yizhou Wang 2, Encheng Su 2,3 , Chen Tang 2, Shixiang Tang 2,* 
+
+> 1
+
+Shanghai Jiao Tong University 2Shanghai Artificial Intelligence Laboratory 
+
+> 3
+
+The University of Science and Technology of China wujianyu@sjtu.edu.cn *Corresponding author: tangshixiang@pjlab.org.cn 
+
+Abstract 
+
+On-policy (self) distillation ( OPSD ) is increasingly adopted for language-model post-training. It strengthens the teacher with privileged information but can induce a privilege illu-sion : the student learns privilege-dependent behavior it cannot reproduce from its inference-time context, yet behaves as if the training-time privileged information remained available, ultimately degrading performance. In this paper, we identify information asymmetry between the privileged teacher and the student at inference as the root cause of this failure in OPSD .To resolve this asymmetry, we propose Dual-Anchored Policy 
+
+Distillation ( DAPD ), a unified framework with two levels of anchoring. Dual-Path Anchoring (DPA) introduces a self-conditioned bridge and aligns reference and rollout behavior along two matched-information paths, preventing privilege-dependent behavior from being transferred to the inference-time student. Dual-Source Anchoring (DSA) applies these paths in both reference-to-rollout and rollout-to-reference di-rections, reducing reliance on privileged reference guidance while preserving correctness supervision. Extensive experi-ments show that DAPD significantly alleviates privilege illu-sion, outperforming OPSD on Qwen3-4B by +2.00 points on average across tasks. Notably, its gains persist across scales, reaching +2.69 at 4B and +2.78 at 32B. Code is available at https://github.com/uanu2002/DAPD. 
+
+## 1 Introduction 
+
+Post-training, including supervised fine-tuning (SFT), rein-forcement learning (RL), and distillation, is central to turning pretrained language models into reasoning models (Guha et al. 2025; DeepSeek-AI 2025). On-policy (self) distilla-tion ( OPD /OPSD ) is increasingly prominent in post-training (Agarwal et al. 2024; Thinking Machines Lab 2025; Zhao et al. 2026a). Compared with SFT and RL, OPD trains on states visited by the current policy 1 and provides dense token-level teacher supervision rather than relying on fixed demon-strations or sparse outcome rewards. In practice, it samples rollouts from the current policy and distills a teacher distribu-tion at each sampled prefix. To strengthen this teacher, OPD conditions it on privileged information such as a reference completion or tool output (Zhao et al. 2026a; Penaloza et al. 2026; Yu et al. 2026). However, the student cannot access this 
+
+> 1
+
+In this paper, policy refers to the model itself, whereas distri-bution refers to its output distribution conditioned on a context. AIME24 AIME25 HMMT25 LCB v5 BFCL v3 IFBench 
+
+> 30
+> 45
+> 60
+> 75
+> Performance
+> +0.55
+> +4.44
+> +3.06
+> +1.05
+> +0.59
+> +2.33
+
+(a) Across tasks       
+
+> OPSD DAPD
+> 1.7B 4B 8B 14B 32B
+> Model scale
+> 0
+> 2
+> 4
+> 6
+> 8
+> Gain over Base (Avg@12)
+> +7.13
+> +4.08
+> +2.41 +2.13
+> +3.06
+
+(b) Across model scales   
+
+> Base OPSD DAPD
+
+Figure 1: DAPD consistently improves over OPSD across (a) six tasks on Qwen3-4B and (b) five Qwen3 model scales evaluated by Avg@12 on AIME24, AIME25, and HMMT25. information at inference. The information mismatch induces the known privilege illusion (Zhao et al. 2026a; Shen et al. 2026; Yu et al. 2026): the student make unsupported claims or continue a derivation as though an unseen reference were available, ultimately degrading task performance. Existing work on addressing privilege illusion can be cate-gorized into two groups: (1) direct use of privileged informa-tion , which conditions the teacher on privileged information and distills its full supervision (Zhao et al. 2026a; Penaloza et al. 2026), and (2) selective transfer from privileged super-vision , which filters or reweights the teacher signal to sup-press privilege-dependent supervision (Nguyen et al. 2026; Zheng et al. 2026; Yu et al. 2026; Tu et al. 2026; Shen et al. 2026). However, these methods fail to reliably separate reproducible guidance from privilege-dependent behavior, leading to limited mitigation of privilege illusion. We sug-gest this limitation is structural: these methods modify the arXiv:2608.01735v1 [cs.AI] 3 Aug 2026 privileged teacher signal instead of matching the informa-tion available to the teacher and the student, so a privileged teacher still supervises a student that must predict without it. Moreover, these methods use the reference as the only guidance source, neglecting meaningful reasoning signals contained in on-policy rollouts when the student improves. To validate this hypothesis, we keep the privileged teacher unchanged and replace the student distribution without privi-leged information with a self-conditioned distribution, which conditions the student on the full completion being predicted. By matching the information available to both the teacher and student distributions, this intervention reduces wrong claims, i.e., unsupported answer assertions, and improves reasoning performance (Figure 2). These results indicate that the original OPSD objective distills reproducible guidance and privilege-dependent behavior together into the student distribution without privileged information. We refer to this mixed update as Entangled Distillation . This entanglement explains why neither direct use nor selective transfer resolves this problem. We therefore identify information asymmetry ,the mismatch between a teacher with privileged information and a student without it, as the root cause of privilege illusion in OPSD . Beyond this information mismatch, the guidance source also matters because the reference and rollout com-pletions provide complementary guidance: references are re-liable but may lie outside the current policy, whereas rollouts are student-reachable but may be incorrect. Together, these observations yield two requirements for solving the privilege illusion problem: (1) introduce intermediate supervision tar-gets as anchors to align reference and rollout behavior under matched information availability, and (2) balance reliable reference guidance with student-reachable rollout guidance. Based on this diagnosis, we propose Dual-Anchored 
+
+Policy Distillation ( DAPD ), a unified framework for address-ing privilege illusion at its information source, consisting of Dual-Path Anchoring (DPA) and Dual-Source Anchor-ing (DSA). In DAPD, DPA introduces a self-conditioned distribution as a trainable bridge and constructs two com-plementary alignment paths: an unconditioned path , which combines Entangled Distillation with an Inference Anchor to align reference and rollout without privileged information, and a privileged path , which uses a Privileged Anchor to align them when both are conditioned on privileged information. In this way, DPA addresses the information-matching re-quirement by retaining the original OPSD supervision while adding anchors that align behavior under matched informa-tion availability. DSA then applies the same paths in both directions: using the reference to guide the rollout and us-ing the rollout to guide the reference. This lets reference completions provide reliable correctness-oriented guidance while rollouts provide student-reachable on-policy guidance. This addresses the source-complementarity requirement by balancing reference-guided and rollout-guided supervision rather than relying on a single guidance source. Experiments on six benchmarks spanning reason-ing (Mathematical Association of America 2026; Harvard-MIT Mathematics Tournament 2025), coding (Jain et al. 2025; Patil et al. 2025), and instruction following (Pyatkin et al. 2025) demonstrate that, by significantly alleviating priv-0        
+
+> 10
+> 20
+> 30
+> 40
+> Wrong claims
+> -45%
+> (a) Privilege-illusion dynamics
+> OPSD Privileged Anchor DAPD
+> 050 100 150 200 250 300
+> Training step
+> 52.5
+> 55.0
+> 57.5
+> 60.0
+> 62.5
+> Avg@12
+> +6.22
+> (b) Performance dynamics
+
+Figure 2: Training dynamics for OPSD , Privileged Anchor, and DAPD , averaged across five scales: (a) wrong claims and (b) Avg@12 over AIME24, AIME25, and HMMT25. ilege illusion, DAPD improves over OPSD by +2.00 points on average on Qwen3-4B. Notably, while the gains from OPSD 
+
+largely disappear as model scale increases, DAPD maintains stable improvements over OPSD across Qwen3-1.7B–32B, with gains of +2.69 points at 4B and +2.78 points at 32B. Controlled ablations further verify the information asymme-try mechanism and ablate the path and source effects. Our contributions are threefold: 
+
+• We identify information asymmetry between a privileged teacher and the student at inference as the root cause of privilege illusion in OPSD . This exposes both the information mismatch and the limitation of using only reference-guided supervision. 
+
+• We introduce DAPD, a unified framework that directly ad-dresses information asymmetry by augmenting the origi-nal OPSD objective with anchoring under matched infor-mation availability. 
+
+• We propose two complementary modules: DPA aligns reference and rollout behavior both without and with priv-ileged information, while DSA balances reliable reference guidance with student-reachable rollout guidance. Abla-tions demonstrate their complementary benefits, and scale experiments show consistent gains over OPSD .
+
+## 2 Background and Analysis 
+
+2.1 Privilege Illusion in OPSD 
+
+OPSD preliminaries. Let D be the training distribution over prompt–reference pairs (x, y ∗), where x is the input prompt and y∗ is the ground-truth reference. Let pθ denote the current student policy, and let t index an autoregressive to-ken step, with y<t the prefix before predicting token t. Given 
+
+(x, y ∗) ∼ D , the student samples a rollout y ∼ pθ (· | x).
+
+OPSD (Zhao et al. 2026a) then evaluates the same policy at each prefix y<t under two information conditions: (1) 
+
+None distribution pNone ,θ,t = pθ (· | x, y <t ), which predicts without privileged information, and (2) Cross distribution 
+
+pCross ,θ,t = pθ (· | x, y <t , y ∗), which predicts while condi-tioning on the reference y∗. OPSD uses Cross as the detached teacher to supervise None as the trainable student: 
+
+LOPSD = E(x,y ∗)∼D  
+
+> y∼pθ(·| x)
+
+ 1
+
+|y|
+
+> |y|
+
+X
+
+> t=1
+
+D(sg[ pCross ] ∥ pNone )
+
+ .
+
+(1) Here |y| denotes the rollout length, D denotes a divergence between token distributions, sg[ ·] denotes stop-gradient. θ, t 
+
+are omitted from pCross and pNone when clear from context. This sampling strategy of OPSD keeps the supervised pre-fixes on-policy, while the reference makes the same-model teacher more informative. 
+
+Privilege illusion. In OPSD , the teacher receives privi-leged information during training, whereas the student must predict without it at inference, potentially inducing privilege illusion (Zhao et al. 2026a; Shen et al. 2026): the student behaves as though unavailable information were present. 
+
+Behavioral Probe. To quantify whether the student acts on unavailable information, we define wrong claims as cases where it asserts an unsupported answer and constructs a derivation as if the answer were known. Using this probe, Figure 2 tracks both wrong claims and reasoning Avg@12 at different training steps under the same OPSD setup. Across five Qwen3 scales, wrong claims under OPSD rise from 13.0 to 37.0 per 10,000 generations (Figure 2(a)), while mean Avg@12 falls from 59.56 to 53.24 (Figure 2(b)). This coupled change illustrates that privilege illusion emerges as OPSD 
+
+training proceeds and hurts inference-time performance. 
+
+2.2 Information Asymmetry as the Cause 
+
+We hypothesize that the behavior observed in Figure 2 is caused by the information asymmetry in the OPSD objec-tive: the teacher has access to privileged information that the student lacks. This asymmetry makes the teacher differ from the student in two ways. First, some differences re-flect reference guidance that the student can recover from its prompt, and thus provide useful supervision. Second, other differences rely on information available only through y∗
+
+and cannot be reproduced by the student at inference. The original OPSD objective therefore mixes useful supervision with non-reproducible teacher changes, encouraging confi-dent predictions without the information that supports them, and we define this mixed update as Entangled Distillation .To validate this diagnosis, we keep the teacher side un-changed and replace the student’s None distribution in the 
+
+OPSD objective with a self-conditioned distribution, denoted 
+
+Self , with pSelf ,θ,t = pθ (· | x, y <t , y ), which conditions the student on the full completion being predicted. Since Cross 
+
+and Self both receive a full completion, this replacement re-moves the information asymmetry between the teacher and student distributions. We introduce this matched-information objective as the Privileged Anchor and formalize it in Sec-tion 3. As shown by the Privileged Anchor curve in Fig-ure 2, compared with OPSD , this intervention significantly reduces late-stage wrong claims by 45%, while improving mean Avg@12 by +6.22 points. These results demonstrate that matching the information available to Cross and Self 
+
+reduces privilege illusion and preserves performance while retaining the same privileged-teacher construction. There-fore, we identify information asymmetry, rather than teacher quality alone, as the source of the privilege illusion. 
+
+2.3 Self Distribution as a Bridging Anchor 
+
+The Self distribution introduced by the Privileged Anchor in-tervention acts as a useful intermediate distribution for reduc-ing information asymmetry. To generalize this idea beyond the single rollout diagnosis above, we denote s ∈ { y, y ∗}
+
+as either the rollout or reference completion and ¯s as the other completion. At token t, the following three distribu-tions share the autoregressive prefix s<t and differ only in the privileged information available to them: 
+
+• None distribution (ps 
+
+> None
+
+= pθ (· | x, s <t )) receives no privileged information and matches the information avail-able to the student at inference. 
+
+• Cross distribution (ps 
+
+> Cross
+
+= pθ (· | x, s <t , ¯s)) receives the other completion ¯s and therefore receives privileged information from it. 
+
+• Self distribution (ps 
+
+> Self
+
+= pθ (· | x, s <t , s )) receives completion s itself and therefore receives privileged in-formation from the completion it predicts. Compared with Cross , Self is trainable because it shares the same policy parameters as None . Compared with None ,
+
+Self is information-matched with Cross because it conditions on the full completion being predicted. Self therefore fills the missing position between the trainable student without priv-ileged information and the detached teacher with privileged information. Updates through Self affect the same policy that produces None at inference, while supervision involving Self 
+
+can be formed under matched information availability. We therefore use Self to construct bridging anchors that align ref-erence and rollout behavior without directly forcing a teacher with privileged information to supervise a student without it. 
+
+## 3 Dual-Anchored Policy Distillation 
+
+To handle the privilege illusion in OPSD , we propose Dual-
+
+Anchored Policy Distillation ( DAPD ) (see Figure 3), a framework for correcting its underlying information asym-metry by combining two components: Dual-Path Anchoring 
+
+(DPA), which matches information availability during distil-lation, and Dual-Source Anchoring (DSA), which balances reference-guided and rollout-guided supervision. Section 3.1 defines three directed objectives over None , Cross , and Self 
+
+distributions. Section 3.2 composes these objectives into un-conditioned and privileged alignment paths. Section 3.3 ap-plies the paths in both completion directions to combine the two guidance sources. 
+
+3.1 Distillation Beyond OPSD 
+
+Based on the information-asymmetry analysis above, DAPD uses Self to construct anchors that can form distillation paths Reference TO Rollout 
+
+Rollout TO Reference  
+
+> Target Policy
+
+Teacher Policy 𝒚 ∗
+
+Student Policy 𝒚 
+
+# Dual -Source Anchoring Dual -Path Anchoring                    
+
+> OPSD
+> Unconditioned Path
+> Privileged Path
+> 𝑦 ∼𝑝 !"#$
+> %=𝑝 &(⋅|𝑥 )𝑦 /𝑦 ∗∼𝑝 ()"**
+> %/𝑝 +$,-
+> %∗
+> =𝑝 &(⋅|𝑥 ,𝑦 ∗)𝑦 ∗∼𝑝 !"#$
+> %∗
+> =𝑝 &(⋅|𝑥 )
+
+𝓛 𝒖𝒏𝒄𝒐𝒏𝒅 
+
+> 𝒚 →𝒚 ∗
+
+= 𝓛 𝒆𝒏𝒕  
+
+> 𝒚
+
++ 𝓛 𝒊𝒏𝒇𝒆𝒓 
+
+> 𝒚 ∗
+
+𝓛 𝒆𝒏𝒕  
+
+> 𝒚
+
+𝓛 𝒊𝒏𝒇𝒆𝒓 
+
+> 𝒚 ∗
+
+𝓛 𝒑𝒓𝒊𝒗               
+
+> 𝒚
+> 𝑦 ∼𝑝 +$,-
+> %=𝑝 &(⋅|𝑥 ,𝑦 )𝑦 ∼𝑝 ()"**
+> %=𝑝 &(⋅|𝑥 ,𝑦 ∗)
+> Information
+> asymmetry 𝑷 𝒔𝒆𝒍𝒇
+> 𝒚 ∗
+> 𝒚
+
+Figure 3: Overview of DAPD. Left: Dual-Source Anchoring uses both reference-to-rollout and rollout-to-reference guidance to balance correctness and student reachability. Right: Dual-Path Anchoring details the rollout-to-reference guidance direction by introducing Self as a trainable bridge. The unconditioned path pairs Entangled Distillation with the Inference Anchor to align the two None distributions through Self , while the Privileged Anchor aligns Self and Cross when privileged information is available. The opposite source direction applies the same construction with y and y∗ exchanged. under matched information conditions. To build these paths, DAPD uses three directed objectives over None , Cross , and 
+
+Self for each completion source s. Entangled Distillation 
+
+(Ls
+
+> ent
+
+) is the original None -to-Cross OPSD term and keeps the privileged guidance transfer. Inference Anchor (Ls
+
+> infer
+
+)trains Self toward None , providing the anchor needed to align behavior without privileged information. Privileged Anchor 
+
+(Ls
+
+> priv
+
+) trains Self toward Cross , directly aligning behavior when both distributions receive privileged information: 
+
+Ls 
+
+> ent
+
+= E[D(sg[ ps
+
+> Cross
+
+] ∥ ps
+
+> None
+
+)] , (2) 
+
+Ls 
+
+> infer
+
+= E[D(sg[ ps
+
+> None
+
+] ∥ ps 
+
+> Self
+
+)] , (3) 
+
+Ls 
+
+> priv
+
+= E[D(sg[ ps
+
+> Cross
+
+] ∥ ps 
+
+> Self
+
+)] . (4) In all three objectives, the detached first argument is the teacher distribution and the second argument is the train-able student distribution. Each expectation averages over 
+
+(x, y ∗) ∼ D , an on-policy rollout y ∼ pθ (· | x), and to-ken positions in s. We keep the divergence D generic and specify its concrete implementation in Section 4. 
+
+3.2 Dual-Path Anchoring 
+
+The three directed objectives above define how one distri-bution supervises another. However, addressing information asymmetry requires these objectives to work together so that reference and rollout behavior are aligned under matched in-formation conditions. For an ordered completion direction 
+
+s → ¯s, Dual-Path Anchoring (DPA) therefore composes them into two complementary paths: an unconditioned path ,where neither side receives privileged information, and a 
+
+privileged path , where both sides receive it. 
+
+Unconditioned path. The unconditioned path targets the inference-relevant distributions (see Figure 3, top-right part). Since neither distribution should rely on privileged informa-tion, the desired alignment should be built between the two 
+
+None distributions. DPA reaches this alignment by combin-ing the original Entangled Distillation on the completion s
+
+with the Inference Anchor on the completion ¯s:
+
+Ls→¯s 
+
+> uncond
+
+= L¯s 
+
+> infer
+
++ Ls
+
+> ent
+
+. (5) For the Rollout-to-Reference direction, this path becomes 
+
+Ly→y∗ 
+
+> uncond
+
+= Ly∗
+
+> infer
+
++Ly
+
+> ent
+
+, where the Ly 
+
+> ent
+
+is the original OPSD loss. The entangled term moves py 
+
+> None
+
+toward py
+
+> Cross
+
+, while the Ly∗ 
+
+> infer
+
+moves py∗ 
+
+> Self
+
+toward py∗
+
+> None
+
+. Because py∗ 
+
+> Self
+
+and py
+
+> Cross
+
+share model parameters and the similar distribution pθ (· | 
+
+x, y ∗), they act as a proxy bridge. The joint update therefore implicitly aligns py 
+
+> None
+
+toward py∗
+
+> None
+
+. A proof under explicit assumptions is provided in the supplementary material. 
+
+Privileged path. The privileged path handles the same or-dered direction when both sides receive a full completion (see Figure 3, bottom-right part). In this case, Cross receives the guiding completion ¯s and Self receives the completion s, so the Privileged Anchor already expresses the required align-ment. Thus, the privileged path directly reuses Ls 
+
+> priv
+
+without introducing another objective. For y → y∗, this aligns self-conditioned and reference-conditioned predictions on rollout tokens under matched information availability. 
+
+Dual-path objective. Combining the two paths gives the DPA objective for one ordered completion direction, with loss coefficients omitted for notational simplicity: 
+
+Ls→¯s 
+
+> DPA
+
+= Ls→¯s 
+
+> uncond
+
++ Ls
+
+> priv
+
+. (6) 
+
+3.3 Dual-Source Anchoring 
+
+DPA defines how to align under an ordered direction, with the remaining question being which completion should provide guidance. We address this source choice with Dual-Source Anchoring (DSA), which applies DPA in both completion directions and balances their supervision. The left part of Figure 3 shows the two guidance directions used by DSA. The Rollout-to-Reference direction (y → y∗) follows the reference-guided view: the rollout is the completion and the Method Reasoning Coding Instruct Avg. AIME24 AIME25 HMMT25 LCB v5 BFCL v3 IFBench Base 75.56 65.56 42.50 52.11 61.38 29.67 54.46 SDFT (Shenfeld et al. 2026) 75.00 62.78 41.94 51.05 61.26 33.00 54.17 SDPO (Hübotter et al. 2026) 70.56 62.78 40.83 50.53 61.75 32.67 53.19 
+
+OPSD (Zhao et al. 2026a) 76.67 67.78 43.33 52.26 61.32 30.67 55.34 Purified OPSD (Shen et al. 2026) 76.67 67.50 45.00 53.16 62.50 32.67 56.25 DOPD (Yu et al. 2026) 73.61 65.00 38.89 50.30 61.47 31.67 53.49 
+
+DAPD 77.22 72.22 46.39 53.31 61.91 33.00 57.34          
+
+> ∆vs. OPSD +0.55 +4.44 +3.06 +1.05 +0.59 +2.33 +2.00
+
+Table 1: Performance comparison of our proposed DAPD with baselines on Qwen3-4B across reasoning, coding, and instruct benchmarks. Avg. is the mean over all six benchmarks. ∆ reports DAPD’s improvement over OPSD. Bold and underlined values mark the best and second-best results, respectively. reference supplies guidance. This direction benefits from the reliability of y∗, but it uses only one source of supervision. As the policy improves, on-policy rollouts can also con-tain useful reasoning signals and may themselves be cor-rect. Therefore, the rollout should not only be treated as a noisy prediction target; it can also provide student-reachable guidance. This motivates the Reference-to-Rollout direc-tion (y∗ → y), in which the reference becomes the com-pletion and the rollout supplies guidance. Applying the same DPA construction gives the unconditioned path Ly 
+
+> infer
+
++ Ly∗
+
+> ent
+
+and the privileged path Ly∗
+
+> priv
+
+.The two directions therefore emphasize complementary properties. The reference provides correctness-oriented but off-policy guidance, whereas the rollout provides student-reachable, on-policy but less reliable guidance. We therefore keep and balance both directional DPA objectives in DSA: 
+
+LDAPD = λLy→y∗ 
+
+> DPA
+
++ (1 − λ)Ly∗→y 
+
+> DPA
+
+. (7) Here λ ∈ [0 , 1] balances reference- and rollout-guided supervision with weights λ and 1 − λ, respectively. 
+
+## 4 Experiments 
+
+4.1 Experimental Setup 
+
+Models and datasets. We conduct experiments on the Qwen3 model family (Yang et al. 2025) at 1.7B, 4B, 8B, 14B, and 32B scales. All models are trained on OpenThoughts data (Guha et al. 2025), using separate models for each task family and excluding its evaluation examples from training: Reason-ing uses the math domain, Coding uses the code domain, and Instruct uses the combined math, code, and science domains. 
+
+Benchmarks. We evaluate three capability families. Rea-soning includes AIME24 and AIME25 (Mathematical As-sociation of America 2026), and HMMT25 (Harvard-MIT Mathematics Tournament 2025). Coding includes LCB v5 (Jain et al. 2025) and BFCL v3 (Patil et al. 2025). Instruct 
+
+is evaluated on IFBench (Pyatkin et al. 2025). We use the official evaluation harness and metric for each benchmark. 
+
+Baselines. We compare DAPD with Base and two groups of OPSD -style baselines. The first group directly uses priv-ileged supervision, including OPSD (Zhao et al. 2026a), SDFT (Shenfeld et al. 2026), and SDPO (Hübotter et al. 2026). The second group selectively modifies the privileged signal, including Purified OPSD (Shen et al. 2026) and DOPD (Yu et al. 2026). Every reported baseline uses the same task-specific student model and data, while method-specific optimization follows its source formulation. 
+
+Implementation. For DAPD, we train models with LoRA (Hu et al. 2022) and instantiate D(sg[ q]∥p) as a component-clipped, full-vocabulary forward KL, where q is the detached teacher distribution and p is the trainable student distribution. More experimental details are in the supplementary material. 
+
+4.2 Main Results 
+
+Overall performance. Unless otherwise specified, results use Qwen3-4B models trained separately for each task fam-ily. We first compare DAPD with standard on-policy self-distillation methods, including OPSD , SDFT, and SDPO, in Table 1. DAPD achieves the best six-task average of 
+
+57.34 , with +2.00 points over OPSD overall. These gains indicate that matched-information anchoring preserves the useful guidance of privileged supervision while reducing its inference-time mismatch. We next compare DAPD with baselines that explicitly modify the privileged signal. Purified OPSD and DOPD still operate under the original information-asymmetric setting: they modify or route the privileged signal, but the teacher and student remain under different information conditions. By changing the supervision structure itself through matched-information anchors, DAPD improves over Purified OPSD 
+
+and DOPD by +1.09 and +3.85 points overall, respectively. These results show that matching the information available to the teacher and student during distillation is more effective than filtering or routing an asymmetric supervision signal. 
+
+Scalability and robustness. Beyond the main Qwen3-4B comparison, we next test whether the gains persist across model scales and transfer beyond the training domain. Fig-ure 1(b) reports the gains of OPSD and DAPD over their cor-responding Base policies across five Qwen3 model scales. The gain of OPSD over Base falls from +5.19 points at 1.7B to +1.39 at 4B and at most +0.28 from 8B through 32B. Method LCB v5 BFCL v3 IFBench Avg. Base 52.11 61.38 29.67 47.72 SDFT (Shenfeld et al. 2026) 49.70 61.43 32.33 47.82 SDPO (Hübotter et al. 2026) 48.87 61.34 31.33 47.18                    
+
+> OPSD (Zhao et al. 2026a) 49.32 61.81 33.67 48.27 Purified OPSD (Shen et al. 2026) 53.01 61.99 31.33 48.78 DOPD (Yu et al. 2026) 47.82 61.41 32.33 47.19
+> DAPD 54.14 61.79 33.00 49.64
+
+Table 2: Out-of-distribution evaluation. We optimize the stu-dent policy on reasoning data and evaluate it on Coding (LCB v5, BFCL v3) and Instruct (IFBench). Bold and underlined values mark the best and second-best results, respectively. In contrast, DAPD retains gains of +2.41 , +2.13 , and +3.06 
+
+points at 8B, 14B, and 32B, respectively, and remains consis-tently above OPSD . As models scale, their rollouts contain more useful reasoning and self-correction, but OPSD distills a teacher that can bypass these steps using the reference. This makes privilege illusion more costly and offsets the benefit of better rollouts, whereas DAPD preserves these gains through matched-information supervision. Table 2 further tests whether a reasoning-trained model remains useful outside the training domain. DAPD obtains the best OOD average of 49.64 , gaining +4.82 points on LCB v5 and +1.37 points on average over OPSD , while remaining competitive on BFCL v3 and IFBench. These results indicate that the matched-information objective improves robustness beyond the reasoning benchmarks used for optimization. 
+
+Qualitative comparison. To examine the corresponding inference-time behavior, we inspect a representative AIME24 case under the same decoding setting. As illustrated in Fig-ure 4, OPSD exhibits privilege illusion: after its derivation fails, it claims to recall an unsupported answer and returns an incorrect result. DAPD instead completes the derivation from the prompt and reaches the correct answer. The aggre-gate dynamics in Figure 2 mirror this case. Over steps 250– 300, DAPD reduces late-stage wrong claims by 73% relative to OPSD , verifying that our design improves inference-time behavior by reducing privilege illusion. 
+
+4.3 Dual-Path and Dual-Source Ablations 
+
+We next ablate DAPD’s two core components. First, we test whether both matched-information paths in DPA are needed within each guidance source. Second, we test whether DSA benefits from combining reference-guided and rollout-guided supervision. 
+
+Dual-Path Anchoring. Table 3(a) evaluates the DPA com-ponents for each guidance source. Both sources show the same trend: completing the unconditioned path with the In-ference Anchor improves over Entangled Distillation alone, and adding the Privileged Anchor further improves perfor-mance to 63.89 for reference guidance and 65.09 for rollout guidance. This consistent pattern indicates that both paths are needed to align behavior under matched information avail-ability. This ordered improvement supports our information-asymmetry analysis: constructing both alignments under               
+
+> No reference at inference. A torus has major radius 6and minor radius 3; a tangent sphere has radius 11 . If ri−ro=m/n , find m+n.Answer:
+> 127 .
+> OPSD : unsupported answer recalled
+
+“For the external case, the distance is 6 + 2 ∗ 6 = 18 , giving 
+
+r = √11 2 − 18 2, which is imaginary, which is not possible. . . . I’m truly stuck and have to give up, but 
+
+I recall that the answer is likely 36 /7.
+
+So m + n = 36 + 7 = 43 .” 
+
+Incorrect: 43 
+
+> DAPD : answer derived from the prompt
+
+“Case 1: Internal tangent. . . . √62 + c2 = 11 − 3 = 8 .. . . Px = · · · = 33 /4. For external tangent, . . . the distance between centers is 11 + 3 = 14 . . . . Px = · · · = 33 /7.Therefore, ri − ro = 33 /4 − 33 /7 = 99 /28 . . . . m + n =127 .” 
+
+Correct: 127 
+
+Figure 4: Visualization of inference-time results. On the same AIME24 sample and decoding setting, OPSD recalls an un-supported answer while DAPD derives the correct one. matched information availability is more effective than di-rectly transferring the privileged distribution. 
+
+Dual-Source Anchoring. To assess the effectiveness of DSA, we compare different completion sources in Table 3(b). Combining both sources improves over the individual-source objectives and reaches the best result of 65.28. This verifies the DSA design: reference guidance and rollout guidance carry complementary information, and their calibrated com-bination improves over either source alone. 
+
+4.4 Sensitivity and Robustness 
+
+Prior analyses show that distillation quality depends on teacher–student compatibility, rollout quality, and the amount of privileged information (Li et al. 2026; Kaur et al. 2026). As model scale increases, rollout quality can improve, so the useful balance between reference-guided and rollout-guided supervision may also shift. We vary the reference-guidance weight λ and the two source-specific Privileged Anchor weights across four Qwen3 scales. Table 3(c,d) shows that the preferred guidance balance changes with model scale. The optimal reference-guidance weight in Table 3(d) decreases from λ = 0 .5 at 1.7B to 
+
+λ = 0 .2 at 4B, 8B, and 14B, suggesting that smaller poli-cies benefit more from reliable reference guidance, whereas larger policies can place more trust in their on-policy rollouts. Source-specific weights also vary by scale: the reference-guided Privileged Anchor weight increases from 0.5 at 1.7B to 1 at 4B, 2 at 8B and 14B, while the rollout-guided weight is 0.5, 2, 0.5, and 1, respectively. These trends reveal a scale-dependent reliability–reachability trade-off. Smaller policies produce noisier rollouts and therefore require stronger cor-rective guidance from reliable references, whereas larger policies generate more reliable on-policy trajectories and benefit more from guidance that remains close to their Source Entangled + Inference + Inference + Privileged Reference 62.13 63.43 63.89                                                                                          
+
+> Rollout 63.33 64.91 65.09 (a) Path components. Both the unconditioned and privileged paths are necessary for each source. Source Reference Rollout Avg@12 Reference ✓63.89 Rollout ✓65.09 Both ✓✓65.28 (b) Guidance sources. Reference and rollout guidance are complementary, and using both is best. Setting 1.7B 4B 8B 14B
+> Reference-guided Privileged Anchor
+> Weight = 0 .543.98 64.91 67.04 69.64 Weight = 1 42.68 65.28 66.95 70.10 Weight = 2 43.15 62.78 67.41 70.93
+> Rollout-guided Privileged Anchor
+> Weight = 0 .543.98 62.96 67.41 69.36 Weight = 1 43.15 62.59 65.47 70.93
+> Weight = 2 42.96 65.28 65.75 68.80
+> (c) Anchor weights. Larger scales prefer stronger Privileged Anchor weights.
+> λ1.7B 4B 8B 14B 0.2 43.79 65.28 67.41 70.93
+> 0.5 43.98 64.63 66.67 69.73 0.8 43.79 63.70 67.14 70.46
+> (d) Guidance weight. The best reference-guidance weight decreases as scale increases. Scale OPSD Dual Verified Single Comb. Single Comb. 1.7B 42.04 42.41 42.50 42.68 43.15
+> 4B 62.59 65.00 64.45 64.72 66.11
+> 8B 65.00 67.41 66.95 67.59 66.94
+> (e) Reference-free sources. Independent or verified rollouts can replace references while preserving gains.
+
+Table 3: DAPD ablation experiments with Qwen3 models. We report reasoning Avg@12 over AIME24, AIME25, and HMMT25. In panel (e), Dual uses two independent rollout sources, while Verified applies a correctness verifier to the reference-side rollout. Checkmarks indicate active components or sources, and bold marks the best result. inference-time distribution. Additional ablations on imple-mentation choices are provided in supplementary material. 
+
+4.5 Toward Reference-Free DAPD 
+
+The complementarity between reference and rollout guid-ance raises whether DAPD can reduce reliance on curated references. To test this, the dual-rollout variant samples in-dependent completions u and v, resampling v when they are identical. It uses u as the reference-side source and v as the rollout source. Both are on-policy and may be incorrect, testing whether a second rollout provides complementary guidance without a reference. To isolate the value of correctness, the verified-rollout variant samples four candidates for u and selects the first verifier-approved answer, while v remains independent and unfiltered. The verifier thus improves source reliability with-out exposing a reference to the policy. Table 3(e) shows that dual rollouts improve over OPSD 
+
+by +0.46, +2.41, and +2.41 points at 1.7B, 4B, and 8B, demonstrating that the second rollout is not redundant. Ver-ification further raises the best scores by +0.65, +1.11, and +0.18 points to 43.15, 66.11, and 67.59. Thus, DSA can oper-ate without curated references, while verification strengthens guidance when a correctness signal is available. 
+
+## 5 Related Work 
+
+Reasoning language models. Reasoning models are com-monly post-trained with curated reference completions, self-generated rollouts, or reward feedback (Wei et al. 2022; Kojima et al. 2022; Wang et al. 2023; Cobbe et al. 2021; Lewkowycz et al. 2022; Lightman et al. 2024; Hendrycks et al. 2021; Zelikman et al. 2022; Shao et al. 2024; DeepSeek-AI 2025; Guha et al. 2025). These sources offer different tradeoffs: references provide reliable correctness-oriented guidance but can be off-policy, whereas rollouts reflect cur-rent model behavior but can be incorrect. DAPD uses this reference–rollout complementarity as a design principle for dense token-level post-training. 
+
+On-policy (self) distillation. OPD provides dense teacher supervision on student-sampled rollouts, reducing the roll-out mismatch of off-policy distillation (Hinton, Vinyals, and Dean 2015; Kim and Rush 2016; Agarwal et al. 2024; Think-ing Machines Lab 2025). Later work improves OPD by changing teacher contexts, objectives, or token weights (Ye et al. 2026; Yang et al. 2026; Hou et al. 2026; Jin et al. 2026; Xu et al. 2026). OPSD removes the need for a separate teacher by conditioning the same model on privileged infor-mation, and related self-distillation methods use reference solutions, environmental feedback, or successful rollouts as auxiliary guidance (Zhao et al. 2026a; Penaloza et al. 2026; Shenfeld et al. 2026; Hübotter et al. 2026). Recent extensions further calibrate, filter, route, relax, or localize this supervi-sion (Nguyen et al. 2026; Zheng et al. 2026; Yu et al. 2026; Tu et al. 2026; Ko et al. 2026; Shen et al. 2026; Zhao et al. 2026b), while analyses study scale, rollout quality, and op-timization (Li et al. 2026; Kaur et al. 2026). DAPD retains on-policy sampling and privileged-teacher construction, but reorganizes supervision around matched information avail-ability and both completion sources. 
+
+## 6 Conclusion 
+
+We identify information asymmetry as the root cause of privilege illusion in OPSD and propose DAPD to address it through two forms of anchoring. DPA aligns reference and rollout behavior under matched information availability, while DSA combines correctness-oriented reference guid-ance with student-reachable rollout guidance. Across bench-marks and Qwen3 models from 1.7B to 32B, DAPD sig-nificantly alleviates privilege illusion and consistently out-performs OPSD , validating the benefits of both matched-information paths and guidance sources. 
+
+Limitations. DAPD constructs multiple anchored distribu-tions during training, increasing training-time computation but adding no inference-time cost. Its weights may need re-calibration across scales or architectures. The verified-rollout extension requires an automatic correctness signal, which may be unavailable for open-ended tasks. A Experimental Details 
+
+This section specifies the data, evaluation, privileged-information construction, training procedure, baseline im-plementations, and final DAPD configurations used in the paper. 
+
+A.1 Benchmarks and Evaluation 
+
+For AIME 2024, AIME 2025 (Mathematical Association of America 2026), and HMMT February 2025 (Harvard-MIT Mathematics Tournament 2025), we sample 12 thinking-enabled solutions per problem at temperature 1.0 and top-p
+
+0.95, allow up to 38,912 new tokens, and verify the final answer. Avg@12 averages correctness over the 12 samples for each problem. The reported reasoning aggregate is the unweighted mean of the three benchmark-level scores. For broader evaluation, LiveCodeBench v5 (Jain et al. 2025) uses its official code-generation split and Pass@1 eval-uator, BFCL v3 (Patil et al. 2025) uses the official multi-turn function-call harness and overall accuracy, and IFBench (Py-atkin et al. 2025) uses the released verifier-based IFBench score. We retain each benchmark’s official prompt and pars-ing rules. Each evaluation uses the model trained under its capability-specific data protocol below. 
+
+A.2 Training Data 
+
+All task-specific models use OpenThoughts data. The Rea-soning protocol uses the math domain, the Coding protocol uses the code domain, and the Instruct protocol uses the re-leased mixture of math, code, and science domains (Guha et al. 2025). Within each protocol, every baseline uses the same data split and prompt format. Benchmark evaluation examples are excluded from every training corpus. 
+
+A.3 Construction of Privileged Information 
+
+We follow the reference-injection format of OPSD (Zhao et al. 2026a). For each problem x, the reference completion 
+
+y∗ is inserted into the teacher’s user message between ex-plicit delimiters. The student rollout prompt contains only x.Table 4 shows the resulting user messages. The same chat template is then applied to both. For either completion s ∈ {y, y ∗}, DAPD computes token-level supervision on the tokens of s. Cross inserts the other completion ¯s into the privileged message, while Self 
+
+inserts s itself. Both distributions are evaluated on the pre-fixes and target tokens of s. These auxiliary completions are available only when constructing training distributions and are never included in the inference prompt. 
+
+Concrete training example. One OpenThoughts example asks to order p = 2 3009 , q = 3 2006 , and r = 5 1003 . Its ref-erence completion rewrites them as 81003 , 91003 , and 51003 ,respectively, and concludes r < p < q . The None message contains only the question and answer instruction. The Cross 
+
+and Self messages insert this complete derivation between the two reference-solution delimiters above. Thus the priv-ileged information is an explicit worked completion, rather than a label or latent teacher state.                
+
+> View User-message template
+> None Problem: {problem}
+> Please reason step by step, and put your final answer within \boxed{} .
+> Cross Problem: {problem}
+> Here is a reference solution to this problem:
+> === Reference Solution Begin === {reference completion} === Reference Solution End ===
+> After reading the reference solution above, make sure you truly understand the reasoning behind each step — do not copy or paraphrase it. Now, using your own words and independent reasoning, derive the same final answer to the problem above. Think step by step, explore different approaches, and don’t be afraid to backtrack or reconsider if something doesn’t work out: Please reason step by step, and put your final answer within \boxed{} .
+
+Table 4: User-message templates for the None view without privileged information and the reference-conditioned Cross 
+
+view. Braced fields are replaced per example. 
+
+A.4 DAPD Training Procedure 
+
+For each minibatch, DAPD performs the following opera-tions: 1. Sample an on-policy rollout y from the current LoRA-on student (Hu et al. 2022) for each prompt–reference pair 
+
+(x, y ∗).2. For each source completion s ∈ { y, y ∗}, construct ps
+
+> None
+
+,
+
+ps
+
+> Cross
+
+, and ps 
+
+> Self
+
+on the tokens of s.3. Evaluate Entangled Distillation, Inference Anchor, and Privileged Anchor in both completion directions. De-tach every teacher distribution and retain gradients only through the student side. 4. Combine the objective losses using the coefficients in Equation (9), backpropagate their sum, and update the current LoRA parameters. 5. Periodically copy the current LoRA parameters into the shared snapshot used by the two Entangled-Distillation teachers. The current LoRA-on policy produces every rollout and trainable distribution. The two Entangled-Distillation teach-ers use the shared snapshot. The Inference-Anchor and Privileged-Anchor teachers use the detached LoRA-off base policy. 
+
+A.5 Baseline Methods 
+
+We compare methods that use the same student backbone and on-policy data budget but differ in how they construct and transfer supervision. 
+
+• Base is the original Qwen3 policy (Yang et al. 2025) evaluated with the task prompt. • OPSD (Zhao et al. 2026a) samples from the current stu-dent and distills the same-model Cross distribution into 
+
+None on the sampled prefixes. 
+
+• SDFT (Shenfeld et al. 2026) uses on-policy samples and an exponential-moving-average self-teacher conditioned on an expert demonstration. 
+
+• SDPO (Hübotter et al. 2026) conditions an exponential-moving-average self-teacher on successful peer rollouts or environment feedback to provide dense token-level su-pervision. 
+
+• Purified OPSD (Shen et al. 2026) removes the com-ponent of privileged supervision that can be predicted from the reference alone through a pointwise-mutual-information correction. 
+
+• DOPD (Yu et al. 2026) dynamically routes token-level su-pervision between privileged teacher and student policies according to their advantage gap and relative probabili-ties. 
+
+A.6 Training and Loss Implementation 
+
+Optimization. We adapt all attention and multilayer-perceptron projections with LoRA rank 64 and scale 128. The optimizer uses a learning rate of 5 × 10 −6, a linear 500-step schedule without warmup, gradient-norm clipping at 0.1, bfloat16, gradient checkpointing, and an effective batch size of 32. 
+
+Random seeds. Unless otherwise specified, all training jobs use seed 42, set before model and LoRA-adapter ini-tialization, data shuffling, and rollout sampling. Matched method comparisons use the same seed so that initializa-tion, data order, and rollout-generation streams are aligned. Reported headline numbers follow this matched-seed proto-col. 
+
+Compute and software. Training uses eight NVIDIA A100-80GB GPUs. The software environment uses PyTorch 2.8.0, Transformers 4.57.1, DeepSpeed 0.18.2, and vLLM 0.11.0 (Kwon et al. 2023). Data parallelism changes the per-device microbatch as needed but keeps the effective batch size fixed. The Coding and Instruct comparisons retain the same LoRA parameterization, optimizer, update budget, and DAPD objective within each model scale. Dataset parsing and prompt formatting are adapted to the corresponding OpenThoughts examples, and every baseline is rerun under the same capability-specific protocol. 
+
+Rollout generation. The student samples one rollout per problem at temperature 1.1, top-p 0.95, top-k 20, and a max-imum of 1,024 new tokens. The training context is limited to 20,000 tokens. 
+
+Divergence implementation. Every directed loss term evaluates the full vocabulary at each non-padding completion token. Teacher and student logits are divided by T = 1 .1.The divergence D(sg[ q]∥p) lists teacher q before student p.With component cap c = 0 .05 , we implement it as 
+
+ℓc(q, p ) = X
+
+> v∈V
+
+min {qv (log qv − log pv ), c }. (8) This is a component-clipped forward-KL surrogate. Both distributions are evaluated directly at every sampled prefix, so no importance-sampling ratio is applied. 
+
+A.7 Main DAPD Configurations 
+
+The main objective applies all three directed losses in both guidance directions. The first tuple below is the reference-guided Rollout-to-Reference direction, and the second is the rollout-guided Reference-to-Rollout direction. We parame-terize their coefficients as 
+
+(wref ent , w ref infer , w ref priv ) = κλ 
+
+1 + βref infer + βref priv 
+
+(1 , β ref infer , β ref priv ),
+
+(wroll ent , w roll infer , w roll priv ) = κ(1 − λ)1 + βroll infer + βroll priv 
+
+(1 , β roll infer , β roll priv ).
+
+(9) Here κ controls the total DAPD loss weight. The reference-guided direction receives fraction λ, and the rollout-guided direction receives 1 − λ. The four β values redistribute weight among the three loss terms within each direction. The Privileged Anchor ablation fixes βref infer = βroll infer = 1 and varies βref priv and βroll priv . The Inference Anchor ablation fixes 
+
+βref priv = βroll priv = 1 and varies βref infer and βroll infer .Every teacher distribution is detached. Only the two Entangled-Distillation instances are produced by one shared snapshot of the LoRA-on student, which is copied and pe-riodically updated during training. The teacher distributions of the Inference Anchor and Privileged Anchor terms are produced by the LoRA-off base model. All student distribu-tions are produced by the current LoRA-on model, which also serves as the rollout sampler.                                
+
+> Reference Rollout Scale λβinfer βpriv βinfer βpriv
+> 1.7B .5 1.5 1.5 4B .2 11128B .2 121.5 14B .2 121132B .2 1.5 11
+
+Table 5: Coefficient configurations for the scale-wise DAPD results. The task-specific Qwen3-4B Reasoning, Coding, and In-struct models use the 4B coefficient allocation above with their corresponding data protocol. 
+
+## B Theoretical Analysis of the Unconditioned Path 
+
+The Rollout-to-Reference unconditioned path ( y → y∗)combines Inference Anchor on reference prefixes with En-tangled Distillation on rollout prefixes. We formalize how 
+
+Self connects these two objectives and supports the implicit alignment between the two None distributions claimed in the main paper. The analysis has three parts: (i) a paired-prefix alignment bound, (ii) sequence-level transfer on inference-policy states, and (iii) the parameter-sharing mechanism that carries the Inference Anchor update across prefixes. 
+
+B.1 Conditional Alignment of the None 
+
+Distributions 
+
+The unconditioned path aims to align the rollout- and reference-side None distributions, although its two objec-tives act through Cross and Self . We first show why these intermediate distributions suffice: small objective values and a consistent Self –Cross bridge bound the desired None –None 
+
+distance. Fix a reference prefix a = y∗ 
+
+> <i
+
+and a rollout prefix 
+
+b = y<j , and abbreviate the four token distributions as 
+
+n∗ = pθ (· | x, a ), s∗ = pθ (· | x, a, y ∗),cy = pθ (· | x, b, y ∗), ny = pθ (· | x, b ). (10) These are, respectively, None and Self on the reference pre-fix and Cross and None on the rollout prefix. Let Πx be any coupling of the reference- and rollout-prefix sampling distributions. Define 
+
+EΠinfer = E(a,b )∼Πx KL( n∗∥s∗),
+
+EΠent = E(a,b )∼Πx KL( cy ∥ny ),ϵbridge = E(a,b )∼Πx TV( s∗, c y ). (11) Here TV denotes total variation distance. 
+
+Bridge-consistency assumption. For coupled reference and rollout prefixes from the same example, assume 
+
+ϵbridge ≤ ϵ. (12) This assumption captures the proxy relation used by DPA: 
+
+Self and Cross are produced by the same policy and share the privileged condition (x, y ∗).
+
+Proposition 1 (paired-prefix None -distribution align-ment). The two None distributions satisfy 
+
+EΠx TV( n∗, n y ) ≤
+
+r EΠinfer 
+
+2 + ϵ +
+
+r EΠent 
+
+2 . (13) 
+
+Proof. For every paired prefix, the triangle inequality gives 
+
+TV( n∗, n y ) ≤ TV( n∗, s ∗) + TV( s∗, c y ) + TV( cy , n y ).
+
+Apply Pinsker’s inequality to the first and third terms, average under Πx, apply Jensen’s inequality to each square root, and use Eq. (12). Proposition 1 directly connects the two terms in the un-conditioned path to its target alignment. Inference Anchor re-duces the first term, Entangled Distillation reduces the third, and the shared Self –Cross bridge controls the middle term. Their joint optimization therefore tightens an explicit upper bound on the distance between py∗ 
+
+> None
+
+and py
+
+> None
+
+.
+
+B.2 Sequence-Level Transfer from Entangled Distillation 
+
+The preceding result establishes token-level conditional alignment, but it does not yet show that complete inference trajectories inherit Cross behavior. We therefore lift Entan-gled Distillation from token conditionals on on-policy pre-fixes to a bound on complete sequence distributions. Fix an input x, a guiding completion r, and a horizon H, appending an absorbing end-of-sequence token to shorter completions. Let Nθ (· | x) be the sequence distribution induced by None 
+
+and let P rθ (· | x) be the sequence distribution induced by 
+
+Cross when conditioned on r. For a rollout Y ∼ Nθ (· | x),define the ideal summed-token Entangled Distillation loss, suppressing fixed x and θ and writing the token conditionals at Y<t as P rt and Nt,
+
+Eent (x, r ) = EY
+
+" HX
+
+> t=1
+
+KL( P rt ∥Nt)
+
+#
+
+. (14) 
+
+Lemma 1 (autoregressive hybrid bound). For any two length-H autoregressive distributions U and V , write their next-token conditionals at Z<t ∼ U as Ut and Vt. Then 
+
+TV( U, V ) ≤
+
+> H
+
+X
+
+> t=1
+
+EZ<t ∼U [TV( Ut, V t)] . (15) 
+
+Proof. For t = 0 , . . . , H , define 
+
+H(t)(z1: H ) = 
+
+> t
+
+Y
+
+> k=1
+
+Uk(zk | z<k )
+
+> H
+
+Y
+
+> k=t+1
+
+Vk(zk | z<k ). (16) Thus H(0) = V and H(H) = U . The pair H(t−1) , H (t) has the same U -induced distribution over z<t , uses Vt or Ut at position t, respectively, and then applies the same V contin-uation kernel. Total variation contracts under this common kernel, giving 
+
+TV 
+
+
+
+H(t−1) , H (t)
+
+≤ EZ<t ∼U [TV( Vt, U t)] .
+
+Summing consecutive hybrid distances proves Eq. (15). 
+
+Proposition 2 (on-policy sequence transfer). The se-quence distributions induced by None and Cross satisfy 
+
+TV( Nθ (· | x), P rθ (· | x)) ≤
+
+r H
+
+2 Eent (x, r ). (17) 
+
+Proof. Apply Lemma 1 with U = Nθ and V = P rθ . At each prefix sampled from Nθ , Pinsker’s inequality gives 
+
+TV  Nθ,t , P rθ,t 
+
+ ≤
+
+q 12 KL( P rθ,t ∥Nθ,t ).
+
+The local KL is algebraically KL( Cross ∥None ), while its student-to-teacher alignment arrow is None → Cross . To-tal variation is symmetric, so Jensen’s and Cauchy–Schwarz inequalities convert the sum of local bounds into Eq. (17). 
+
+B.3 Shared-Parameter Transfer from Inference Anchor 
+
+The preceding result explains how Entangled Distillation transfers Cross behavior to rollout-side None , but Infer-ence Anchor is optimized on reference-side Self rather than rollout-side Cross . We therefore show how shared parame-ters carry an Inference Anchor update from Self to Cross ,providing the optimization channel required by the proxy bridge. At a reference prefix, let qN be the detached None teacher distribution and pS the trainable Self distribution. At a roll-out prefix, let pC be the Cross distribution. Write their pre-softmax logits as zS(θ) and zC(θ), with Jacobians JS =
+
+∂z S/∂θ and JC = ∂z C/∂θ . For the ideal Inference Anchor 
+
+ℓinfer = KL( qN∥pS), (18) the unit-temperature logit gradient is pS − qN. Consequently, one gradient step with step size η using only this loss term changes the Cross logits by 
+
+zC(θ+) − zC(θ) = −ηJ CJ⊤ 
+
+> S
+
+(pS − qN) + O(η2). (19) The cross-prefix kernel JCJ⊤ 
+
+> S
+
+is the first-order channel from grounding Self on reference tokens to changing Cross 
+
+on rollout tokens. Let gS = pS−qN and gC = pC−qN. Taking expectation over examples and their paired-prefix coupling, we use the local compatibility condition 
+
+Ex, (a,b )∼Πx
+
+g⊤ 
+
+> C
+
+JCJ⊤ 
+
+> S
+
+gS
+
+ ≥ γ > 0. (20) Because gC is the logit gradient of CE( qN, p C), Eqs. (19) and (20) give the expected change 
+
+ECE( qN, p C(θ+)) − CE( qN, p C(θ))  ≤ − ηγ + O(η2).
+
+(21) Thus, a compatible Inference Anchor step moves Cross in expectation toward the reference-side None anchor. Refresh-ing the Cross teacher then carries this anchored change into rollout-side None through Entangled Distillation. Shared pa-rameters provide the optimization channel underlying the proxy bridge in Section 3. 
+
+Empirical compatibility check. We directly measure the scalar in Eq. (20) in the trainable LoRA subspace of Qwen3-4B. Using four training-matched LoRA initializations and 32 distinct math examples, we sample on-policy rollouts and compute full-vocabulary gradients at four interior token po-sitions per example. Across the resulting 128 positions, the mean gradient dot product is 256 .62 with a bootstrap 95% 
+
+confidence interval of [147 .55 , 393 .53] , and the mean gra-dient cosine is 0.101 with an interval of [0 .058 , 0.144] . Af-ter averaging the four positions within each example, the corresponding values are 225 .30 [122 .94 , 352 .53] and 0.119 [0 .054 , 0.185] . The positive intervals across both aggregation levels empirically support the expected local compatibility used above. 
+
+B.4 Implication for DAPD 
+
+The three results support the unconditioned-path construc-tion from complementary perspectives. Proposition 1 bounds the desired None -to-None alignment through the two trained objectives and the Self –Cross bridge. Proposition 2 shows that Entangled Distillation transfers the resulting teacher be-havior on on-policy prefixes, while Eq. (21) explains how a compatible Inference Anchor step shapes that teacher through shared parameters. Together, they formalize why the joint update implicitly moves py 
+
+> None
+
+toward py∗ 
+
+> None
+
+under the stated bridge-consistency and local compatibility conditions. 
+
+## C Additional Experimental Results 
+
+This section provides the absolute scale-wise scores, the mea-surements behind the privilege-illusion analysis, and imple-mentation sensitivity. 
+
+C.1 Complete Scale-Wise Results 
+
+Table 6 expands Figure 1(b) into per-benchmark scores. Ev-ery DAPD row uses the complete objective and the configu-ration in Table 5. DAPD improves over the scale-matched OPSD policy by 1.94, 2.69, 2.41, 2.04, and 2.78 points from 1.7B through 32B, respectively. The gains are not concentrated in one benchmark: DAPD improves AIME25 at every scale and typically improves HMMT25 as well. 
+
+C.2 Privilege-Illusion Dynamics 
+
+Behavioral probe. The primary probe detects a genera-tion that first states that its derivation has failed and then attributes a concrete answer to memory, a reference or of-ficial solution, or an external source, while returning an in-correct final answer. Generic uncertainty, ordinary guesses, recalled formulas, and broad phrases such as “after research” are excluded. Each scale–checkpoint cell contains 90 benchmark prob-lems and 12 generations per problem. We report counts per 10,000 generations after pooling the five Qwen3 scales. Con-fidence intervals use a problem-cluster bootstrap that keeps all 12 generations of a problem together. Across all checkpoints, OPSD produces 58 detected claims in 32,400 generations, compared with 41 for the Privileged Anchor. At steps 250–300, the counts are 33 and 18, a 45% reduction. At steps 250–300, DAPD produces 9 detected claims com-pared with 33 for OPSD , a 73% reduction. Its step-300 Avg@12 is also 7.66 points higher. Together with the iso-lated Privileged-Anchor intervention, these dynamics show that matched-information anchoring reduces privilege illu-sion while preserving late-stage reasoning performance. 
+
+C.3 Divergence and Clipping 
+
+To examine sensitivity to divergence direction and clipping, we summarize completed Qwen3-4B results for the evaluated implementations. Component-clipped forward KL performs best in this com-parison, supporting its use as the default DAPD implemen-tation. 
+
+## D Additional Qualitative Evidence 
+
+Table 9 supplements Figure 4 with three inference-time com-parisons. Neither method receives a reference at inference, and both use the same reference-free prompt and decoding protocol. The counts report correctness over all 12 samples rather than only the displayed output. Scale Method AIME24 AIME25 HMMT25 Avg@12 1.7B Base 50.83 37.78 21.94 36.85 
+
+OPSD 57.78 40.56 27.78 42.04 DAPD 57.50 46.67 27.78 43.98 
+
+4B Base 75.56 65.56 42.50 61.20 
+
+OPSD 76.67 67.78 43.33 62.59 DAPD 77.22 72.22 46.39 65.28 
+
+8B Base 80.56 67.78 46.67 65.00 
+
+OPSD 80.56 67.50 46.94 65.00 DAPD 80.00 72.50 49.72 67.41 
+
+14B Base 84.17 70.83 51.39 68.80 
+
+OPSD 81.39 72.78 52.50 68.89 DAPD 85.83 75.56 51.39 70.93 
+
+32B Base 83.61 73.06 53.33 70.00 
+
+OPSD 85.28 75.28 50.28 70.28 DAPD 86.11 76.67 56.39 73.06 
+
+Table 6: Complete reasoning results underlying the scale comparison. Avg@12 is the unweighted mean of AIME24, AIME25, and HMMT25. 
+
+Step OPSD Privileged Anchor DAPD 
+
+Wrong claims per 10k 
+
+0 7.41 7.41 9.26 50 7.41 16.67 9.26 100 14.81 3.70 1.85 150 11.11 7.41 3.70 200 12.96 14.81 7.41 250 24.07 11.11 5.56 300 37.04 22.22 11.11 
+
+Reasoning Avg@12 
+
+0 60.56 60.56 60.56 50 60.83 62.04 63.65 100 61.50 61.82 63.11 150 60.59 61.15 62.70 200 59.56 61.67 63.10 250 56.96 59.93 61.36 300 53.24 59.46 60.90 
+
+Table 7: Five-scale training dynamics underlying Figure 2. The Privileged Anchor replaces the trainable None distribu-tion with Self while retaining the Cross teacher, and DAPD combines both anchoring paths and guidance sources. 
+
+Divergence Component cap Avg@12 Forward KL 0.05 65.28 
+
+Forward KL None 62.50 Reverse KL 0.05 62.50 Reverse KL None 63.33 
+
+Table 8: Divergence and component-clipping ablation on Qwen3-4B.                                                                 
+
+> Policy Output excerpt
+> Qwen3-4B on AIME25 #20
+> OPSD (6/12 )After leaving the arc relations unresolved, the output states: “since the problem is from a competition, the answer is likely to be a nice number, like 360 ◦”, and returns 360 .
+> DAPD
+> (12 /12 )The output obtains dDE = 72 ◦,dHJ = 24 ◦, and dF G = 72 ◦,then computes 72 + 2(24) + 3(72) = 336 .
+> Qwen3-4B on HMMT25 #27
+> OPSD (8/12 )After finding that its candidate violates the circle equation, the output states: “I recall that the answer is likely 1/7or 2/7”and returns 1/7.
+> DAPD
+> (11 /12 )The output derives A=(3 /2,3√15 /2) and P=(7 /4,7√15 /12) . It computes [BP C ]=49 √15 /24 and
+> [ABC ] = 21 √15 /4, giving 7/18 .
+> Qwen3-8B on AIME25 #9
+> OPSD (7/12 )After obtaining a sign incompatible with the required answer form, the output states: “the answer is likely to be 50 , I will go with this, assuming there was a sign error in the calculation” , and returns
+> 50 .
+> DAPD
+> (10 /12 )The output factors t4+ 2 t3−25 t2−18 t+ 120 as (t2−t−
+> 10)( t2+ 3 t−12) , derives y= (3 − √57) /2, and returns
+> 3 + 57 + 2 = 62 .
+
+Table 9: Additional inference-time cases. Counts report cor-rect outputs among 12 generations. Quoted clauses are verba-tim, while the remaining text summarizes omitted reasoning. E Future Directions 
+
+Reference-free DAPD. The dual-rollout experiments in Section 4 show that a second rollout can provide useful guidance even without a reference completion. A natural next step is to replace the fixed reference with a verified or consensus-selected rollout and update this source as the pol-icy improves. This would preserve the matched-information paths while reducing dependence on curated solutions. 
+
+Adaptive source trust. The scale-wise results indicate that reference and rollout guidance should not receive a universal fixed balance. Larger policies generate more useful rollouts, but reliability also varies across examples and tokens. Fu-ture work can estimate this reliability online and assign con-tinuous source and anchor weights, avoiding both a global coefficient and a brittle hard gate. 
+
+Broader forms of privileged information. References are only one source of training-time information. The same framework can be studied with retrieved documents, tool traces, verifier feedback, or intermediate plans that are un-available at inference. Studying these sources can clarify how anchor design should adapt to the form and reliability of privileged information. References 
+
+Agarwal, R.; Vieillard, N.; Zhou, Y.; Stanczyk, P.; Ramos, S.; Geist, M.; and Bachem, O. 2024. On-Policy Distillation of Language Models: Learning from Self-Generated Mistakes. In International Conference on Learning Representations .Cobbe, K.; Kosaraju, V.; Bavarian, M.; Chen, M.; Jun, H.; Kaiser, L.; Plappert, M.; Tworek, J.; Hilton, J.; Nakano, R.; et al. 2021. Training Verifiers to Solve Math Word Problems. 
+
+arXiv preprint arXiv:2110.14168 .DeepSeek-AI. 2025. DeepSeek-R1: Incentivizing Reason-ing Capability in LLMs via Reinforcement Learning. arXiv preprint arXiv:2501.12948 .Guha, E.; Marten, R.; Keh, S.; et al. 2025. OpenThoughts: Data Recipes for Reasoning Models. arXiv preprint arXiv:2506.04178 .Harvard-MIT Mathematics Tournament. 2025. HMMT February 2025 Archive. Hendrycks, D.; Burns, C.; Kadavath, S.; Arora, A.; Basart, S.; Tang, E.; Song, D.; and Steinhardt, J. 2021. Measuring Mathematical Problem Solving With the MATH Dataset. In 
+
+Advances in Neural Information Processing Systems , vol-ume 34. Hinton, G.; Vinyals, O.; and Dean, J. 2015. Distilling the Knowledge in a Neural Network. In NIPS Deep Learning and Representation Learning Workshop .Hou, W.; Peng, S.; Wang, W.; Ruan, Z.; Zhang, Y.; Zhou, Z.; Gao, M.; Chen, Y.; Wang, K.; Yang, H.; et al. 2026. Uni-OPD: Unifying On-Policy Distillation with a Dual-Perspective Recipe. arXiv preprint arXiv:2605.03677 .Hu, E. J.; Shen, Y.; Wallis, P.; Allen-Zhu, Z.; Li, Y.; Wang, S.; Wang, L.; and Chen, W. 2022. LoRA: Low-Rank Adaptation of Large Language Models. In International Conference on Learning Representations .Hübotter, J.; Lübeck, F.; Behric, L.; Baumann, A.; Bagatella, M.; Marta, D.; Hakimi, I.; Shenfeld, I.; Buening, T. K.; Guestrin, C.; et al. 2026. Reinforcement Learning via Self-Distillation. arXiv preprint arXiv:2601.20802 .Jain, N.; Han, K.; Gu, A.; Li, W.-D.; Yan, F.; Zhang, T.; Wang, S.; Solar-Lezama, A.; Sen, K.; and Stoica, I. 2025. LiveCodeBench: Holistic and Contamination Free Evalua-tion of Large Language Models for Code. In International Conference on Learning Representations .Jin, W.; Min, T.; Yang, Y.; Wei, D.; Zhou, Y.; Kadhe, S. R.; Baracaldo, N.; and Lee, K. 2026. Entropy-Aware On-Policy Distillation of Language Models. arXiv preprint arXiv:2603.07079 .Kaur, S.; Ri, N.; He, Y.; Fowl, L.; and Arora, S. 2026. Re-thinking On-Policy Self-Distillation for Thinking Models. 
+
+arXiv preprint arXiv:2607.05184 .Kim, Y.; and Rush, A. M. 2016. Sequence-Level Knowl-edge Distillation. In Proceedings of the 2016 Conference on Empirical Methods in Natural Language Processing , 1317– 1327. Ko, J.; Abdali, S.; Kim, Y. J.; Chen, T.; and Cameron, P. 2026. Scaling Reasoning Efficiently via Relaxed On-Policy Distillation. arXiv preprint arXiv:2603.11137 .Kojima, T.; Gu, S. S.; Reid, M.; Matsuo, Y.; and Iwasawa, Y. 2022. Large Language Models are Zero-Shot Reason-ers. In Advances in Neural Information Processing Systems ,volume 35. Kwon, W.; Li, Z.; Zhuang, S.; Sheng, Y.; Zheng, L.; Yu, C. H.; Gonzalez, J. E.; Zhang, H.; and Stoica, I. 2023. Efficient Memory Management for Large Language Model Serving with PagedAttention. In Proceedings of the ACM Symposium on Operating Systems Principles .Lewkowycz, A.; Andreassen, A. J.; Dohan, D.; Dyer, E.; Michalewski, H.; Ramasesh, V. V.; Slone, A.; Anil, C.; Schlag, I.; Gutman-Solo, T.; et al. 2022. Solving Quantitative Reasoning Problems with Language Models. In Advances in Neural Information Processing Systems , volume 35. Li, Y.; Zuo, Y.; He, B.; Zhang, J.; Xiao, C.; Qian, C.; Yu, T.; Gao, H.-a.; Yang, W.; Liu, Z.; and Ding, N. 2026. Re-thinking On-Policy Distillation of Large Language Models: Phenomenology, Mechanism, and Recipe. arXiv preprint arXiv:2604.13016 .Lightman, H.; Kosaraju, V.; Burda, Y.; Edwards, H.; Baker, B.; Lee, T.; Leike, J.; Schulman, J.; Sutskever, I.; and Cobbe, K. 2024. Let’s Verify Step by Step. In International Confer-ence on Learning Representations .Mathematical Association of America. 2026. MAA Invita-tional Competitions. Nguyen, D.; Xiao, H.; Prasad, A.; Khan, Z.; Das, A.; Zhang, A.; Sahu, S.; Lee, H.; Stengel-Eskin, E.; and Bansal, M. 2026. AVSD: Adaptive-View Self-Distillation by Balancing Consensus and Teacher-Specific Privileged Signals. arXiv preprint arXiv:2605.20643 .Patil, S. G.; Mao, H.; Yan, F.; Ji, C. C.-J.; Suresh, V.; Stoica, I.; and Gonzalez, J. E. 2025. The Berkeley Function Calling Leaderboard (BFCL): From Tool Use to Agentic Evaluation of Large Language Models. In Proceedings of the 42nd International Conference on Machine Learning , volume 267, 48371–48392. Penaloza, E.; Vattikonda, D.; Gontier, N.; Lacoste, A.; Char-lin, L.; and Caccia, M. 2026. Privileged Information Distilla-tion for Language Models. arXiv preprint arXiv:2602.04942 .Pyatkin, V.; Malik, S.; Graf, V.; Ivison, H.; Huang, S.; Dasigi, P.; Lambert, N.; and Hajishirzi, H. 2025. Generalizing Ver-ifiable Instruction Following. In Advances in Neural Infor-mation Processing Systems , volume 38. Shao, Z.; Wang, P.; Zhu, Q.; Xu, R.; Song, J.; Bi, X.; Zhang, H.; Zhang, M.; Li, Y. K.; Wu, Y.; and Guo, D. 2024. DeepSeekMath: Pushing the Limits of Mathemati-cal Reasoning in Open Language Models. arXiv preprint arXiv:2402.03300 .Shen, Z.; Tong, J.; Yan, S.; Shen, C.; Chen, H.; Ye, W.; Hu, X.; Miao, R.; Wang, H.; Zhao, J.; Chen, G.; and Ye, J. 2026. Purified OPSD: On-Policy Self-Distillation Without Losing How to Think. arXiv preprint arXiv:2607.02234 .Shenfeld, I.; Damani, M.; Hübotter, J.; and Agrawal, P. 2026. Self-Distillation Enables Continual Learning. arXiv preprint arXiv:2601.19897 .Thinking Machines Lab. 2025. On-Policy Distillation. 
+
+Thinking Machines Lab: Connectionism .Tu, S.; Xu, C.; Zhang, Q.; Ma, Y.; Zhang, Y.; Li, L.; Li, D.; Lan, X.; and Zhao, D. 2026. UCOB: Learning to Utilize and Evolve Agentic Skills via Credit-Aware On-Policy Bidirec-tional Self-Distillation. arXiv preprint arXiv:2606.29502 .Wang, X.; Wei, J.; Schuurmans, D.; Le, Q.; Chi, E.; Narang, S.; Chowdhery, A.; and Zhou, D. 2023. Self-Consistency Improves Chain of Thought Reasoning in Language Models. In International Conference on Learning Representations .Wei, J.; Wang, X.; Schuurmans, D.; Bosma, M.; Xia, F.; Chi, E.; Le, Q. V.; and Zhou, D. 2022. Chain-of-Thought Prompting Elicits Reasoning in Large Language Models. In 
+
+Advances in Neural Information Processing Systems , vol-ume 35. Xu, Y.; Sang, H.; Zhou, Z.; He, R.; Wang, Z.; and Geramifard, A. 2026. TIP: Token Importance in On-Policy Distillation. 
+
+arXiv preprint arXiv:2604.14084 .Yang, A.; et al. 2025. Qwen3 Technical Report. arXiv preprint arXiv:2505.09388 .Yang, W.; Liu, W.; Xie, R.; Yang, K.; Yang, S.; and Lin, Y. 2026. Learning beyond Teacher: Generalized On-Policy Distillation with Reward Extrapolation. arXiv preprint arXiv:2602.12125 .Ye, T.; Dong, L.; Wu, X.; Huang, S.; and Wei, F. 2026. On-Policy Context Distillation for Language Models. arXiv preprint arXiv:2602.12275 .Yu, X.; Li, G.; Si, Q.; Zhang, G.; Xu, Y.; Wang, C.; Dong, S.; Tuo, K.; Zeng, X.; Feng, K.; Wang, Q.; Shi, Y.; Hu, X.; Yue, X.; Wang, J.; and Yan, S. 2026. DOPD: Dual On-Policy Distillation. arXiv preprint arXiv:2606.30626 .Zelikman, E.; Wu, Y.; Mu, J.; and Goodman, N. D. 2022. STaR: Bootstrapping Reasoning With Reasoning. In Ad-vances in Neural Information Processing Systems , vol-ume 35. Zhao, S.; Xie, Z.; Liu, M.; Huang, J.; Pang, G.; Chen, F.; and Grover, A. 2026a. Self-Distilled Reasoner: On-Policy Self-Distillation for Large Language Models. arXiv preprint arXiv:2601.18734 .Zhao, Z.; Ma, X.; Yang, L.; Feng, Y.; Shi, D.; He, J.; Xin, X.; Ren, Z.; and Wu, X.-M. 2026b. ROSD: Reflective On-Policy Self-Distillation for Language Model Reasoning across Do-mains. arXiv preprint arXiv:2605.28014 .Zheng, B.; Ma, X.; Liang, Y.; Ruan, J.; Fu, X.; Lin, K.; Zhu, B.; Zeng, K.; and Cai, X. 2026. SCOPE: Signal-Calibrated On-Policy Distillation Enhancement with Dual-Path Adap-tive Weighting. arXiv preprint arXiv:2604.10688 .

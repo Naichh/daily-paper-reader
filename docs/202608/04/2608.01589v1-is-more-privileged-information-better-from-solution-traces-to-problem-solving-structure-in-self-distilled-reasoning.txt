@@ -1,0 +1,449 @@
+Title: Is More Privileged Information Better? From Solution Traces to Problem-Solving Structure in Self-Distilled Reasoning
+
+URL Source: https://arxiv.org/pdf/2608.01589v1
+
+Published Time: Tue, 04 Aug 2026 01:42:11 GMT
+
+Number of Pages: 9
+
+Markdown Content:
+# Is More Privileged Information Better? From Solution Traces to Problem-Solving Structure in Self-Distilled Reasoning 
+
+## Xuyang Zhao 1, Liting Zhang 1, Zichen Xu 1, Zhihu Wang 2,Xu Caiyue 2, Shiwan Zhao 1∗, Qicheng Li 1∗
+
+> 1
+
+TMCC, College of Computer Science, Nankai University, Tianjin, China 
+
+> 2
+
+Huawei Technologies Ltd., Beijing, China xychao@mail.nankai.edu.cn, liqicheng@nankai.edu.cn, zhaosw@gmail.com 
+
+Abstract 
+
+On-policy self-distillation (OPSD) improves reasoning by us-ing a privileged view of a model conditioned on reference solutions to supervise a student view that observes only the question. However, the teacher-provided token-level tar-gets may depend on reference-specific information unavail-able at inference time. We propose Problem-Space-Guided OPSD (PS-OPSD), which replaces the complete solution with trajectory-grounded guidance describing the initial state, goal conditions, constraints, and a selected state-transition path. The student rollout and OPSD objective remain unchanged. Across three mathematical reasoning benchmarks and model scales ranging from 1.7B to 8B, PS-OPSD achieves the high-est aggregate question-only accuracy among the compared methods. Controlled experiments further indicate that guid-ance relevance and path coherence contribute to these gains, highlighting the representation of privileged information as an important design choice in OPSD. 
+
+## 1 Introduction 
+
+On-policy self-distillation offers an appealing approach to dense supervision for reasoning. A student generates its own trajectory, while a privileged view of the same model, condi-tioned on a verified reference solution, provides next-token supervision along the student-generated prefixes (Agarwal et al. 2024; Zhao et al. 2026). Supervision is therefore ap-plied at states the student actually visits, reducing the mis-match between training prefixes and those encountered dur-ing question-only inference. Because the privileged teacher is another view of the same model, this framework also avoids reliance on a separate, permanently stronger external teacher. However, its training and deployment interfaces are asym-metric. During training, the privileged teacher has access to a complete reference solution, whereas the deployed student must reason from the question alone. A complete solution can make the teacher highly informative, but informative-ness does not necessarily imply transferability. The reference solution ties reusable mathematical relations to a particular final answer, reasoning order, wording, and set of instance-specific calculations. Consequently, the teacher’s token-level targets may depend on information that the student cannot recover from its question-only input at inference time. 
+
+> ∗
+
+Corresponding author. 
+
+Recent analyses of on-policy and privileged self-distillation reinforce this concern. Teacher choice, informa-tion asymmetry, and token-level teachability can substan-tially affect what is transferred to a question-only student (Zhu et al. 2026; Kaur et al. 2026; Kim et al. 2026; Shen et al. 2026). Recent work also reports a concrete behavioral symptom: models trained with OPSD may explicitly refer to reference solutions, answer keys, or hints that are unavail-able in their question-only input (Yang et al. 2026). Such behavior does not by itself establish all forms of privileged-information dependence, but it suggests that conditioning the teacher on a complete reference may introduce reference-specific dependencies that do not transfer cleanly to question-only inference. This raises a representation question that pre-cedes the design of the distillation loss: 
+
+What privileged information should the teacher observe? 
+
+We address this question through the classical problem-space view of problem solving, which characterizes a task in terms of an initial state, goal conditions, applicable operators, and constraints on valid state transitions (Newell and Simon 1972; Fikes and Nilsson 1971). Theories of relational transfer further suggest that structural relations are more reusable than the surface form through which a particular solution instantiates them (Gentner 1983; Gick and Holyoak 1983). Together, these perspectives motivate representing privileged information not as a complete reference trace, but as the problem-solving structure realized along a verified solution trajectory. We do not attempt to reconstruct the full problem space, which would require enumerating all reachable states, ad-missible operators, and alternative solution paths. Instead, for each problem–solution pair, we extract the portion in-stantiated by the verified reference trajectory. The result-ing representation, which we call Problem-Space Guidance, records the Initial State, Goal Conditions, Constraints, and a Selected State-Transition Path. Each transition specifies an Operator, its Preconditions, the induced Transformation, and the Resulting State. This representation remains grounded in a valid solution while emphasizing functional state changes over trace-specific wording, ordering, and arithmetic details. Based on this representation, we propose Problem-Space-Guided On-Policy Self-Distillation ( PS-OPSD ). An offline extractor first transforms each verified reference solution into arXiv:2608.01589v1 [cs.AI] 3 Aug 2026 Problem-Space Guidance. Within the OPSD training loop, 
+
+PS-OPSD modifies only the privileged teacher context: the student continues to generate question-only on-policy tra-jectories, and the token-level distillation objective remains unchanged. At inference time, the trained student reasons from the question alone, without access to the reference so-lution, extracted guidance, privileged teacher, or extractor. Figure 1 summarizes the training and inference interfaces. We evaluate PS-OPSD using Qwen3 models at three scales, from 1.7B to 8B parameters, on three competition-level mathematical reasoning benchmarks. Across all three scales, PS-OPSD achieves the highest aggregate question-only accuracy among the compared methods. Controlled representation variants further investigate the roles of guid-ance relevance, explicit field structure, and state-transition coherence. We additionally analyze teacher-input exposure and downstream question-only behavior to better understand how the representation of privileged information affects self-distillation. Our main contributions are: 
+
+• We formulate privileged-context design in same-model on-policy self-distillation as a transfer problem and intro-duce trajectory-grounded Problem-Space Guidance. 
+
+• We develop PS-OPSD , which replaces complete reference solutions in the privileged teacher context with structured guidance while leaving the student rollout and token-level distillation objective unchanged. 
+
+• We evaluate PS-OPSD across three model scales and three mathematical reasoning benchmarks, and use representa-tion controls and behavioral diagnostics to examine which properties of privileged guidance contribute to its effec-tiveness. 
+
+## 2 Related Work 
+
+On-policy distillation and self-distillation. Knowledge distillation transfers teacher predictions through soft targets or teacher-generated sequences (Hinton, Vinyals, and Dean 2015; Kim and Rush 2016). When those targets are evalu-ated only on fixed trajectories, training prefixes can diverge from states visited by the student at inference time, a gen-eral sequential-learning problem studied by scheduled sam-pling and learner-state imitation (Bengio et al. 2015; Ross, Gordon, and Bagnell 2011). Generalized Knowledge Distil-lation moves supervision onto student-generated sequences and supports forward- or reverse-KL targets (Agarwal et al. 2024). For mathematical reasoning, GRPO instead supplies sequence-level verifiable rewards on sampled trajectories (Shao et al. 2024). Process reward models provide denser feedback over intermediate reasoning steps, but require sep-arate step-level supervision or reward modeling (Lightman et al. 2024). OPSD combines dense on-policy supervision with a same-model teacher: the student generates from the question, while a privileged teacher reads a verified solution and scores the student’s prefixes (Zhao et al. 2026). Our work keeps this OPSD mechanism fixed and studies the represen-tation of the privileged context. 
+
+Privileged information and transferability. Training-only privileged information can improve a deployment-time predictor, and its connection to distillation has long been rec-ognized (Vapnik and Vashist 2009; Lopez-Paz et al. 2016); its utility nevertheless depends on whether the learner can internalize what the privileged view reveals (Penaloza et al. 2026). Recent analyses of on-policy self-distillation sharpen this concern for reasoning models. Instance-specific context, incompatible teacher behavior, and locally unteachable token preferences can weaken or reverse transfer (Zhu et al. 2026; Kaur et al. 2026; Wang et al. 2026). Other work reports that rich solution context may suppress useful epistemic behav-ior or inject reference-specific shortcut signal (Kim et al. 2026; Shen et al. 2026). AVSD addresses view dependence by combining full-solution, partial-solution, and answer-only teachers into consensus and gated residual signals (Nguyen et al. 2026). In contrast, we ask whether a single teacher view can be redesigned around problem-solving relations before distillation. 
+
+Solution-derived plans and scaffolds. Several methods transform, filter, or operationalize solution traces. Studies of chain-of-thought distillation similarly find that rationale organization and compression affect transferred reasoning behavior (Chen et al. 2025; Luo et al. 2025). PAINT adapts how much of a solution is exposed and interpolates priv-ileged energy at selected token positions (Tan and Hong 2026). Adaptive Teacher Exposure learns a controller that selects how much of a reference prefix to reveal during self-distillation (Han et al. 2026). OPHSD uses a dynamic plan– solve harness to generate assisted behavior and distills that behavior into an unassisted model (Zhao, Ma, and Zhang 2026). SORT uses a reference-derived plan to weight to-kens in off-policy repair for all-wrong GRPO groups, while HiLL learns failure-conditioned hints that alter the reasoner’s online RL input (Le et al. 2026; Xia et al. 2026). Outside un-changed OPSD, SuperCorrect extracts hierarchical thought templates for critique and correction, while Reasoning Scaf-folding predicts semantic reasoning signals alongside solu-tion steps (Yang et al. 2024; Wen et al. 2025). These methods establish that solution abstraction and procedural scaffold-ing are not new by themselves. Our narrower contribution is a fixed offline state-transition representation, rather than an adaptive reference-prefix exposure policy, used only as teacher context with the student rollout and OPSD objective held unchanged. 
+
+## 3 Problem-Space-Guided OPSD 
+
+OPSD Preliminaries 
+
+Let q be a problem and r a verified reference solution. A question-only student samples a reasoning trajectory 
+
+ˆy ∼ pθ (· | q). (1) At token t, OPSD queries a privileged view of the same model on the student-generated prefix ˆy<t . OPSD conditions that view on the complete solution, pT (· | q, r, ˆy<t ), and matches the student distribution to the resulting token-level target (Zhao et al. 2026). The student therefore remains on-policy even though the teacher receives information unavailable at inference time. (a) Privileged-Context Construction (b) On-Policy Self-Distillation (c) Token Matching 
+
+(d) Question-Only Inference · No Privileged Modules              
+
+> Dataset
+> 𝐀 = {( 𝐀 ,𝐀 )}
+> Sample
+> (𝐀 ,𝐀 )
+> Question
+> 𝐀
+> Complete
+> Solution
+> 𝐀𨰀𝐀𤠀𝐀𤠀𨰀𥠀 𝐀
+> Teacher
+> Context z
+> 𝐀 𝐀𝐀 𝐀 𝐀 𝐀
+> Offline PS
+> Extraction
+> q and r
+> Problem-Space
+> Guidance
+> 𝐀 0,𝐀 ,𝐀 ,𝐀
+> Student
+> Prompt
+> 𝐀 𝐀𧀀𝐀𦰀
+> Student
+> Policy
+> 𝐀 𝐀 (·| 𝐀 )
+> On-Policy
+> Prefix
+> 𦰀 <𝐀
+> Privileged
+> Teacher
+> 𝐀 𝐀 (·| 𝐀 ,𝐀 ,𦰀 <𝐀 )
+> Teacher
+> Prompt
+> q + z
+
+TeaTtt   
+
+> Teacher vs. Student
+
+Per-Token 
+
+Divergence    
+
+> 𝐀 (𝐀 𝐀 || 𝐀 𝐀 )
+> Student Update Only
+> Question
+> only input
+> Trained Student
+> qonly
+> Reasoning + Answer
+> standard decoding
+> OPSD
+> sample
+> score
+> PS-OPSD
+
+INFERENCE  
+
+> Absent at Inference
+> solution · guidance
+> teacher · extractor
+
+❌️Figure 1: PS-OPSD replaces a complete-solution teacher context with explicit, trajectory-grounded problem-space guidance. OPSD conditions the privileged teacher on the full reference solution, whereas PS-OPSD extracts an initial state, goal conditions, constraints, and a selected state-transition path whose steps specify operators, preconditions, transformations, and resulting states. In both settings, the question-only student generates on-policy prefixes and receives the same token-level OPSD distribution-matching objective. At inference time, the trained student observes only the question; the reference solution, guidance, teacher, and extractor are absent. 
+
+Explicit Problem-Space Guidance 
+
+Following classical problem-space accounts (Newell and Si-mon 1972; Fikes and Nilsson 1971), we represent a mathe-matical problem q conceptually as 
+
+P(q) = ⟨S, s 0, O, G, C ⟩. (2) Here, S is the state space, s0 the Initial State, O the admissible operators, and G the Goal Conditions; C is a mathematics-specific extension for domain restrictions, global invariants, and validity conditions. Equation 2 is conceptual and is not constructed by PS-OPSD. Because enumerating S and O is generally impracti-cal and one reference solution r reveals only a single realized trajectory, an offline extractor serializes the teacher guidance as 
+
+gPS (q, r ) = ⟨s0, G, C, π ⟩. (3) Leaving S and O implicit, the selected path π =(τ1, . . . , τ k) contains only transition records derived from 
+
+r. Each transition is serialized as 
+
+τi = ( oi, pre i, transform i, s i). (4) Given the top-level Initial State s0, each τi records one sub-sequent transition: oi names the Operator selected from the conceptual set O, pre i states its local Preconditions in si−1,
+
+transform i describes the induced change, and si records the Resulting State. Under the intended semantics, the states 
+
+s0, . . . , s k respect the global Constraints C, and the terminal state sk meets the Goal Conditions G.Accordingly, Problem-Space Guidance uses four top-level fields: Algorithm 1: PS-OPSD Procedure 
+
+Input: Dataset D = {(qi, r i)}Ni=1 ; fixed teacher pT ; student 
+
+pθ ; temperature T ; clipping threshold c.1 Offline extraction: Cache gi ← gPS (qi, r i) for every 
+
+(qi, r i) ∈ D .2 repeat 
+
+3 Sample a minibatch B ⊂ { (qi, g i)}Ni=1 .4 for each (q, g ) ∈ B do 
+
+5 Sample an on-policy trajectory ˆy ∼ pθ (· | q).6 for t = 1 , . . . , |ˆy| do 
+
+7 Evaluate pPS  
+
+> T,t
+
+= pT (· | q, g, ˆy<t ).8 Evaluate pθ,t = pθ (· | q, ˆy<t ).9 end for 
+
+10 Compute the mean clipped-KL loss ℓ(q, g ) over the tra-jectory. 11 end for 
+
+12 Update only θ using the minibatch mean loss; keep pT and the cached guidance fixed. 13 until the training budget is exhausted. 
+
+Output: Trained question-only student pθ (· | q).
+
+Initial State: variables, entities, givens, and relations. 
+
+Goal Conditions: target and verifiable success conditions. 
+
+Constraints: invariants, domains, and validity conditions. 
+
+Selected State-Transition Path: an ordered list of Operator, Preconditions, Transformation, and Resulting State records. 
+
+Figure 2 illustrates how a question and complete verified solution are transformed into this serialization for a sym-bolic rate-composition problem. The first three fields specify Extract Problem-Space Guidance:    
+
+> Problem q
+> A boat travels a,b km downstream/upstream in T₁ hours and c,d km in T₂.
+> Given a,b,c,d,T₁,T₂, find still-water speed v and current speed u.
+> Complete Reference Solution r (excerpt)
+> Rates v+u and v-u yield the two time equations.
+> Let p=1/(v+u), q=1/(v-u); solve ap+bq=T₁, cp+dq=T₂.
+> ... Recover v=(1/p+1/q)/2 and u=(1/p-1/q)/2;
+> verify both equations and v>u>0.
+> Offline extraction
+> Extracted Guidance g PS (q,r)
+> Initial State
+> Variables: v (still-water speed), u (current speed).
+> Relations: a/(v+u)+b/(v-u)=T₁; c/(v+u)+d/(v-u)=T₂.
+> Goal Conditions
+> Recover v,u; both equations hold; v>u>0.
+> Constraints
+> v+u≠0; v-u≠0; Δ=ad-bc≠0.
+> Selected State-Transition Path
+> π=(τ₁,τ₂,τ₃)
+> τ₁. Operator: reciprocal linearization; Preconditions: v+u≠0, v-u≠0.
+> Transform: p=1/(v+u), q=1/(v-u); Result: linear system.
+> τ₂. Operator: solve 2×2 system; Preconditions: Δ=ad-bc≠0.
+> Transform: solve for p,q; Result: p,q uniquely determined.
+> τ₃. Operator: inverse transform; Preconditions: p≠0, q≠0.
+> Transform: recover v,u; Result: candidate state for goal checking.
+
+Figure 2: Offline Problem-Space Guidance extraction for a symbolic rate-composition problem. The complete verified solution is abbreviated; the four-field output records global problem information and a selected transition path while omitting an instantiated final answer. global problem information, while the final field records a reference-derived sequence of local transitions. Algorithm 1 summarizes the complete procedure. The ex-traction stage is performed once before training; the cached guidance is used only by the teacher, which scores the same prefixes generated and evaluated by the student. 
+
+Training and Question-Only Inference 
+
+PS-OPSD replaces r in the privileged teacher context with 
+
+gPS (q, r ) while leaving the question-only student unchanged: 
+
+pOPSD  
+
+> T,t
+
+= pT (· | q, r, ˆy<t ),pPS  
+
+> T,t
+
+= pT (· | q, g PS (q, r ), ˆy<t ),pθ,t = pθ (· | q, ˆy<t ).
+
+(5) We treat pT as a fixed target distribution and optimize only the student parameters θ. For distributions with logits zp
+
+and zq , define the implemented coordinate-clipped KL-form objective as 
+
+p(T ) = softmax( zp/T ),q(T ) = softmax( zq /T ),dT (p, q ; v) = p(T )(v) log p(T )(v)
+
+q(T )(v) ,
+
+eDc,T (p∥q) = X
+
+> v∈V
+
+min {dT (p, q ; v), c } .
+
+(6) For the training distribution D, the objective is then 
+
+LPS -OPSD = E (q,r )∼D  
+
+> ˆy∼pθ(·| q)
+
+"
+
+1
+
+|ˆy|
+
+X
+
+> t
+
+eDc,T 
+
+ pPS  
+
+> T,t
+
+∥ pθ,t 
+
+#
+
+.
+
+(7) The vocabulary sum is computed in full, and clipping is applied to each vocabulary-coordinate contribution before summation and averaging over non-padding sequence posi-tions. Thus, eDc,T is not the unmodified mathematical KL divergence. The exact temperature and clipping threshold remain bound to each run manifest because the clipping con-figuration differs across scales and runs. No guidance is appended to the student prompt. At infer-ence time, generation follows pθ (· | q) without the reference, extractor, teacher, or any planning module. 
+
+## 4 Experimental Setup 
+
+Models and training data. We evaluate Qwen3-1.7B, Qwen3-4B, and Qwen3-8B (Yang et al. 2025). Teacher and student use the same model family and initialization within each condition. In all OPSD variants, the teacher is the ini-tial Qwen3 checkpoint evaluated with LoRA adapters dis-abled and without gradient tracking, while optimization up-dates only the student’s LoRA parameters. Training uses the mathematical-reasoning subset of OpenThoughts (Guha et al. 2025). 
+
+Guidance extractor. We use Qwen3.6-35B-A3B (Qwen Team 2026) as an offline extractor to transform each question and verified reference solution into Problem-Space Guid-ance. The resulting guidance is cached before training, and the extractor is not used during optimization or question-only inference. 
+
+Benchmarks and metrics. We evaluate competition-level mathematical reasoning on AIME24, AIME25, and HMMT25. All tabulated accuracy results use K = 12 stored question-only generations per problem, produced under com-mon decoding settings and generation limits. For a bench-mark with N problems, accuracy is reported as a percentage, 
+
+Accuracy = 100 
+
+KN 
+
+> N
+
+X
+
+> i=1
+
+ci, (8) where K = 12 and ci is the number of correct generations among the K generations for problem i. For each scale, Avg is the unweighted mean of the three benchmark accuracies. Method AIME24 AIME25 HMMT25 Avg                                                                                                                                                                                                 
+
+> Qwen3-1.7B
+> Base 48.89 38.33 22.78 36.67 SFT 51 .11 ±0.28 38 .70 ±0.70 26 .76 ±0.70 38 .86 ±0.39
+> GRPO 49 .44 ±0.56 40 .19 ±0.32 23 .43 ±0.98 37 .69 ±0.09
+> OPSD 53 .80 ±0.89 41 .67 ±0.83 27 .78 ±0.56 41 .08 ±0.28
+> AVSD 51 .85 ±0.16 38 .61 ±0.73 26 .57 ±1.53 39 .01 ±0.57
+> PS-OPSD 55 .37 ±1.53 41 .48 ±2.89 32 .50 ±1.94 43 .12 ±2.00
+> Qwen3-4B
+> Base 75.28 66.39 43.61 61.76 SFT 74 .35 ±0.42 66 .30 ±1.53 44 .17 ±1.00 61 .60 ±0.79
+> GRPO 75 .74 ±0.85 66 .57 ±1.40 44 .81 ±0.70 62 .38 ±0.84
+> OPSD 73 .06 ±0.73 68 .06 ±1.00 43 .98 ±0.70 61 .70 ±0.79
+> AVSD 75 .46 ±0.70 66 .67 ±0.28 46 .20 ±0.42 62 .78 ±0.19
+> PS-OPSD 76 .57 ±0.85 70 .56 ±0.73 45 .83 ±1.21 64 .32 ±0.33
+> Qwen3-8B
+> Base 75.00 66.94 45.00 62.31 SFT 76 .02 ±0.58 67 .78 ±1.69 43 .80 ±1.63 62 .53 ±1.02
+> GRPO 75 .83 ±0.48 69 .35 ±0.58 44 .72 ±1.00 63 .30 ±0.46
+> OPSD 75 .74 ±0.98 70 .09 ±0.89 44 .91 ±0.98 63 .58 ±0.62
+> AVSD 77 .78 ±0.73 66 .67 ±1.00 46 .48 ±1.25 63 .64 ±0.96
+> PS-OPSD 77 .13 ±0.85 71 .30 ±0.58 47 .78 ±0.28 65 .40 ±0.21
+
+Table 1: Question-only generation accuracy across model scales (%). All scores use 12 stored generations per problem. For each post-training method and benchmark, the checkpoint with the highest accuracy averaged across three independent training seeds is selected; entries report the mean ± sample standard deviation across those seeds. Avg is the unweighted mean across the three benchmarks and may therefore combine checkpoints. Bold marks the highest mean in each scale and column. 
+
+Compared methods. The main comparison includes the unadapted post-trained Qwen3 checkpoint (Base), super-vised fine-tuning (SFT), GRPO (Shao et al. 2024), OPSD (Zhao et al. 2026), AVSD (Nguyen et al. 2026), and PS-OPSD . OPSD exposes the complete verified solution to the privileged teacher. AVSD combines multiple privileged views and reconstructs a consensus-plus-residual target, so it is a method-level baseline rather than a representation con-trol. 
+
+Representation controls. At the 4B primary setting, we compare Problem-Space Guidance with three controlled variants. Flattened PS removes field names, hierarchy, and step delimiters while preserving content, order, and token budget under a deterministic serialization rule. Mismatched PS replaces the target guidance with a donor from another problem, matched by problem family, difficulty bin, and guid-ance length. Path-Corrupted PS retains the semantics inside every transition but breaks global path coherence by reorder-ing or incompatibly composing transitions. The corruption audit verifies local-content retention and cross-step depen-dency breakage. 
+
+Correct-path token entropy. We examine whether the ac-curacy gains of OPSD and PS-OPSD are merely associ-ated with a sharper predictive distribution along correct re-sponses. Each method and scale contributes the checkpoint with the highest Avg across the three benchmarks, with ties broken by the earlier step. We replay each checkpoint’s 12 question-only generations under teacher forcing and compute 
+
+Ht = − P 
+
+> v
+
+pθ (v | q, y <t ) log pθ (v | q, y <t ) over the raw full-vocabulary distribution at temperature one. We average over non-structural response tokens within each path, then micro-average over all, correct, or failed paths. Confidence intervals resample matched problems with all 12 paths and are stratified by benchmark. 
+
+## 5 Results and Analysis 
+
+Main Question-Only Performance 
+
+Table 1 implements the paper’s consistency criterion. For each scale, we first average accuracy over AIME24, AIME25, and HMMT25; PS-OPSD counts as consistently highest within the oracle envelope only if its Avg strictly exceeds every compared method at all three scales. The observed oracle-envelope Avg scores are 43.12, 64.32, and 65.40 for 
+
+PS-OPSD at 1.7B, 4B, and 8B, exceeding the strongest base-line at every scale by 1.54–2.04 percentage points. Across the nine scale–benchmark cells, PS-OPSD is strictly highest in six. The three exceptions are OPSD on AIME25 at 1.7B and AVSD on HMMT25 at 4B and AIME24 at 8B, where the respective gaps over PS-OPSD are 0.19, 0.37, and 0.65 points; the headline result is therefore cross-benchmark con-sistency, not uniform per-benchmark dominance. We report every benchmark even when its direction differs from the aggregate result, and we treat exact ties as co-highest rather than uniquely highest. Figure 3 complements the oracle envelope with matched-checkpoint trajectories at the 4B primary setting. At check-point 100, PS-OPSD exceeds OPSD on all three benchmarks. It also has the highest endpoint accuracy among the three methods on all three benchmarks. The trajectories also show PS-OPSD OPSD ▲ AVSD 
+
+AIME24     
+
+> 20 40 60 80 100
+> 70
+> 72
+> 74
+> 76
+> 78
+> ▲
+> ▲
+> ▲
+> ▲
+> ▲
+
+AIME25       
+
+> 20 40 60 80 100
+> 60
+> 62
+> 64
+> 66
+> 68
+> 70
+> 72
+> ▲
+> ▲▲
+> ▲▲
+
+HMMT25      
+
+> 20 40 60 80 100
+> 38
+> 40
+> 42
+> 44
+> 46
+> ▲
+> ▲
+> ▲
+> ▲▲
+> Mean accuracy (%)
+> Training step
+
+Figure 3: Question-only accuracy (%) across checkpoints 20–100 for OPSD, AVSD, and PS-OPSD at Qwen3-4B. The panels report AIME24, AIME25, and HMMT25, respectively. that the endpoint advantage emerges late rather than holding uniformly throughout training. Following Yang et al. (2026), who characterize explicit appeals to an invisible reference solution at inference time as privileged information leakage, Figure 4 measures this behavioral manifestation. A completion is positive if it ex-plicitly invokes an unavailable reference solution, answer key, hint, or guidance. On the training problems, the invo-cation rate at the final checkpoint is 3.0% for OPSD and 0.5% for PS-OPSD ; on held-out validation problems, it is 2.2% and 0.4%, respectively. The lower rates for PS-OPSD 
+
+on both splits are consistent with reduced reliance on un-available reference-specific information, including beyond the problems encountered during optimization. 
+
+What Matters in Problem-Space Guidance                     
+
+> Condition AIME24 AIME25 HMMT25 Avg
+> PS-OPSD 76.57 70.56 45.83 64.32
+> Flattened PS 75.37 68.24 47.22 63.61 Mismatched PS 74.63 67.31 43.33 61.76 Path-Corrupted PS 73.06 68.89 44.63 62.19
+
+Table 2: Controlled guidance comparison at Qwen3-4B (ac-curacy, %). Each score is the per-benchmark oracle-best checkpoint selected on the same benchmark being reported. Avg is the unweighted mean of the three displayed scores. Bold marks the highest value in each column. Table 2 probes three representation hypotheses at the 4B primary setting. PS-OPSD reaches an Avg of 64.32, com-pared with 63.61 for Flattened PS, 61.76 for Mismatched PS, and 62.19 for Path-Corrupted PS. The 0.71-point Avg gap over Flattened PS, computed from unrounded values, is con-sistent with an incremental role for visible fields and bound-aries in aggregate, but Flattened PS is 1.39 points higher on HMMT25, so the pattern is not uniform across benchmarks. The 2.56-point gap over Mismatched PS appears on all three benchmarks and is consistent with the importance of target-relevant guidance. The 2.13-point gap over Path-Corrupted PS also appears on all three benchmarks and is consistent with sensitivity to globally coherent transition order. 
+
+Problem-Level Behavior 
+
+Aggregate accuracy does not distinguish general post-training gains from the incremental effect of changing the privileged representation. Comparisons with Base measure the overall effect of post-training. OPSD and PS-OPSD use the same OPSD objective and differ only in the privileged teacher context: OPSD receives the complete reference solu-tion, whereas PS-OPSD receives Problem-Space Guidance. Their comparison therefore focuses on the choice of privi-leged representation.                             
+
+> Method ∆Base Better Worse Tied Base +0 .00 0090 SFT −0.15 13 15 62 GRPO +0 .62 17 13 60
+> OPSD −0.06 13 11 66 AVSD +1 .02 13 11 66
+> PS-OPSD +2 .56 18 765
+
+Table 3: Problem-level capability changes relative to Base for Qwen3-4B over 90 benchmark problems. ∆Base is the aggregate accuracy difference in percentage points. Better, Worse, and Tied count problems on which a method produces more, fewer, or the same number of correct generations as Base. Table 3 first asks whether each training method improves over the unadapted model. PS-OPSD has the largest aggre-gate gain at +2 .56 points, improving the per-problem cor-rect count on 18 problems and regressing on 7. AVSD and GRPO improve by +1 .02 and +0 .62 points, respectively, while OPSD and SFT decline by 0.06 and 0.15 points. The direct comparison between PS-OPSD and OPSD asks a narrower representation question. PS-OPSD has a +2 .62 -point aggregate difference, with 23 problems favoring PS-OPSD , 9 favoring OPSD , and 58 tied. OPSD PS-OPSD 
+
+(a) Training set      
+
+> 020 40 60 80 100
+> 0.0
+> 0.5
+> 1.0
+> 1.5
+> 2.0
+> 2.5
+> 3.0
+
+(b) Held-out validation set      
+
+> 020 40 60 80 100
+> Normalized training progress (%)
+> Explicit PI-invocation rate (%)
+
+Figure 4: Measured explicit PI-invocation rates for OPSD and PS-OPSD over normalized training progress on (a) training problems and (b) held-out validation problems.                             
+
+> Method Hard Avg Hard Pass Ret. Net Exp. Base 0.00 0.00 100.00 0SFT 0.85 4.35 97.01 −1
+> GRPO 6.04 13.04 98.51 +2
+> OPSD 1.69 8.70 97.01 0AVSD 2.66 4.35 98.51 0
+> PS-OPSD 4.35 13.04 98.51 +2
+
+Table 4: Base-defined hard-case rescue at Qwen3-4B (%). Table 4 separates new capability from retention of prob-lems that Base already solves. Relative to OPSD , PS-OPSD 
+
+raises hard-case accuracy from 1.69 to 4.35 , hard-case pass rate from 8.70% to 13 .04% , and retention from 97 .01% to 
+
+98 .51% . Its net expansion is +2 , compared with 0 for OPSD ,showing that its aggregate gain is accompanied by broader coverage of the Base-hard subset while retaining 98 .51% of Base-solved problems. 
+
+Correct-Path Token Entropy                             
+
+> Scale Reference ∆Avg ∆pass@12 ∆HC
+> 1.7B Base +5 .34 −1.11 +0 .0697
+> 1.7B OPSD −0.68 −4.44 −0.0185
+> 4B Base +0 .43 +0 .00 +0 .0763
+> 4B OPSD +0 .00 +1 .11 +0 .0321
+> 8B Base +1 .11 +2 .22 +0 .0453
+> 8B OPSD +0 .68 +4 .44 +0 .0319
+
+Table 5: Paired best-checkpoint differences, PS-OPSD minus the reference. Accuracy columns are percentage points; HC
+
+is correct-path token entropy in nats. Positive ∆HC indicates a less concentrated token distribution along each method’s own correct paths, not greater semantic strategy diversity or better reasoning by itself. Table 5 uses Base to calibrate how OPSD training changes predictive concentration. At the selected checkpoints, both 
+
+OPSD and PS-OPSD improve Avg over Base at all three scales, and neither exhibits lower correct-path token entropy. The implied OPSD –Base entropy differences are +0 .0882 ,
+
++0 .0442 , and +0 .0134 at 1.7B, 4B, and 8B, respectively. Thus, the observed Avg gains are not obtained through a uni-formly sharper correct-path distribution; pass@12 relative to Base remains mixed. The direct comparison between PS-OPSD and OPSD 
+
+is capacity dependent. At 1.7B, PS-OPSD has lower Avg, pass@12, and correct-path entropy. At 4B, Avg is unchanged, while pass@12 and entropy increase by 1.11 points and 
+
+0.0321 nats. At 8B, Avg, pass@12, and entropy increase by 0.68 , 4.44 , and 0.0319 , respectively. The 4B and 8B re-sults show that PS-OPSD ’s coverage gains do not rely on a more concentrated predictive distribution. 
+
+## 6 Conclusion and Limitations 
+
+PS-OPSD achieves the highest Avg among the compared methods at every model scale, exceeding the strongest base-line by 1.54–2.04 percentage points. The representation con-trols further support the importance of target-relevant guid-ance and globally coherent transition paths, while the explicit PI-invocation rate is lower than OPSD on both training and held-out problems. Together, these results show that more privileged information is not automatically more transfer-able: structuring the teacher context around problem-solving relations provides a stronger interface for question-only self-distillation than exposing the complete reference solution. Our evaluation is limited to competition mathematics, three Qwen3 scales. Problem-Space Guidance captures a se-lected trajectory derived from one verified solution rather than the complete problem space, and the offline extrac-tor adds preprocessing cost. Future work should test other model families and domains, alternative verified paths, re-covery from intermediate errors. The teacher-input exposure and PI-invocation analyses are surface and behavioral diag-nostics rather than causal identification of privileged infor-mation leakage, while correct-path token entropy measures local predictive concentration rather than semantic strategy diversity. References 
+
+Agarwal, R.; Vieillard, N.; Zhou, Y.; Stanczyk, P.; Ramos Garea, S.; Geist, M.; and Bachem, O. 2024. On-Policy Distillation of Language Models: Learning from Self-Generated Mistakes. In The Twelfth International Confer-ence on Learning Representations .Bengio, S.; Vinyals, O.; Jaitly, N.; and Shazeer, N. 2015. Scheduled Sampling for Sequence Prediction with Recur-rent Neural Networks. In Advances in Neural Information Processing Systems , volume 28. Chen, X.; Sun, Z.; Guo, W.; Zhang, M.; Chen, Y.; Sun, Y.; Su, H.; Pan, Y.; Klakow, D.; Li, W.; and Shen, X. 2025. Unveiling the Key Factors for Distilling Chain-of-Thought Reasoning. In Findings of the Association for Computational Linguistics: ACL 2025 .Fikes, R. E.; and Nilsson, N. J. 1971. STRIPS: A New Approach to the Application of Theorem Proving to Problem Solving. Artificial Intelligence , 2(3–4): 189–208. Gentner, D. 1983. Structure-Mapping: A Theoretical Frame-work for Analogy. Cognitive Science , 7(2): 155–170. Gick, M. L.; and Holyoak, K. J. 1983. Schema Induction and Analogical Transfer. Cognitive Psychology , 15(1): 1–38. Guha, E.; Marten, R.; Keh, S.; Raoof, N.; Smyrnis, G.; Bansal, H.; Nezhurina, M.; Mercat, J.; Vu, T.; Sprague, Z.; et al. 2025. OpenThoughts: Data Recipes for Reasoning Models. arXiv:2506.04178. Han, Z.; Zhang, T.; Wang, H.; and Sun, Y. 2026. Adaptive Teacher Exposure for Self-Distillation in LLM Reasoning. ArXiv preprint arXiv:2605.11458, arXiv:2605.11458. Hinton, G.; Vinyals, O.; and Dean, J. 2015. Distilling the Knowledge in a Neural Network. ArXiv preprint arXiv:1503.02531, arXiv:1503.02531. Kaur, S.; Ri, N.; He, Y.; Fowl, L.; and Arora, S. 2026. Re-thinking On-Policy Self-Distillation for Thinking Models. ArXiv preprint arXiv:2607.05184, arXiv:2607.05184. Kim, J.; Luo, X.; Kim, M.; Lee, S.; Kim, D.; Jeon, J.; Li, D.; and Yang, Y. 2026. Why Does Self-Distillation (Sometimes) Degrade the Reasoning Capability of LLMs? ArXiv preprint arXiv:2603.24472, arXiv:2603.24472. Kim, Y.; and Rush, A. M. 2016. Sequence-Level Knowl-edge Distillation. In Proceedings of the 2016 Conference on Empirical Methods in Natural Language Processing , 1317– 1327. Le, D. A.; Nguyen, T.-P.; Nguyen, T. H.; Van, L. N.; and Le, T. 2026. Selective Off-Policy Reference Tuning with Plan Guid-ance. ArXiv preprint arXiv:2605.11505, arXiv:2605.11505. Lightman, H.; Kosaraju, V.; Burda, Y.; Edwards, H.; Baker, B.; Lee, T.; Leike, J.; Schulman, J.; Sutskever, I.; and Cobbe, K. 2024. Let’s Verify Step by Step. In The Twelfth Interna-tional Conference on Learning Representations .Lopez-Paz, D.; Bottou, L.; Schölkopf, B.; and Vapnik, V. 2016. Unifying Distillation and Privileged Information. In 
+
+International Conference on Learning Representations .Luo, Y.; Song, Y.; Zhang, X.; Liu, J.; Wang, W.; Chen, G.; Su, W.; and Zheng, B. 2025. Deconstructing Long Chain-of-Thought: A Structured Reasoning Optimization Framework for Long CoT Distillation. arXiv:2503.16385. Newell, A.; and Simon, H. A. 1972. Human Problem Solving .Prentice-Hall. Nguyen, D.; Xiao, H.; Prasad, A.; Khan, Z.; Das, A.; Zhang, A.; Sahu, S.; Lee, H.; Stengel-Eskin, E.; and Bansal, M. 2026. AVSD: Adaptive-View Self-Distillation by Balancing Consensus and Teacher-Specific Privileged Signals. ArXiv preprint arXiv:2605.20643, arXiv:2605.20643. Penaloza, E.; Vattikonda, D.; Gontier, N.; Lacoste, A.; Charlin, L.; and Caccia, M. 2026. Privileged Informa-tion Distillation for Language Models. ArXiv preprint arXiv:2602.04942, arXiv:2602.04942. Qwen Team. 2026. Qwen3.6-35B-A3B: Agentic Coding Power, Now Open to All. Official model release. Ross, S.; Gordon, G. J.; and Bagnell, J. A. 2011. A Reduction of Imitation Learning and Structured Prediction to No-Regret Online Learning. In Proceedings of the Fourteenth Interna-tional Conference on Artificial Intelligence and Statistics ,volume 15, 627–635. Shao, Z.; Wang, P.; Zhu, Q.; Xu, R.; Song, J.; Bi, X.; Zhang, H.; Zhang, M.; Li, Y. K.; Wu, Y.; et al. 2024. DeepSeek-Math: Pushing the Limits of Mathematical Reasoning in Open Language Models. ArXiv preprint arXiv:2402.03300, arXiv:2402.03300. Shen, Z.; Tong, J.; Yan, S.; Shen, C.; Chen, H.; Ye, W.; Hu, X.; Miao, R.; Wang, H.; Zhao, J.; Chen, G.; and Ye, J. 2026. Purified OPSD: On-Policy Self-Distillation Without Losing How to Think. ArXiv preprint arXiv:2607.02234, arXiv:2607.02234. Tan, Z.; and Hong, Y. 2026. PAINT: Partial-Solution Adaptive Interpolated Training for Self-Distilled Reasoners. ArXiv preprint arXiv:2604.26573, arXiv:2604.26573. Vapnik, V.; and Vashist, A. 2009. A New Learning Paradigm: Learning Using Privileged Information. Neural Networks ,22(5–6): 544–557. Wang, Y.; Lu, S.; Gu, Y.; Wang, P.; Yang, Y.; Yan, Z.; Xie, C.; Wu, J.; and Yang, H. 2026. Not All Disagreement Is Learn-able: Token Teachability in On-Policy Distillation. ArXiv preprint arXiv:2605.26844, arXiv:2605.26844. Wen, X.; Huang, J.; Li, Z.; Li, M.; Zhong, J.; Xu, Z.; Yuan, M.; Huang, Y.; and Xu, Q. 2025. Reasoning Scaffolding: Distilling the Flow of Thought from LLMs. ArXiv preprint arXiv:2509.23619, arXiv:2509.23619. Xia, Y.; Xu, C.; Yao, Z.; McAuley, J.; and He, Y. 2026. Learning to Hint for Reinforcement Learning. ArXiv preprint arXiv:2604.00698, arXiv:2604.00698. Yang, A.; Li, A.; Yang, B.; Zhang, B.; Hui, B.; Zheng, B.; Yu, B.; Gao, C.; Huang, C.; Lv, C.; et al. 2025. Qwen3 Technical Report. ArXiv preprint arXiv:2505.09388, arXiv:2505.09388. Yang, C.; Qin, C.; Si, Q.; Chen, M.; Gu, N.; Yao, D.; Lin, Z.; Wang, W.; Wang, J.; and Duan, N. 2026. Self-Distilled RLVR. arXiv preprint arXiv:2604.03128 .Yang, L.; Yu, Z.; Zhang, T.; Xu, M.; Gonzalez, J. E.; Cui, B.; and Yan, S. 2024. SuperCorrect: Advancing Small LLM Reasoning with Thought Template Distilla-tion and Self-Correction. ArXiv preprint arXiv:2410.09008, arXiv:2410.09008. Zhao, S.; Xie, Z.; Liu, M.; Huang, J.; Pang, G.; Chen, F.; and Grover, A. 2026. Self-Distilled Reasoner: On-Policy Self-Distillation for Large Language Models. ArXiv preprint arXiv:2601.18734, arXiv:2601.18734. Zhao, Z.; Ma, L.; and Zhang, W. 2026. Training with Harnesses: On-Policy Harness Self-Distillation for Complex Reasoning. ArXiv preprint arXiv:2605.08741, arXiv:2605.08741. Zhu, S.; Ye, X.; Lu, H.; Shi, W.; and Liu, G. 2026. The Many Faces of On-Policy Distillation: Pitfalls, Mechanisms, and Fixes. ArXiv preprint arXiv:2605.11182, arXiv:2605.11182.
