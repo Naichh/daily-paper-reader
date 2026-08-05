@@ -6,53 +6,55 @@
 </div>
 
 ## 每次日报
-- 最新运行日期：2026-08-04
-- 运行时间：2026-08-04 21:53:21 UTC
+- 最新运行日期：2026-08-05
+- 运行时间：2026-08-05 21:49:01 UTC
 - 运行状态：成功
 - 本次总论文数：11
-- 精读区：7
-- 速读区：4
+- 精读区：6
+- 速读区：5
 
 ### 今日简报（AI）
-今日11篇论文中7篇精读，聚焦策略蒸馏方向；两篇满分《Weak-to-Strong On-Policy Distillation》与《DAPD: Dual-Anchored Policy Distillation》值得优先研读。速读中《HindSearch》等也涉及强化学习与自我蒸馏，可作交叉参考。建议普通读者从满分两篇的对比分析入手，再延展至速读中的相关方法。
-- 详情：[/202608/04/README](/202608/04/README)
+今日精读11篇论文，聚焦AI对齐与推理蒸馏，两篇满分研究成焦点。  
+最值得关注：教师模型误导信号的检测与修正，以及工具推理中“事后自我蒸馏”的增效方法。  
+建议读者优先精读这两篇满分论文，速读可关注流匹配模型异构蒸馏与反思式推理训练。
+- 详情：[/202608/05/README](/202608/05/README)
 
 ### 精读区论文标签
-1. [Weak-to-Strong On-Policy Distillation](/202608/04/2607.26246v2-weak-to-strong-on-policy-distillation)  
+1. [When Teachers Mislead: Spurious-Signal-Aware On-Policy Distillation](/202608/05/2608.03632v1-when-teachers-mislead-spurious-signal-aware-on-policy-distillation)  
    标签：评分：10.0/10、query:policy-dist
-   evidence：弱到强在线策略蒸馏，用于大语言模型能力迁移
-2. [DAPD: Dual-Anchored Policy Distillation](/202608/04/2608.01735v1-dapd-dual-anchored-policy-distillation)  
+   evidence：面向LLM的虚假信号感知在线策略蒸馏
+2. [TurnSight: Turn-Level Hindsight Self-Distillation for Tool-Integrated Reasoning](/202608/05/2608.04007v1-turnsight-turn-level-hindsight-self-distillation-for-tool-integrated-reasoning)  
    标签：评分：10.0/10、query:policy-dist
-   evidence：直接针对语言模型后训练中的在线自我蒸馏问题，解决特权错觉
-3. [Group-Reflective Self-Distillation for Agentic Reinforcement Learning](/202608/04/2607.28076v2-group-reflective-self-distillation-for-agentic-reinforcement-learning)  
+   evidence：面向后训练语言模型推理的在线策略自蒸馏
+3. [EviSD: Evidence-Conditioned Self-Distillation for Search-Augmented Agents](/202608/05/2608.01359v1-evisd-evidence-conditioned-self-distillation-for-search-augmented-agents)  
    标签：评分：9.0/10、query:policy-dist
-   evidence：组反思自蒸馏从策略自身rollout中提取指导用于智能体RL。
-4. [Distill Where You Fail: Recovering Learning Signals of Negative RL-Groups from Adaptive Teacher Guidance](/202608/04/2608.00782v1-distill-where-you-fail-recovering-learning-signals-of-negative-rl-groups-from-adaptive-teacher-guidance)  
+   evidence：使用实例级证据作为特权信息进行自蒸馏，实现动作级信用分配
+4. [Language-Specialized Multi-Teacher On-Policy Distillation for Multilingual LLM-Based ASR](/202608/05/2608.03610v1-language-specialized-multi-teacher-on-policy-distillation-for-multilingual-llm-based-asr)  
    标签：评分：9.0/10、query:policy-dist
-   evidence：将GRPO与在线策略蒸馏结合用于LLM后训练，在RL组奖励相同时恢复学习信号
-5. [Distill What the Student Can See: Fisher-Projected On-Policy Distillation for Vision-Language Models](/202608/04/2608.01263v1-distill-what-the-student-can-see-fisher-projected-on-policy-distillation-for-vision-language-models)  
-   标签：评分：9.0/10、query:policy-dist
-   evidence：直接将在线策略蒸馏应用于视觉语言模型后训练，让教师目标适配学生能力
-6. [Is More Privileged Information Better? From Solution Traces to Problem-Solving Structure in Self-Distilled Reasoning](/202608/04/2608.01589v1-is-more-privileged-information-better-from-solution-traces-to-problem-solving-structure-in-self-distilled-reasoning)  
-   标签：评分：9.0/10、query:policy-dist
-   evidence：研究了推理LLM的在线自蒸馏，并提出用结构化指导替代完整解轨迹
-7. [PCSD: Persistent Consistency for Self-Distillation in Agentic Reinforcement Learning](/202608/04/2608.01837v1-pcsd-persistent-consistency-for-self-distillation-in-agentic-reinforcement-learning)  
-   标签：评分：9.0/10、query:policy-dist
-   evidence：面向智能体强化学习的在线自蒸馏方法，针对稀疏奖励问题
+   evidence：语言特化多教师在策略蒸馏，利用RL优化教师并迁移到多语言ASR
+5. [OPTD: On-Policy Transition Distillation with Consistency-Guided Adaptive Compression for Few-Step Diffusion Language Models](/202608/05/2608.02942v1-optd-on-policy-transition-distillation-with-consistency-guided-adaptive-compression-for-few-step-diffusion-language-models)  
+   标签：评分：8.0/10、query:policy-dist
+   evidence：面向少步扩散语言模型的on-policy转换蒸馏，直接对应语言模型中的on-policy蒸馏。
+6. [SMOPD: Multi-Reward Reinforcement Learning via Specialize-and-Merge Online Policy Distillation](/202608/05/2608.03092v1-smopd-multi-reward-reinforcement-learning-via-specialize-and-merge-online-policy-distillation)  
+   标签：评分：8.0/10、query:policy-dist
+   evidence：面向多奖励强化学习的专门化-合并在线策略蒸馏
 
 ### 速读区论文标签
-1. [HindSearch: Trajectory-Level Hindsight Critique for Search-Augmented Reinforcement Learning](/202608/04/2608.01597v1-hindsearch-trajectory-level-hindsight-critique-for-search-augmented-reinforcement-learning)  
+1. [Any-OPD: Heterogeneous On-Policy Distillation for Flow-Matching Models via Representation-Space Bridging](/202608/05/2608.03316v1-any-opd-heterogeneous-on-policy-distillation-for-flow-matching-models-via-representation-space-bridging)  
    标签：评分：8.0/10、query:policy-dist
-   evidence：通过事后评判为搜索增强强化学习提供辅助在线蒸馏信号
-2. [Instruction-Conditioned Exploration with Asymmetric Reinforcement Learning and Self-Distillation](/202608/04/2608.02087v1-instruction-conditioned-exploration-with-asymmetric-reinforcement-learning-and-self-distillation)  
+   evidence：通过表示空间桥接实现异构流匹配模型的on-policy蒸馏
+2. [ReflectRL: Learning from Golden Negative Trajectories via Reflective-to-Direct Reasoning](/202608/05/2608.03972v1-reflectrl-learning-from-golden-negative-trajectories-via-reflective-to-direct-reasoning)  
    标签：评分：8.0/10、query:policy-dist
-   evidence：在LLM后训练中将强化学习与自蒸馏结合，直接相关于RL中的知识蒸馏
-3. [AlphaG-OPD: Reliability-Gated Sibling Counterfactuals for On-Policy Distillation in Symbolic Alpha Factor Discovery](/202608/04/2608.01303v1-alphag-opd-reliability-gated-sibling-counterfactuals-for-on-policy-distillation-in-symbolic-alpha-factor-discovery)  
+   evidence：在策略训练中利用专家轨迹，并将失败轨迹转化为反思信号
+3. [PROGRESS: Coverage-guided RL to Train Search-augmented LLM Agent](/202608/05/2608.00969v1-progress-coverage-guided-rl-to-train-search-augmented-llm-agent)  
    标签：评分：6.0/10、query:policy-dist
-   evidence：提出了一个结构化的在线策略蒸馏框架，利用兄弟反事实进行符号因子发现
-4. [Self-Improving Large Language Models via Progressive Experience Evolution](/202608/04/2608.02139v1-self-improving-large-language-models-via-progressive-experience-evolution)  
+   evidence：使用冻结教师模型指导覆盖奖励，塑造检索增强LLM智能体的搜索行为
+4. [Reusing Rollouts under Policy Lag: Prefix-Normalized Policy Optimization for LLM Reinforcement Learning](/202608/05/2608.01418v1-reusing-rollouts-under-policy-lag-prefix-normalized-policy-optimization-for-llm-reinforcement-learning)  
    标签：评分：6.0/10、query:policy-dist
-   evidence：经验蒸馏作为LLM自我改进的中间阶段
+   evidence：面向LLM在策略强化学习的归一化策略优化，与蒸馏式在策略训练密切相关
+5. [Self-Improving Large Language Models via Progressive Experience Evolution](/202608/05/2608.02139v2-self-improving-large-language-models-via-progressive-experience-evolution)  
+   标签：评分：6.0/10、query:policy-dist
+   evidence：提出将经验蒸馏作为大模型自改进的关键中间阶段
 
 
 <div class="dpr-home-promo-card">

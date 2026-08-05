@@ -1,0 +1,549 @@
+Title: Any-OPD: Heterogeneous On-Policy Distillation for Flow-Matching Models via Representation-Space Bridging
+
+URL Source: https://arxiv.org/pdf/2608.03316v1
+
+Published Time: Wed, 05 Aug 2026 00:43:56 GMT
+
+Number of Pages: 9
+
+Markdown Content:
+# Any-OPD: Heterogeneous On-Policy Distillation for Flow-Matching Models via Representation-Space Bridging 
+
+Siming Fu 1*, Zheming Fu 1*, Ruizhe He 1*, Hualiang Wang 1, Jie Huang 1, Xiaoxiao Ma 1,Mingchen Zhong 1, Weihu Huang 2, Xiaoxuan He 2, Haojun Xu 1†
+
+> 1
+
+Joy Future Academy 2Zhejiang University *Equal contribution. †Corresponding author. fusiming.chosen@jd.com, xuhaojun.9@jd.com Problem          
+
+> FLUX.1 -dev
+> SD3.5 -M
+> Flux
+> VAE Enc .
+> FLUX latent
+> tokens
+> SD3 Transformer
+> SD3
+> VAE Enc .
+> FLUX Transformer
+> SD3 latent
+> tokens
+> Flux noise schedule
+> SD3.5 -Mnoise schedule
+> Different latent
+> representations
+> Different noise
+> schedules
+> Student
+> Rollout
+> Noise
+> Teacher
+> Refinement
+> Re -noise
+> Student Image Teacher Image
+
+DINOv2 
+
+CLS Feature Alignment 
+
+Any -OPD Performance      
+
+> SD3.5 -M
+> Any -OPD
+> A cheerful young
+> Latina woman,
+> 3/4 portrait.
+> A couple sharing
+> pizza on a
+> romantic date.
+> 0.846
+> 0.884 0.878
+> PickScore
+> 9.12 10.97 11.19
+> HPSv3
+> SD3.5 -MAny -OPD （SD3.5 -M）FLUX
+> Prompt
+
+Direct latent 
+
+regression 
+
+collapses 
+
+> Any -OPD Latet MSE
+
+Figure 1: Any-OPD enables on-policy distillation between flow-matching models that share nothing but pixels. Left: heterogeneous teacher–student pairs (here FLUX.1-dev → SD3.5-Medium) differ in both latent representation and noise schedule, so no existing on-policy method can supervise the student’s own trajectory. Middle: Any-OPD sidesteps both mismatches — the teacher refines the student’s on-policy sample, and the two models are compared only in a frozen DINOv2 feature space, never in each other’s latents. 
+
+Right: naive latent regression collapses, whereas Any-OPD raises the 2.5B student’s PickScore from 0.846 to 0.884 and its HPSv3 from 9.12 to 10.97, approaching or exceeding its 12B teacher on preference metrics at a fraction of the size. 
+
+Abstract 
+
+On-policy distillation, in which a teacher corrects samples that the student itself generates, presupposes that the two models speak the same language: identical VAE latents, matching architectures, and a common timestep grid. We ask what happens when none of this holds, as when the strongest teacher available and the student one wishes to deploy come from different model families, and find that the standard recipes have no answer: teacher latents cannot serve as tar-gets in a foreign coordinate system, per-pixel losses against a teacher that stochastically re-draws local detail degenerate into blur or divergence, and timestep indices lose their mean-ing across mismatched schedules. We present Any-OPD , to our knowledge the first framework for on-policy distillation between arbitrary pairs of latent flow-matching generators. Any-OPD treats the teacher purely as a black-box sampler and connects the two models at exactly one point: a frozen, model-agnostic vision representation in which their indepen-dently decoded outputs are compared, sidestepping every as-sumption about latents, features, or architecture. Trajectory correspondence is recovered by matching continuous noise levels instead of step indices, and a brief anchoring phase, in which teacher samples are re-encoded through the stu-dent’s own VAE, ensures the on-policy gradient measures sample quality rather than domain mismatch. Distilling the 
+
+12 B FLUX.1-dev into the 2.5B SD3.5-Medium, Any-OPD lifts the student’s PickScore from 0.846 to 0.884 and HPSv3 from 9.12 to 10 .97 , rivaling the teacher at a fifth of its size, where direct latent regression fails to train at all. 
+
+1 Introduction 
+
+Flow-matching generators (Lipman et al. 2023; Esser et al. 2024b) now define the state of the art in text-to-image syn-thesis, but their strongest instances are large: models such as FLUX.1-dev (Black Forest Labs 2024) carry 12 B param-arXiv:2608.03316v1 [cs.LG] 4 Aug 2026 eters in the denoising transformer alone, placing them out of reach for latency- or memory-constrained deployment. Knowledge distillation (Hinton, Vinyals, and Dean 2015) offers the natural remedy of letting a small student inherit the quality of a large teacher, and its most effective form is 
+
+on-policy : rather than imitating teacher outputs from fixed data, the student is supervised on states drawn from its own 
+
+sampling trajectory, which eliminates the exposure bias of purely offline imitation (Agarwal et al. 2024; Lin et al. 2020; Ross, Gordon, and Bagnell 2011). Existing diffusion on-policy scheme (Salimans and Ho 2022; Yin et al. 2024a; Luo et al. 2023a), however , rests on an assumption so pervasive that it is rarely stated: the teacher and the student are ho-mogeneous . They share a VAE, hence a latent coordinate system in which teacher predictions can serve as regression targets; they typically share an architecture, so internal fea-tures can be matched; and they share a timestep grid, so “the same step” means the same noise level for both (Salimans and Ho 2022). This assumption quietly restricts distillation to pairs derived from a single model family. Yet the pairs one actually wants to distill between are heterogeneous : the available teacher and the student are, in general, developed by different parties around different VAEs, architectures and noise schedules. In this paper we formulate and address heterogeneous on-policy distillation : train a student on its own trajecto-ries under the supervision of a frozen teacher with which it shares neither VAE, nor architecture, nor noise sched-ule, accessing the teacher only as a sampler . Dropping the homogeneity assumption breaks on-policy distillation along two independent axes. First, the pair has no shared space :a teacher latent is not a valid target in the student’s coor-dinates, and, less obviously, decoding both models to pixels does not restore a usable objective either. Teacher refinement is a stochastic re-synthesis that preserves semantics while re-drawing local detail, so pixel-wise regression pulls toward a blurred conditional mean and, in our experiments, collapses training outright. Second, the pair has no shared clock : the two noise schedules arise from different shift functions, so equal solver indices denote different noise levels (Esser et al. 2024b), and index-aligned supervision pairs states from in-comparable noise regimes (Karras et al. 2022). We introduce Any-OPD (any teacher, any student, on-
+
+policy distillation), which resolves each failure with a mech-anism that references neither model’s internals. For the space gap, the two models are coupled only in a third repre-sentation external to both: student and teacher each decode with their own VAE, and the resulting images are compared by the CLS embedding of a frozen DINOv2 (Oquab et al. 2023). This global, coordinate-free comparison is invariant to exactly the local re-synthesis that defeats pixel and la-tent regression, and because the extractor is model-agnostic, 
+
+swapping the teacher changes neither the loss nor a single line of the training procedure . For the clock gap, the two trajectories are aligned by the noise level itself rather than by step index: after the teacher refines the student’s sample from a chosen noise level, gradients flow through precisely those student steps that are at least as noisy, a rule that re-mains well defined for arbitrary pairs of schedules. A third component makes this signal usable from the start: an of-fline anchoring stage first transplants the teacher’s output distribution into the student’s own latent space via the stu-dent’s encoder, closing the distribution-level gap with data so that the on-policy objective is left to correct only per-sample error. We instantiate Any-OPD on a maximally het-erogeneous pair, distilling FLUX.1-dev (Black Forest Labs 2024) ( 12 B) into SD3.5-Medium (Stability AI 2024) ( 2.5B): different VAEs, different transformer architectures, different noise schedules. The distilled student improves substantially over its initialization on preference-oriented metrics, raising PickScore (Kirstain et al. 2023) from 0.846 to 0.884 and HPSv3 (Ma et al. 2025) from 9.12 to 10 .97 , and approaches or exceeds the 12 B teacher at roughly one fifth of its size, while the direct latent-regression alternative collapses. Our contributions are: 
+
+• We formulate heterogeneous on-policy distillation for flow-matching generators and identify the two obstruc-tions that make existing on-policy methods inapplicable: the absence of a shared representation ( no shared space )and of a comparable timestep grid ( no shared clock ). • We propose Any-OPD , which couples the two mod-els solely through a frozen, model-agnostic represen-tation space and aligns their trajectories by noise-level matching rather than solver indices. The procedure there-fore applies to any teacher–student pair of latent flow-matching generators. • We demonstrate the first on-policy distillation across model families, from FLUX.1-dev into SD3.5-Medium, where the 2.5B student matches or surpasses its 12 Bteacher on several preference metrics. We ablate each component and show in particular that naive latent re-gression across the VAE boundary collapses. 
+
+2 Related Work 
+
+Diffusion and Flow Matching. Diffusion models (Ho, Jain, and Abbeel 2020; Song et al. 2021) generate samples by reversing a gradual noising process, while flow match-ing (Lipman et al. 2023; Liu, Gong, and Liu 2023) learns a continuous transport from noise to data and supports effi-cient deterministic sampling. This formulation has become a common backbone for recent high-resolution text-to-image systems, including SD3 (Esser et al. 2024a), FLUX (Black Forest Labs 2024), and Z-Image (Cai et al. 2025). In prac-tice, these models differ not only in scale, but also in VAE design, transformer architecture, and noise-schedule param-eterization. Such differences make cross-family distillation substantially more difficult than distillation between homo-geneous checkpoints. 
+
+Diffusion Distillation. Early distillation methods for dif-fusion and flow models mainly compress sampling cost. Pro-gressive and consistency-based approaches (Salimans and Ho 2022; Luo et al. 2023b; Song and Dhariwal 2024) train few-step students to match a many-step teacher, while dis-tribution matching methods (Yin et al. 2024c,b; Zhou et al. 2024) align the student’s output distribution with teacher preferences. These methods are typically offline: supervi-sion is collected from fixed data or teacher trajectories, so the teacher does not directly correct the states that the stu-dent visits during training. On-policy distillation (OPD) was developed in language-model distillation to reduce this ex-posure bias by letting the student learn from teacher feed-back on student-generated trajectories (Agarwal et al. 2024; Gu et al. 2024; Ko et al. 2025). Recent diffusion and flow extensions bring this idea to iterative image generation. Dif-fusionOPD (Li et al. 2026) formulates on-policy supervi-sion for diffusion transitions, and Flow-OPD (Fang et al. 2026) adapts OPD to flow matching with dense trajectory-level teacher supervision. However, these formulations as-sume that teacher and student can interact on shared states, which naturally fits homogeneous models but breaks down when their VAE latent spaces are incompatible. 
+
+3 Method 
+
+3.1 Preliminaries: Flow Matching and Latent Generators 
+
+Flow Matching (Lipman et al. 2023) learns a velocity field 
+
+vθ : Rd × [0 , 1] → Rd that transports noise to data along the ODE dxt = vθ (xt, t ) d t. Under the Optimal Transport interpolation, 
+
+xt = (1 −t) x0 +t x 1, x0 ∼ pdata , x1 ∼ N (0 , I ), (1) so that t is itself the noise level, and training minimizes 
+
+LFM (θ) = Et,x 0,x 1
+
+h
+
+∥vθ (xt, t ) − (x1 − x0)∥2i
+
+. (2) Inference uses a discrete N -step Euler schedule with noise levels 1 = σ0 > σ 1 > · · · > σ N = 0 , where σi is produced by a model-specific shift function (Karras et al. 2022; Esser et al. 2024a). Throughout, solver index 0 is pure noise and index N is the clean sample , so σ decreases monotonically with the index. We consider latent generators, each a tuple (E, D, v, {σi})
+
+of encoder, decoder, velocity field and schedule: images are produced by integrating v in the latent space Z and decoding the endpoint (Rombach et al. 2022; Esser et al. 2024a). Our student is S = ( ES , DS , v θ , {σSi }) and our frozen teacher is T = ( ET , DT , v ϕ, {σTi }), with velocity fields acting on disjoint domains, 
+
+vθ : ZS × [0 , 1] → Z S , vϕ : ZT × [0 , 1] → Z T . (3) 
+
+3.2 The Heterogeneous Setting: No Shared Space, No Shared Clock 
+
+On-policy distillation requires the teacher to supervise states on the student’s own trajectory (Ross, Gordon, and Bag-nell 2011; Agarwal et al. 2024; Li et al. 2026; Fang et al. 2026), which for a heterogeneous pair fails along two axes. 
+
+No shared space : since ZS̸ ≡ Z T , a teacher latent is not a valid target in the student’s coordinates, and architectural differences rule out feature matching; pixels do not help ei-ther, because teacher refinement is a stochastic re-synthesis that preserves semantics while re-drawing local detail, so a pixel-wise MSE regresses toward the mean of all admissi-ble re-syntheses and collapses training (Zhang et al. 2018; Blau and Michaeli 2018). Supervision must move to a third 
+
+representation, external to both models and insensitive to lo-cal coordinates. No shared clock : differing shift functions give σSi̸ = σTi , so index-aligned supervision pairs states from incomparable noise regimes; the noise level is the only quantity the two trajectories share, and must serve as the alignment variable. These remedies say how to supervise, not when supervision is useful: while the student’s samples remain far from the teacher’s manifold, every gradient points out of one domain and into the other, carrying no per-sample information. Any-OPD therefore anchors the student’s dis-tribution offline first, and only then applies the on-policy cor-rection to the per-sample residual. 
+
+3.3 Anchoring the Student on the Teacher’s Manifold 
+
+The distribution-level gap does not require on-policy train-ing to close, because it does not require correspondence: the student need only learn to produce images of the teacher’s kind, not to reproduce any particular one. This makes the gap addressable offline, with the standard flow-matching ob-jective, provided the teacher’s distribution can be expressed in the student’s coordinates. The student’s own encoder pro-vides that expression. Given a prompt c, the teacher generates a target image 
+
+xT = DT (Sample T (c)) , which we re-encode with the stu-dent’s VAE, z⋆ = ES (xT ). The teacher’s manifold is thereby rendered in the coordinate system the student actually opti-mizes in, something no loss defined across the two latent spaces could achieve. Drawing an index m uniformly from the student’s own M -step schedule, we form 
+
+zm = (1 − σSm) z⋆ + σSm ϵ, ϵ ∼ N (0 , I ), (4) and train with 
+
+LWS = Em,ϵ,c 
+
+h
+
+vθ (zm, σ Sm, c ) −  ϵ − z⋆ 2i
+
+, (5) where ϵ − z⋆ = ( zm − z⋆)/σ Sm by (4); the form above matches LFM and avoids dividing by σSm as σSm → 0. What anchoring cannot fix is equally precise. The student only ever observes states interpolated from a correct endpoint, whereas at inference it follows its own imperfect trajectory; anchoring fixes where the student’s distribution lies, not how the student behaves on the states it actually reaches. That residual is intrinsically per-sample, and closing it is the task of the on-policy stage. 
+
+3.4 On-Policy Distillation between Any Teacher and Any Student 
+
+The on-policy stage is organized around a single operator. For a noise level σ, let 
+
+ΠσT (x) = DT
+
+
+
+Euler T
+
+ (1 − σ) ET (x) + σϵ → 0, c 
+
+(6) denote the teacher’s noise-and-denoise map: perturb an im-age to noise level σ and regenerate it under the teacher’s ve-locity field (Nie et al. 2022). Because denoising contracts to-ward the teacher’s model distribution, ΠσT acts as a stochas-tic projection onto the teacher’s image manifold (Permenter Prompt 
+
+Stage 1: Warm Start Stage 2: On -Policy Distillation  
+
+> FLUX.1 -dev
+> Noise
+> Teacher Image
+
+𝒛 𝟎       
+
+> SD3
+> VAE Enc .
+> SD3 latent
+> tokens
+> Re -noise
+> Noised SD3
+> latent tokens
+> SD3.5 -M
+> 𝑧 !=(1−𝜎 !
+> ")𝑧 #+𝜎 !
+> "𝜖
+
+𝑧 "              
+
+> Velocity 𝒗 𝜽 (𝒛 𝒕 ,𝐭 ,𝐜 )
+> Flow matching loss
+> Warm up the student
+> on teacher -generated targets
+> 𝑳 𝒔𝒇𝒕 =𝒗 𝜽 −𝑧 !−𝑧 #
+> 𝜎 !
+> "
+> 𝟐
+> 𝟐
+> Student rollout (cache matched state 𝒁 𝒋
+> 𝑺 )
+> Flux
+> VAE Enc .
+
+𝒁 𝑵 
+
+> 𝑺
+> SD3
+> VAE Dec.
+> Flux
+> VAE Dec.
+
+𝒁 %&'()*  
+
+> 𝑻
+> Re -noise to 𝝈 𝒌
+> 𝑻
+
+𝒁 𝒌  
+
+> 𝑻
+
+𝒁 𝟎 
+
+> 𝑻
+
+𝒁 𝒋  
+
+> 𝑺
+
+𝒁 𝟎      
+
+> 𝑺
+> Teacher Refinement
+> Noise -level matching DINOv2 CLS feature
+> loss
+> Student Image
+> Teacher Image
+> SD3 latent
+> tokens
+> Flux latent
+> tokens
+
+𝒁 𝑵 .𝟏     
+
+> 𝑺
+> 𝝈 𝒋
+> 𝑺 ≥𝝈 𝑲
+> 𝑻 >𝝈 𝒋 -𝟏
+> 𝑺
+
+Figure 2: Overview of Any-OPD. Left : the anchoring stage trains the student by velocity matching on teacher-generated targets, transferring the teacher’s distribution into the student’s own latent coordinates. Right : on-policy training rolls out the student, projects the sample onto the teacher’s manifold by noise-and-denoise refinement, and back-propagates through the student segment selected by noise-level matching. Student and teacher each decode with their own VAE; the two images meet only in a frozen DINOv2 representation space. and Yuan 2023), with σ setting the radius within which the projection may move the sample: as σ → 0 it approaches the identity, and as σ → 1 it approaches unconditional resam-pling (Ho, Jain, and Abbeel 2020; Song et al. 2021). Evaluat-ing ΠσT requires nothing from the teacher beyond the ability to sample; this sampling interface is the entire assumption Any-OPD places on the teacher, and any latent generator in the sense of Sec. 3.1 provides it. The stage trains the student so that its own samples become fixed points of this projec-tion up to feature equivalence: a sample x receives zero gra-dient precisely when f (x) = f (Π σT (x)) , that is, when the teacher, allowed to redraw the sample within radius σ, can produce nothing semantically better. Each training iteration accordingly does three things: it projects one on-policy sam-ple, routes the resulting correction through the student steps that can express it, and tests the fixed-point condition. Let 
+
+NS and NT denote the student and teacher solver steps. 
+
+Projecting the on-policy sample. Every iteration super-vises exactly one sample from the distribution the student deploys at inference. The projection radius is fixed first, by drawing r ∼ U{ rmin , . . . , r max } and setting the teacher start index k = NT − r; knowing the radius in advance identi-fies the single intermediate state the later gradient pass will need, so the rollout stores one latent rather than a trajectory. The student then integrates its schedule from z0 ∼ N (0 , I )
+
+without gradients, 
+
+zi+1 = zi + σSi+1 −σSi
+
+ vθ (zi, σ Si , c ), i = 0 , . . . , N S −1,
+
+(7) and its output is projected at level σTk . Concretely, xS =
+
+DS (zNS ) enters the teacher’s coordinates through zTNT =
+
+ET (xS ), a format conversion carrying no loss; the teacher re-noises, 
+
+zTk = (1 − σTk ) zTNT + σTk ϵ, ϵ ∼ N (0 , I ), (8) and integrates its own schedule to the clean endpoint, 
+
+xref = DT
+
+ Euler T
+
+ zTk , k → NT , v ϕ, c  = Π σTk 
+
+> T
+
+(xS ).
+
+(9) The radius trades signal against relevance. At small r the projection collapses toward the identity and the target con-tains no correction; at large r it collapses toward resampling, so xref ceases to be an improvement of this sample and the gradient inherits the variance of an unpaired target. Useful refinement lives between the two degeneracies, where the projection keeps the student’s composition and replaces only its execution; Sec. 4.3 maps this range empirically. 
+
+Routing the correction by noise level. A correction has a scale as well as a content. The projection altered the sam-ple only at scales governed by noise levels in [0 , σ Tk ], so for the student to absorb it, the gradient must reach every solver step of its own that operates in this range; no narrower seg-ment can express the edit. Schedules being incomparable by index, the segment is located by the noise level itself, 
+
+j = max  i : σSi ≥ σTk , i.e. σSj ≥ σTk > σ Sj+1 ,
+
+(10) Table 1: Main results. FLUX.1-dev uses its standard 50-step Euler sampler; SD3.5-Medium and Any-OPD use 40 Euler steps. Aesth.: Aesthetic Score; ImgRwd: ImageReward; HPSv3: Human Preference Score v3; UniRwd/UniRwd2: UnifiedReward and UnifiedReward2. Bold with blue shading marks improvements over the SD3.5-Medium baseline. DrawBench DPG-Bench Role Model Params Aesth. ↑ ImgRwd ↑ PickScore ↑ HPSv3 ↑ UniRwd ↑ UniRwd2 ↑ Overall ↑
+
+Teacher FLUX.1-dev 12B 5.765 0.971 0.878 11.19 3.38 3.35 83.84 Student SD3.5-Medium 2.5B 5.383 0.922 0.866 9.12 3.23 3.21 84.58 Student + Any-OPD SD3.5-Medium 2.5B 5.788 1.116 0.884 10.97 3.31 3.26 84.71 Flux-dev (teacher) 
+
+> SD3.5
+> Ours
+> A storefront with
+> 'Diffusion' written on it.
+> Illustration of a mouse
+> using a mushroom as an
+> umbrella.
+> Colouring page of large cats
+> climbing the eifel tower in
+> a cyberpunk future.
+> A side view of an owl
+> sitting in a field.
+> A fisheye lens view of a
+> turtle sitting in a forest.
+> Photo of a mega Lego space
+> station inside a kid's
+> bedroom.
+> Hyper-realistic photo of an
+> abandoned industrial site
+> during a storm.
+
+Figure 3: Qualitative comparison on DrawBench prompts. Any-OPD (2.5B, SD3.5-Medium with LoRA) approaches the visual quality of the 12B FLUX.1-dev teacher while keeping the student architecture and 40-step sampling unchanged. the least noisy student state still at least as noisy as the pro-jection’s start, and hence the tightest segment whose noise range contains the correction’s, for arbitrary pairs of shift functions. The student is replayed from the cached zj with gradients enabled, 
+
+ˆzNS = Euler S (zj , j → NS , v θ , c ) , (11) so only NS − j transformer evaluations carry activations, each individually checkpointed. Treating zj as a constant conditions the gradient on the state the student actually reached, rather than on any state a correct model would have reached; this conditioning, not the rollout alone, is what makes the update on-policy. 
+
+Coupling the models in representation space. The con-dition f (ˆ xS ) = f (xref ) can only be tested in the third repre-sentation that Sec. 3.2 identified. Each model renders its re-sult through its own decoder, ˆxS = DS (ˆ zNS ) and xref from (9), and the loss couples them through a frozen extractor f
+
+applied identically to both: 
+
+LOPD = 1 − cos 
+
+
+
+f (ˆ xS ), f (xref )
+
+
+
+, (12) where f returns the CLS token of a frozen DINOv2-Base (Oquab et al. 2023) and gradients flow through the frozen decoder DS into vθ . The choice of f discharges both requirements of Sec. 3.2 at once. It is external: f touches nei-ther model’s latents or architecture, so replacing the teacher replaces only the projection ΠT and leaves loss and proce-dure untouched. It is coordinate-free: the CLS token aggre-gates over all patches, and DINOv2’s discriminative self-supervision makes cosine distance penalize structural and semantic deviation while remaining invariant to the local re-synthesis that every application of (9) introduces. 
+
+4 Experiments 
+
+4.1 Experimental Setup 
+
+Models. The student is SD3.5-Medium (2.5B; SD3 VAE, static shift 3.0, guidance 4.5); the teacher is FLUX.1-dev (12B; FLUX VAE, dynamic shifting, guidance 3.5). The pair differs in VAE, architecture and noise schedule simultane-ously. We train only LoRA adapters (rank 32 , α = 64 ) in the student transformer; everything else stays frozen. 
+
+Data and Training. Training prompts are sampled from the Pick-a-Pic training set (Kirstain et al. 2023), with Pick-a-Pic test prompts held out for validation. Anchoring runs for 400 steps ( M = 10 noise levels; teacher targets generated at 
+
+512 × 512 with 50-step Euler sampling). On-policy training runs for 800 steps at 512 × 512 with NS = NT = 20 . Both phases use learning rate 10 −4 and per-GPU batch size 4.N = 20 
+
+> N = 10
+> a jung male cyborg with white
+> hair sitting down on a throne
+> in a dystopian world, digital
+> art, epic
+> enigmatic black square
+> building on top of a purple
+> hill, smoke stacks
+> noah is standing with his wife
+> and three sons on ark. the ark
+> is floating on ocean realistic
+> image
+> an epic angel dressed in blue
+> with white wings
+> cinematic still of highly
+> reflective stainless steel
+> bitcoin logo in the desert, at
+> sunset
+> davy crockett eating a burger
+> at mcdonalds
+> photo of ford focus rs, night
+> time, city, city roads, miami
+> streets
+> an impressionist portrait of a
+> shar pei
+
+Figure 4: Effect of the teacher refinement steps NT (10 vs. 20 , otherwise identical). Blur in the NT = 10 targets propagates into the student, showing that the teacher’s denoising budget bounds the transferable quality. 
+
+Evaluation. All models are evaluated at 1024 × 1024 
+
+under their standard inference settings (teacher: 50-step Euler; student and Any-OPD: 40-step Euler). On DrawBench (Saharia et al. 2022) we report Aesthetic Score (Schuhmann 2022), ImageReward (Xu et al. 2023), PickScore (Kirstain et al. 2023), HPSv3 (Ma et al. 2025), and UnifiedReward/UnifiedReward2 (Wang et al. 2025) over five images per prompt; on GenEval (Ghosh, Hajishirzi, and Schmidt 2023) and DPG-Bench (Hu et al. 2024) we report the official overall scores over four. Model versions, prompt counts and category-level results are in the supplementary material. 
+
+4.2 Main Results 
+
+Table 1 contains the central result: the distilled 2.5B student 
+
+overtakes its 12B teacher on Aesthetic Score, ImageReward and PickScore, and closes most of the gap on HPSv3 and the UnifiedReward scores, improving all six DrawBench met-rics over the baseline at an unchanged architecture and sam-pling budget. That the student can exceed its teacher follows from the supervision itself: the target is the teacher’s pro-jection of a student sample, combining the student’s com-position with the teacher’s rendering, so training can land the student at points neither model occupies alone; on Im-ageReward, the gain over the baseline ( +0 .194 ) is nearly four times the teacher’s own margin ( +0 .049 ). Composi-tional accuracy is preserved, with DPG-Bench essentially unchanged ( +0 .13 ): the objective is preference-oriented and the teacher offers no headroom on this benchmark, whereas the compositionally stronger Z-Image teacher does improve it under the same procedure (Sec. 4.4). Figure 3 shows the gains qualitatively: cleaner textures, more coherent lighting and finer structure, with the baseline’s layout retained, con-sistent with a projection that keeps composition and replaces execution. 
+
+4.3 Ablation Studies 
+
+The Objective: Only the Representation Space Survives 
+
+Only the representation-space objective trains stably, con-firming the core claim of Sec. 3.2 that heterogeneous pairs 0 50 100 150 200 250 300 350 400 
+
+> Training Step
+> 1.5
+> 1.0
+> 0.5
+> 0.0
+> 0.5
+> 1.0
+> ImageReward
+> DINO CLS
+> DINO CLS (multilayer)
+> DINO CLS + Patch
+> LPIPS
+> MSE
+> LPIPS + DINO CLS
+
+(a) ImageReward 0 50 100 150 200 250 300 350 400  
+
+> Training Step
+> 5.2
+> 5.4
+> 5.6
+> 5.8
+> 6.0
+> 6.2
+> Aesthetic Score
+> DINO CLS
+> DINO CLS (multilayer)
+> DINO CLS + Patch
+> LPIPS
+> MSE
+> LPIPS + DINO CLS
+
+(b) Aesthetic Score 
+
+Figure 5: OPD training curves under different objectives. Latent MSE collapses; LPIPS degrades late; DINOv2 CLS is stable and best. can be compared neither coordinate-wise in latents nor lo-cally in pixels. Figure 5 compares OPD trained with latent MSE, LPIPS (Zhang et al. 2018), and three DINOv2 variants (CLS; multi-layer CLS from layers 5, 9, 12; CLS+Patch). Latent MSE collapses within the first training steps on both ImageReward and Aesthetic Score: coordinate-wise regres-sion across the VAE boundary is not merely suboptimal but unstable. LPIPS improves initially, then degrades, since its patch-local features still demand a spatial correspondence that the teacher’s stochastic re-synthesis does not respect. All DINOv2 variants remain stable to the end of training, and plain CLS matches or exceeds the richer variants, so a single global embedding suffices. The ordering MSE <
+
+LPIPS < DINOv2 tracks exactly how much local correspon-dence each objective assumes. 
+
+Anchoring Is a Prerequisite, Not a Bonus Anchor-ing quality strictly determines what OPD can achieve, as Sec. 3.3 predicted. Figure 6 compares OPD started from no anchoring, a pre-stabilization checkpoint (Anchor-100), and a stabilized one (Anchor-400). The three curves are strictly ordered throughout training, and Anchor-100 never catches Anchor-400 despite the identical OPD budget: the gap is one of initialization quality, not total compute, so OPD should begin only after anchoring has converged. Anchoring curves are in the supplementary material. 
+
+Teacher Refinement Schedule 0 50 100 150 200 250 300 350 400 
+
+> Training Step
+> 0.0
+> 0.2
+> 0.4
+> 0.6
+> 0.8
+> 1.0
+> 1.2
+> ImageReward
+> No WarmStart
+> WarmStart-100
+> WarmStart-400
+
+(a) ImageReward 0 50 100 150 200 250 300 350 400  
+
+> Training Step
+> 5.90
+> 5.95
+> 6.00
+> 6.05
+> 6.10
+> 6.15
+> 6.20
+> 6.25
+> Aesthetic Score
+> No WarmStart
+> WarmStart-100
+> WarmStart-400
+
+(b) Aesthetic Score 
+
+Figure 6: OPD curves from different initializations. The sta-bilized checkpoint (Anchor-400) dominates throughout. 0 100 200 300 400 500 
+
+> Training Step
+> 0.5
+> 0.6
+> 0.7
+> 0.8
+> 0.9
+> 1.0
+> 1.1
+> 1.2
+> ImageReward
+> =0 (no noise)
+> =0.1
+> =0.3
+> =0.5
+> =1.0
+
+(a) ImageReward 0 100 200 300 400 500  
+
+> Training Step
+> 5.90
+> 5.95
+> 6.00
+> 6.05
+> 6.10
+> 6.15
+> 6.20
+> 6.25
+> Aesthetic Score
+> =0 (no noise)
+> =0.1
+> =0.3
+> =0.5
+> =1.0
+
+(b) Aesthetic Score 
+
+Figure 7: OPD curves with CPS rollout stochasticity. Deter-ministic Euler ( η = 0 ) is best on both metrics. 
+
+Refinement strength r. Strong refinement is necessary: starting the teacher at medium-low noise ( r ∈ [0 , 10) ,
+
+σ < 0.63 ) underperforms every other setting on every met-ric in Table 2, since the teacher barely alters the sample and the target carries little signal. The two stronger ranges are close, with [10 , 15) marginally ahead on PickScore and Im-ageReward and [15 , 20] winning DPG-Bench and HPSv3; we adopt [15 , 20] as the best overall balance. 
+
+Refinement steps NT . The teacher’s denoising budget bounds the transferable quality: in Figure 4, the halved 
+
+NT = 10 schedule leaves visible blur in the refined targets, which the student faithfully reproduces, while NT = 20 
+
+yields sharp targets and a correspondingly sharper student. 
+
+Rollout Stochasticity Rollout stochasticity, though often beneficial in RL-style fine-tuning, hurts here. We replace Eu-ler with Coefficients-Preserving Sampling (CPS) (Wang and Yu 2025), which rotates the noise component of each step from the model-predicted direction ˆϵ = xi + (1 − σi)vθ to-ward a fresh Gaussian ξ ∼ N (0 , I ) by an angle set by η, at fixed total noise scale σi+1 :
+
+xi+1 = (1 − σi+1 ) ˆ x0 + σi+1 
+
+cos ηπ  
+
+> 2
+
+ˆϵ + sin ηπ  
+
+> 2
+
+ξ , (13) with ˆx0 = xi − σivθ . Deterministic Euler ( η = 0 ) is uni-formly best, and η ≥ 0.3 degrades after 200 –300 steps (Fig-ure 7): perturbing the rollout decouples the supervised tra-jectory from the deployed one. 
+
+4.4 Generalization: Swapping the Teacher 
+
+The defining claim of Any-OPD is that the teacher is re-placeable without touching the method. We test it literally: FLUX.1-dev is swapped for Z-Image (6B; its own VAE, shift 6, guidance 5.0) and nothing else changes : same stu-dent, loss, hyperparameters and evaluation. Table 3 shows Table 2: Effect of the teacher refinement strength on the 20-step teacher schedule. Larger r starts refinement from a nois-ier level. Stronger refinement yields better results. 
+
+DrawBench DPG Strength r Range HPSv3 ↑ Pick ↑ ImgRwd ↑ Overall ↑
+
+Med-low [0 , 10) 10.24 0.881 0.891 81.21 Med-high [10 , 15) 10.80 0.885 1.120 84.68 High [15 , 20] 10.97 0.884 1.116 84.71 
+
+Table 3: Distillation with Z-Image as the teacher, using the identical procedure and hyperparameters as the main exper-iment. Bold with blue shading marks improvements over the SD3.5-Medium baseline; † marks the teacher reference. 
+
+DrawBench GenEval DPG Model ImgRwd ↑ Pick ↑ HPSv3 ↑ Overall ↑ Overall ↑
+
+SD3.5-Medium 0.922 0.866 9.12 70.70 84.58 Z-Image † 0.958 0.864 9.96 74.90 86.73 
+
+Any-OPD-Z 1.082 0.872 9.75 71.50 85.53 
+
+the student improves on every reported metric, including the compositional benchmarks GenEval ( +0 .80 ) and DPG-Bench ( +0 .95 ). Notably, the gains follow the teacher’s pro-file: Z-Image is itself strong on GenEval ( 74 .90 ), and Any-OPD-Z inherits this strength alongside the perceptual gains. 
+
+5 Conclusion 
+
+We introduced Any-OPD, which extends on-policy distil-lation beyond the homogeneous setting it has so far been confined to. Our formulation identifies the two assumptions that heterogeneous pairs break, a shared representation and a shared timestep grid, and replaces each with a mecha-nism that references neither model’s internals: the teacher acts purely as a sampler through a noise-and-denoise pro-jection of the student’s own outputs, the two models meet only in a frozen external representation where the student is trained toward fixed points of its own projection, and super-vision is aligned across incompatible schedules by the noise level itself. A preceding anchoring stage separates distilla-tion by granularity, closing the distribution-level gap with data so that the on-policy objective carries purely per-sample information. Because none of these components depends on the teacher’s VAE, architecture or schedule, the teacher is interchangeable by construction, a property we verified by swapping model families without changing a single line of the procedure. We hope this decoupling turns the strongest available generator, whoever builds it, into a usable teacher for whatever model one needs to deploy. 
+
+Limitations and Future Work. Combining complemen-tary teachers is a natural remedy. Since nothing in the for-mulation is specific to images beyond the feature extractor, extending Any-OPD to other latent generative modalities is a further direction. References 
+
+Agarwal, R.; Vieillard, N.; Zhou, Y.; Stanczyk, P.; Ramos Garea, S.; Geist, M.; and Bachem, O. 2024. On-policy distillation of language models: Learning from self-generated mistakes. In International Conference on Learn-ing Representations , volume 2024, 21246–21263. Black Forest Labs. 2024. FLUX.1. https://github.com/ black-forest-labs/flux. Blau, Y.; and Michaeli, T. 2018. The perception-distortion tradeoff. In Proceedings of the IEEE conference on com-puter vision and pattern recognition , 6228–6237. Cai, H.; Cao, S.; Du, R.; Gao, P.; Hoi, S.; Hou, Z.; Huang, S.; Jiang, D.; Jin, X.; Li, L.; et al. 2025. Z-image: An effi-cient image generation foundation model with single-stream diffusion transformer. arXiv preprint arXiv:2511.22699 .Esser, P.; Kulal, S.; Blattmann, A.; Entezari, R.; M¨ uller, J.; Saini, H.; Levi, Y.; Lorber, D.; Sauer, A.; Boesel, F.; et al. 2024a. Scaling Rectified Flow Transform-ers for High-Resolution Image Synthesis. arXiv preprint arXiv:2403.03206 .Esser, P.; Kulal, S.; Blattmann, A.; Entezari, R.; M¨ uller, J.; Saini, H.; Levi, Y.; Lorenz, D.; Sauer, A.; Boesel, F.; et al. 2024b. Scaling rectified flow transformers for high-resolution image synthesis. In Forty-first international con-ference on machine learning .Fang, Z.; Huang, W.; Zeng, Y.; Zhao, Y.; Chen, S.; Feng, K.; Lin, Y.; Chen, L.; Chen, Z.; Cao, S.; et al. 2026. Flow-OPD: On-policy distillation for flow matching models. arXiv preprint arXiv:2605.08063 .Ghosh, D.; Hajishirzi, H.; and Schmidt, L. 2023. Geneval: An object-focused framework for evaluating text-to-image alignment. Advances in Neural Information Processing Sys-tems , 36: 52132–52152. Gu, Y.; Dong, L.; Wei, F.; and Huang, M. 2024. Minillm: Knowledge distillation of large language models. In Inter-national Conference on Learning Representations , volume 2024, 32694–32717. Hinton, G.; Vinyals, O.; and Dean, J. 2015. Distill-ing the knowledge in a neural network. arXiv preprint arXiv:1503.02531 .Ho, J.; Jain, A.; and Abbeel, P. 2020. Denoising Diffusion Probabilistic Models. NeurIPS .Hu, X.; Wang, R.; Fang, Y.; Fu, B.; Cheng, P.; and Yu, G. 2024. Ella: Equip diffusion models with llm for enhanced semantic alignment. arXiv preprint arXiv:2403.05135 .Karras, T.; Aittala, M.; Aila, T.; and Laine, S. 2022. Eluci-dating the design space of diffusion-based generative mod-els. Advances in neural information processing systems , 35: 26565–26577. Kirstain, Y.; Polyak, A.; Singer, U.; Matiana, S.; Penna, J.; and Levy, O. 2023. Pick-a-Pic: An Open Dataset of User Preferences for Text-to-Image Generation. NeurIPS .Ko, J.; Chen, T.; Kim, S.; Ding, T.; Liang, L.; Zharkov, I.; and Yun, S.-Y. 2025. Distillm-2: A contrastive ap-proach boosts the distillation of llms. arXiv preprint arXiv:2503.07067 .Li, Q.; Yu, J.; Jiang, K.; Wei, Y.; Xing, Z.; Li, P.; Chu, R.; Zhang, S.; Liu, Y.; and Wu, Z. 2026. DiffusionOPD: A Uni-fied Perspective of On-Policy Distillation in Diffusion Mod-els. arXiv preprint arXiv:2605.15055 .Lin, A.; Wohlwend, J.; Chen, H.; and Lei, T. 2020. Autore-gressive knowledge distillation through imitation learning. In Proceedings of the 2020 Conference on Empirical Meth-ods in Natural Language Processing (EMNLP) , 6121–6133. Lipman, Y.; Chen, R. T.; Ben-Hamu, H.; Nickel, M.; and Le, M. 2023. Flow Matching for Generative Modeling. ICLR .Liu, X.; Gong, C.; and Liu, Q. 2023. Flow Straight and Fast: Learning to Generate and Transfer Data with Rectified Flow. 
+
+ICLR .Luo, S.; Tan, Y.; Huang, L.; Li, J.; and Zhao, H. 2023a. Latent consistency models: Synthesizing high-resolution images with few-step inference. arXiv preprint arXiv:2310.04378 .Luo, S.; Tan, Y.; Huang, L.; Li, J.; and Zhao, H. 2023b. Latent Consistency Models: Synthesizing High-Resolution Images with Few-Step Inference. arXiv preprint arXiv:2310.04378 .Ma, Y.; Wu, X.; Sun, K.; and Li, H. 2025. Hpsv3: Towards wide-spectrum human preference score. In Proceedings of the IEEE/CVF International Conference on Computer Vi-sion , 15086–15095. Nie, W.; Guo, B.; Huang, Y.; Xiao, C.; Vahdat, A.; and Anandkumar, A. 2022. Diffusion models for adversarial pu-rification. arXiv preprint arXiv:2205.07460 .Oquab, M.; Darcet, T.; Moutakanni, T.; Vo, H.; Szafraniec, M.; Khalidov, V.; Fernandez, P.; Haziza, D.; Massa, F.; El-Nouby, A.; et al. 2023. Dinov2: Learning robust visual fea-tures without supervision. arXiv preprint arXiv:2304.07193 .Permenter, F.; and Yuan, C. 2023. Interpreting and im-proving diffusion models from an optimization perspective. 
+
+arXiv preprint arXiv:2306.04848 .Rombach, R.; Blattmann, A.; Lorenz, D.; Esser, P.; and Om-mer, B. 2022. High-resolution image synthesis with latent diffusion models. In Proceedings of the IEEE/CVF confer-ence on computer vision and pattern recognition , 10684– 10695. Ross, S.; Gordon, G.; and Bagnell, D. 2011. A reduction of imitation learning and structured prediction to no-regret on-line learning. In Proceedings of the fourteenth international conference on artificial intelligence and statistics , 627–635. JMLR Workshop and Conference Proceedings. Saharia, C.; Chan, W.; Saxena, S.; Li, L.; Whang, J.; Denton, E. L.; Ghasemipour, K.; Gontijo Lopes, R.; Karagol Ayan, B.; Salimans, T.; et al. 2022. Photorealistic Text-to-Image Diffusion Models with Deep Language Understand-ing. NeurIPS .Salimans, T.; and Ho, J. 2022. Progressive Distillation for Fast Sampling of Diffusion Models. arXiv preprint arXiv:2202.00512 .Schuhmann, C. 2022. LAION-Aesthetics. https://laion.ai/ blog/laion-aesthetics/. LAION blog post. Song, Y.; and Dhariwal, P. 2024. Improved techniques for training consistency models. In International Conference on Learning Representations , volume 2024, 15078–15097. Song, Y.; Sohl-Dickstein, J.; Kingma, D. P.; Kumar, A.; Er-mon, S.; and Poole, B. 2021. Score-Based Generative Mod-eling through Stochastic Differential Equations. ICLR .Stability AI. 2024. Introducing Stable Diffusion 3.5. https: //stability.ai/news/introducing-stable-diffusion-3-5. Official model release announcement; accessed: 2026-07-28. Wang, F.; and Yu, Z. 2025. Coefficients-Preserving Sam-pling for Reinforcement Learning with Flow Matching. 
+
+arXiv preprint arXiv:2509.05952 .Wang, Y.; Zang, Y.; Li, H.; Jin, C.; and Wang, J. 2025. Uni-fied reward model for multimodal understanding and gener-ation. arXiv preprint arXiv:2503.05236 .Xu, J.; Liu, X.; Wu, Y.; Tong, Y.; Li, Q.; Ding, M.; Tang, J.; and Dong, Y. 2023. Imagereward: Learning and evaluating human preferences for text-to-image generation. 
+
+Advances in Neural Information Processing Systems , 36: 15903–15935. Yin, T.; Gharbi, M.; Park, T.; Zhang, R.; Shechtman, E.; Du-rand, F.; and Freeman, W. T. 2024a. Improved distribution matching distillation for fast image synthesis. In The Thirty-eighth Annual Conference on Neural Information Process-ing Systems .Yin, T.; Gharbi, M.; Park, T.; Zhang, R.; Shechtman, E.; Du-rand, F.; and Freeman, W. T. 2024b. Improved Distribu-tion Matching Distillation for Fast Image Synthesis. arXiv preprint arXiv:2405.14867 .Yin, T.; Gharbi, M.; Zhang, R.; Shechtman, E.; Durand, F.; Freeman, W. T.; and Park, T. 2024c. One-step Diffu-sion with Distribution Matching Distillation. arXiv preprint arXiv:2311.18828 .Zhang, R.; Isola, P.; Efros, A. A.; Shechtman, E.; and Wang, O. 2018. The Unreasonable Effectiveness of Deep Features as a Perceptual Metric. CVPR .Zhou, M.; Zheng, H.; Wang, Z.; Yin, M.; and Huang, H. 2024. Score identity distillation: Exponentially fast distilla-tion of pretrained diffusion models for one-step generation. In Forty-first International Conference on Machine Learn-ing .

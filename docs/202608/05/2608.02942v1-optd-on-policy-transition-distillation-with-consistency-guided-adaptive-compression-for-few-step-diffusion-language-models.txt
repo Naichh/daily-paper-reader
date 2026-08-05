@@ -1,0 +1,338 @@
+Title: OPTD: On-Policy Transition Distillation with Consistency-Guided Adaptive Compression for Few-Step Diffusion Language Models
+
+URL Source: https://arxiv.org/pdf/2608.02942v1
+
+Published Time: Wed, 05 Aug 2026 00:18:00 GMT
+
+Number of Pages: 9
+
+Markdown Content:
+# OPTD: On-Policy Transition Distillation with Consistency-Guided Adaptive Compression for Few-Step Diffusion Language Models 
+
+## Xiaocheng Lu 1,* , Hualei Zhang 1,* , Shuhan Guo 2, †, Jie Zhang 1, Xiaoyi Pang 1, Jian Liu 1,Haoxi Li 1, Bohai Gu 1, Haoxuan Che 1, Jingcai Guo 3, Song Guo 1
+
+> 1
+
+HKUST 2NWPU 3PolyU 
+
+Abstract 
+
+Diffusion language models (dLLMs) can predict many tokens in parallel, but accurate generation still requires many iterative denoising steps. Few-step distillation accelerates decoding by compressing multiple teacher steps into a single student tran-sition. However, existing methods construct supervision on off-policy trajectories. At inference, the student’s early paral-lel commitments alter the context of later predictions, so the states it actually visits drift away from the supervised ones— precisely when step compression is most aggressive. On-policy distillation is a natural remedy for this mismatch, but it leaves open how far each transition should advance: match-ing only the teacher’s next action limits compression, while indiscriminately merging future actions can violate interme-diate dependencies. To address this limitation, we propose OPTD, On-Policy Transition Distillation with consistency-guided adaptive compression. It samples partial states from the few-step student’s own trajectories, uses a frozen, question-only teacher to identify outcome-aligned future candidates, and orders them by current-state confidence. The method then selects the longest prefix whose joint commitment preserves the teacher’s rollout outcome. A set-bottleneck objective pro-motes every verified future candidate to the decoder’s release threshold, while a frozen-teacher KL anchor regularizes all other active positions. Neither target construction nor train-ing uses a gold response. Across four mathematical reason-ing and code-generation benchmarks, OPTD consistently im-proves the quality–efficiency trade-off and attains the strongest overall quality-constrained AUP among the evaluated few-step baselines. 
+
+## Introduction 
+
+Diffusion language models (dLLMs) generate text by itera-tively replacing masked positions with predicted tokens (Nie et al. 2025; Sahoo et al. 2024). Because a denoiser pre-dicts a distribution for every remaining mask, a decoder can commit multiple confident tokens in parallel. Accurate gen-eration nevertheless requires many neural function evalua-tions (NFEs), since later predictions often depend on con-text revealed by earlier denoising steps. Few-step distillation reduces this cost by training one student transition to ap-proximate several teacher transitions. Figure 1 previews the resulting four-benchmark quality–efficiency trade-off. 
+
+> ∗
+
+Equal contribution. 
+
+> †
+
+Work completed during an internship at HKUST. 0 100 200 300         
+
+> OPTD 313.18 6.69x
+> +27.5% vs. best prior
+> TAD-S 245.59 5.25x
+> d3LLM 230.50 4.92x
+> TAD-Q 218.07 4.66x
+> dParallel 156.48 3.34x
+> Fast-dLLM 107.84 2.30x
+> D2F 72.49 1.55x
+> LLaDA 46.82 1.00x
+> Average quality-constrained AUP
+
+Figure 1: Quality–efficiency frontier. Average quality-constrained AUP across four benchmarks. OPTD achieves 313.18 AUP: 6.69 × that of vanilla LLaDA and 27.5% above the highest-AUP prior method, TAD-S. The gain comes from higher parallelism with a modest accuracy trade-off. Most existing few-step methods construct compression tar-gets off-policy, using fixed teacher trajectories or prescribed corruption schedules rather than the accelerated student’s own behavior (Zhang et al. 2026; Qian et al. 2026; Kim et al. 2026; Liang et al. 2026; Shen et al. 2026; Zhou et al. 2026). At inference, the student determines both the tokens commit-ted and the next partial state. This mismatch is particularly consequential for dLLMs because one parallel action changes the context of all remaining masks and can alter many later release decisions. In our audit, only 33.7% of student-visited states occur on the corresponding teacher trajectory; cover-age falls from 55.0% in the first eight decoding steps to 6.5% after step 40. Moreover, only 50.3% of merges verified on progress-matched teacher states remain valid after transfer to student states. On-policy distillation aligns supervision with student-visited states, but it does not determine how far a transi-tion should advance. Matching only the teacher’s immediate action provides no additional compression, whereas a fixed merge horizon imposes the same depth at every state and, in our horizon diagnostic, fails to convert deeper horizons arXiv:2608.02942v1 [cs.CL] 3 Aug 2026 into additional parallelism. Token-wise verification is also insufficient: a future token may match its value in the teacher outcome in isolation yet become invalid when committed jointly with other future tokens. Indeed, we later find that unions of individually valid tokens can still fail the joint check (10 of 416 in our verification-unit ablation). These two failure modes motivate a state-dependent compression rule evaluated directly on student-visited states. We propose OPTD , On-Policy Transition Distillation with Consistency-Guided Adaptive Compression. OPTD samples partial states from the evolving student’s inference policy and queries a frozen, question-only teacher (it sees only the ques-tion and the current partial state) for outcome-aligned future candidates. It orders these candidates by current-state confi-dence and selects the longest prefix whose joint commitment preserves the teacher’s rollout outcome. A set-bottleneck cer-tainty loss promotes every verified future token to the de-coder’s release threshold, while a frozen-teacher KL anchor regularizes all other active positions. The teacher and verifier are used only to construct training targets; inference runs the unchanged student and decoder. Empirically, this procedure improves decoding parallelism while maintaining competi-tive accuracy. No model or target-construction component observes a gold response or reference answer. In summary, our main contributions are threefold: 
+
+• We identify and quantify the state–action mismatch in off-policy few-step dLLM distillation, showing how teacher-collected supervision diverges from the states and release decisions encountered by the evolving student. 
+
+• We introduce consistency-guided adaptive compression, which selects the longest outcome-preserving candidate prefix and optimizes it with threshold-aligned verified-set certainty forcing and a frozen-teacher anchor. 
+
+• Across mathematical reasoning and code-generation benchmarks, OPTD improves accuracy–parallelism trade-offs over few-step baselines; controlled analyses iso-late the effects of on-policy states and joint consistency verification. 
+
+## Related Work 
+
+Diffusion language models. Discrete diffusion extends de-noising to categorical state spaces (Austin et al. 2021a; Hoogeboom et al. 2021), and recent masked dLLMs scale this formulation to language modeling (Sahoo et al. 2024; Arriola et al. 2025; Nie et al. 2025; Ye et al. 2025; Cheng et al. 2025). At a partial state x, a denoiser predicts a distribution for every masked position. A dynamic decoder releases posi-tions whose confidence exceeds a threshold, with a fallback release when no position is ready. Therefore, model quality and confidence calibration jointly determine the number of tokens released per forward. Fast-dLLM, D2F, and dParal-lel accelerate this decoding process through prefix caching and parallel release mechanisms (Wu et al. 2025; Wang et al. 2026; Chen et al. 2025); these system-level optimizations are complementary to the learned transition policy. 
+
+Few-step and trajectory distillation. Progressive distil-lation and consistency learning compress multi-step dif-fusion samplers in continuous domains (Salimans and Ho 2022; Song et al. 2023). Recent dLLM methods use pseudo-trajectories, temporal targets, sharpened distribu-tions, learned release order, or consistency objectives to re-duce denoising cost (Qian et al. 2026; Kim et al. 2026; Liang et al. 2026; Shen et al. 2026; Zhou et al. 2026; Zhang et al. 2026). These methods establish strong distilled checkpoints, but their supervision is generally produced before or inde-pendently of the student’s inference-time trajectory. OPTD 
+
+is compatible with these initialization recipes and instead contributes inference-aligned state collection and adaptive transition compression. Our notion of consistency also dif-fers: it is outcome consistency of the completed block under a jointly committed merge, rather than self-consistency along a sampler trajectory. 
+
+On-policy distillation. The state-distribution mismatch between teacher and student is the core motivation of on-policy distillation: GKD lets an autoregressive student gener-ate its own trajectories and queries a teacher on them to obtain dense next-token supervision (Agarwal et al. 2023). dLLMs exhibit the same mismatch, motivating a line of on-policy distillation for this setting: OPDLM performs data-efficient knowledge transfer from an autoregressive teacher to a diffu-sion student, yet supervises only final sequences and leaves intermediate denoising states unconstrained (Su et al. 2026); d-OPSD refines on-policy self-distillation to the step level by supervising arbitrary-order release transitions, but relies on privileged self-future conditioning that is unavailable at inference (Luo et al. 2026); and TOPD conducts trace-based OPD along the student’s own denoising trajectory (Ren et al. 2026). All three align teacher supervision with the student’s visited states, but pursue capability or alignment gains rather than few-step acceleration. OPTD instead learns accelerated merges directly on student states. 
+
+## On-Policy Transition Distillation 
+
+Preliminaries 
+
+A masked dLLM starts from a fully masked response. Given question q, one denoiser forward at partial state x predicts 
+
+pθ (· | q, x, i ) at every active mask i ∈ M (x). Let G(x) be the currently exposed block group and MG(x) ⊆ M (x) its masked positions. Define cθ (i | q, x ) = max y pθ (y | q, x, i ).A threshold decoder selects 
+
+Aτθ (q, x ) = {i ∈ MG(x) : cθ (i | q, x ) ≥ τ } (1) and jointly commits their argmax tokens, with a most-confident fallback for an empty set. We count each denoiser forward as one NFE. Few-step distillation replaces several teacher transitions with one student transition. Existing methods train on a fixed state distribution doff , whereas inference follows the student’s own distribution dθ :
+
+Loff = Ex∼doff ℓ(x; θ), Lon = Ex∼dθ ℓ(x; θ). (2) Since a joint release alters the context of all remaining masks simultaneously, targets constructed on doff often become invalid under dθ . To address this distributional mismatch, 
+
+OPTD optimizes under the student-induced state distribu-tion by constructing supervision directly on partial states sampled as x ∼ dθ .On-Policy State Sampling from the student           
+
+> Question Student
+> (trainable)
+> ... ...
+> t = 0 t = k t = T
+> Sample a root state
+> Consistency-Guided Adaptive Compression from Frozen Teacher
+> Frozen
+> Teacher
+> Teacher
+> releases
+> waves
+> A. Verify compressible future releases from teacher
+> Same outcome
+> completion?
+> B. Select the longest consistent action tokens
+> Choose the longest jointly
+> consistent action tokens that keeps
+> the same outcome completion
+> Masked tokens Student rollout tokens Data flow Trainable Frozen Consistent action tokens
+> wave 1
+> root state
+> rollout
+> Candidate tokens
+> masked positions
+> loss =
+> 1) Joint token supervision
+> 2) Certainty forcing
+> 3) KL anchor on masked positions
+
++
+
++Update student 
+
+> consistent action tokens
+> loss =
+> 1) Verified-set certainty forcing
+> +
+> 2) KL anchor on other active positions
+
+Figure 2: Overview of OPTD . The current student supplies on-policy partial states. A frozen, question-only teacher rolls forward from each state and proposes future releases. OPTD retains candidate actions whose joint commitment preserves the teacher’s rollout outcome and selects the longest outcome-preserving action. Threshold-aligned set-bottleneck certainty forcing promotes its verified future tokens, and a frozen-teacher KL anchor regularizes all other active positions. 
+
+The OPTD Algorithm 
+
+Although on-policy training resolves the state-distribution mismatch, it does not determine the appropriate compres-sion extent: how many teacher transitions can be consistently merged into a single student transition at a given state? OPTD 
+
+resolves this state-dependent compression problem through adaptive transition construction. As illustrated in Figure 2, the current student first supplies an on-policy state using its inference decoder. We call this sampled student-visited state the root state . A frozen teacher then generates a conservative continuation from that state. From this continuation, OPTD 
+
+selects the longest confidence-ordered future action whose joint commitment preserves the teacher’s rollout outcome. 
+
+On-policy state collection. Given a training question q,we run the current student from a fully masked response to a sampled rollout depth using the same question-only dynamic decoder as at inference, retaining the resulting partial state x
+
+and the block group exposed to its next transition. We then query a frozen teacher policy pT with (q, x ) to obtain its current distribution and a conservative future continuation. 
+
+Consistency-guided adaptive compression. To deter-mine how far the teacher trajectory can be safely compressed at each state, we perform consistency-guided adaptive com-pression: we construct an ordered family of outcome-aligned future candidates and select a state-dependent prefix length by testing their effect on the frozen teacher’s rollout outcome. Specifically, starting from a student-visited state x0 = x,the frozen teacher uses the confidence threshold τ to com-plete the currently exposed block group conservatively: 
+
+x0 A1
+
+−−→ x1 A2
+
+−−→ · · · AJ
+
+−−→ xJ = xT , (3) where Ah is the release set at teacher wave h and xT is the rollout outcome. The first wave A1 is immediately available at x; later waves generally condition on the intervening re-leases. The exposed block group bounds the spatial scope of target construction; within that group, the method imposes no fixed per-state compression rate. The teacher-wave hori-zon H is bounded by both the exposed block group and an implementation cap of H=16 waves. Let ˆyi = arg max y pT (y | q, x, i ) and ci = pT (ˆ yi |
+
+q, x, i ). A future position is eligible only if its current-state teacher prediction already matches its value in the teacher outcome: 
+
+C(x) = i ∈ MG(x) \ A1 : ˆyi = xTi , (4) where MG(x) restricts candidates to the currently exposed block group. We order candidates by decreasing ci, using position as a deterministic tie-breaker, and let Cm be the first m candidates. Teacher release waves are used to con-struct the rollout outcome and to measure the wave span of accepted candidates (for reporting), but do not partition or order the candidate set. The identity filter removes candi-dates whose current predictions still change along the teacher trajectory, while confidence ordering prioritizes candidates already closest to the release boundary. However, satisfying this token-wise identity filter is insuf-ficient for parallel decoding. Current agreement is a token-wise condition: it identifies candidate tokens whose iden-tities appear stable, but cannot establish that several can-didates are jointly independent of the teacher’s interme-diate states. Committing them together changes the con-text seen by every remaining mask. To resolve this, we evaluate each proposed action as a set and reject a merge whenever it changes the teacher’s rollout outcome xT . Let 
+
+ΦT (x; B) = Outcome T (Commit( x, B )) denote the frozen teacher’s rollout outcome after jointly committing B at x.Beginning with the longest prefix, we select 
+
+m⋆ = max {m ∈ { 0, . . . , |C (x)|} : Φ T (x; A1∪Cm) = xT }.
+
+(5) Equality is token-wise over every exposed block, so can-didates may cross a block boundary without changing the criterion. Here C0 = ∅, so the ordinary first teacher release is always the fallback. The verified future set is V (x) = Cm⋆
+
+and the compressed action is S(x) = A1 ∪ V (x).Outcome-Consistency Guarantee 
+
+Lemma 1 (Fallback consistency and verification cost) . As-sume that the frozen teacher and its tie-breaking rules are deterministic. Let n = |C (x)|. Then C0 = ∅ is consistent, so m⋆ in (5) is well-defined and the returned action is jointly outcome-preserving: 
+
+ΦT (x; S(x)) = xT .
+
+A descending exhaustive scan finds m⋆ using at most n
+
+nontrivial counterfactual outcome checks, or ⌈n/b ⌉ verifier batches when b prefixes are checked in parallel; C0 needs no check because it is the ordinary first teacher transition. This does not assume that outcome consistency is monotone in m.
+
+By definition, Cm⋆ is the longest, and hence largest-cardinality, outcome-preserving member of the prescribed prefix family. This observation is prefix-relative: it does not claim optimality over arbitrary subsets of C(x), whose ex-haustive search has 2n candidates. The ordering prioritizes current-state teacher confidence while making exact verifica-tion tractable. The proof of Lemma 1 and a formal statement of its scope are given in the technical appendix (supplemen-tary material). We construct this single verified prefix action at the student-visited root state; teacher-generated interme-diate states are used for verification but are not added to the training distribution. 
+
+Scope of the guarantee. Lemma 1 concerns the construc-tion of S(x) under the frozen teacher and verifier. At in-ference, neither component is present: the student releases 
+
+Aτθ (q, x ) according to its learned probabilities, and this set need not equal S(x) or be outcome-preserving under the teacher. Accordingly, the lemma establishes outcome-preserving training targets under the frozen teacher, not an inference-time consistency guarantee; inference quality re-mains an empirical property of the learned policy and its confidence calibration. 
+
+Verified-Set Transition Objective 
+
+Target construction verifies token identities and their joint outcome effect. The ordinary first wave A1 is already above the frozen teacher’s release threshold; the additional verified set V (x) is what must be promoted to make the merged transition available in one student step. Let hi(θ) = [log τ −
+
+log pθ (ˆ yi | q, x, i )] + and use 
+
+Lset =
+
+max i∈V (x) hi(θ), V (x)̸ = ∅,
+
+0, V (x) = ∅. (6) It is zero only when every verified candidate reaches the re-lease boundary and otherwise targets the least-ready member. All other active positions, including the already releasable first wave, retain the frozen teacher’s current-state distribu-tion: 
+
+Lanchor = 1
+
+|MG(x) \ V (x)|
+
+X 
+
+> i∈MG(x)\V(x)
+
+DKL 
+
+ piT ∥ piθ
+
+ ,
+
+(7) with zero value for an empty complement. Overall, 
+
+LOPTD = Lset + λanchor Lanchor ; the primary checkpoint uses λanchor = 1. No auxiliary head, gold target, or inference-time verifier is required. 
+
+Mean-hinge variant. For the loss-design ablation, we also replace the set bottleneck by |V |−1 P 
+
+> i∈V
+
+hi, with zero value for an empty set, while retaining the identical teacher anchor. Mean-hinge improves average readiness; set-bottleneck tar-gets the least-ready token in each joint release. 
+
+## Experiments 
+
+Setup 
+
+We initialize student and frozen teacher from the released TAD-Speed checkpoint (denoted TAD-S throughout), based on LLaDA-8B-Instruct (Nie et al. 2025; Zhou et al. 2026). The primary checkpoint uses 512 two-rank updates and rank-128, alpha-128 LoRA on all linear projections with learning rate 10 −6 (Hu et al. 2022). It collects student states and con-structs maximal verified future sets with a frozen teacher. Training uses the set-bottleneck certainty loss and residual teacher KL defined above. Rollout and deployment both use confidence Multi-Block decoding with response length 256, block length 32, at most K = 3 active blocks, confidence threshold τ = 0 .8, and block-add and decoded-token thresh-olds 0.5. This terminal checkpoint supplies the OPTD entries in Tables 1 and 3. The single-block attribution studies and the separate H = 16 compression-space audit use different configurations, detailed in the technical appendix. We evaluate on GSM8K (5-shot), MATH-500 (4-shot), MBPP (3-shot), and HumanEval (0-shot) (Cobbe et al. 2021; Hendrycks et al. 2021; Chen et al. 2021; Austin et al. 2021b). We use BF16, greedy decoding, batch size 1, and a 256-token budget. We report exact-match accuracy or pass@1, NFE, and tokens per forward (TPF). Following d3LLM, the unaccelerated endpoint is anchored at TPF = 1 .00 ; acceler-ated endpoints use the number of emitted non-special tokens divided by the actual NFE. All MBPP entries use the same 500-problem denominator; generated code is extracted, san-itized, and executed with an isolated pass@1 scorer. As in d3LLM, AUP uses α = 3 , an unweighted TPF-1 accuracy anchor, and trapezoidal integration of quality-weighted ac-curacy beyond that anchor. We retain only endpoints within five accuracy points of the conservative endpoint and aver-age AUP across tasks; the technical appendix gives the exact formula, reference accuracies, and endpoint policy. 
+
+Main Results 
+
+Table 1 compares method-native inference stacks under a common evaluation protocol (prompts, scorers, and bud-gets) across four benchmarks. It is therefore a complete-stack comparison, not an isolation of transition distillation; the controlled ablations in the next subsection provide the latter attribution. 
+
+Aligned cross-task comparison. OPTD reaches 47.21% average accuracy and 7.87 average TPF. As an end-to-end stack, it improves over d3LLM by 1.83 accuracy points and 13.4% in TPF. Relative to TAD-S, OPTD increases TPF by 38.1% in exchange for a 3.41-point accuracy drop. These complete-stack deltas include different native decoders and must not be attributed solely to transition distillation. Ta-ble 3 therefore provides a decoder-matched transition-policy Table 1: Full-benchmark complete-stack results using each method’s native decoder; MBPP uses all 500 test problems. AUP anchors the conservative endpoint at algorithmic TPF = 1 and may use a quality-constrained threshold-sweep endpoint from the same decoder family (technical appendix). The displayed OPTD operating point uses confidence threshold τ = 0 .8. †:conservative endpoint; TPF is 1.00 by definition. Best results are bold, second-best are underlined, and our method is shaded. 
+
+Method GSM8K MATH-500 HumanEval MBPP Average Acc. TPF AUP Acc. TPF AUP Acc. TPF AUP Acc. TPF AUP Acc. TPF AUP LLaDA (vanilla) † (Nie et al. 2025) 76.50 1.00 76.50 34.20 1.00 34.20 36.59 1.00 36.59 40.00 1.00 40.00 46.82 1.00 46.82 Fast-dLLM (Wu et al. 2025) 79.53 3.25 256.47 35.60 2.14 69.18 37.80 2.50 56.79 38.60 2.25 48.93 47.88 2.54 107.84 D2F (Wang et al. 2026) 68.54 2.97 161.92 20.40 2.75 26.25 32.32 2.73 50.41 38.80 2.34 51.37 40.01 2.70 72.49 dParallel (Chen et al. 2025) 75.74 5.85 392.77 30.60 4.46 79.57 37.20 7.50 97.73 39.80 2.36 55.84 45.84 5.04 156.48 d3LLM (Qian et al. 2026) 76.35 8.62 616.04 30.00 6.61 116.77 35.98 7.07 106.99 39.20 5.46 82.20 45.38 6.94 230.50 TAD-Q (Zhou et al. 2026) 79.76 6.29 481.72 46.80 4.41 197.39 40.24 6.06 108.54 40.80 3.75 84.61 51.90 5.13 218.07 TAD-S (Zhou et al. 2026) 80.21 8.34 576.34 40.80 5.10 216.26 40.85 5.94 115.53 40.60 3.42 74.23 50.62 5.70 245.59 
+
+OPTD 78.85 10.85 848.31 34.00 7.41 185.19 37.20 9.24 136.67 38.80 3.98 82.56 47.21 7.87 313.18 
+
+attribution across all four benchmarks. OPTD ’s average ac-curacy is 0.39 points above vanilla LLaDA (46.82%), while its average TPF is 7.87 × vanilla LLaDA’s anchored TPF. Thus, OPTD is a high-parallelism quality–efficiency op-erating point rather than a uniformly accuracy-preserving method; it achieves the highest TPF on GSM8K, MATH-500, and HumanEval. 
+
+Quality-constrained AUP. The Acc/TPF columns in Ta-ble 1 show each method’s primary operating point, whereas AUP summarizes its quality-constrained full-dataset curve. The technical appendix specifies when the curve uses a quality-constrained threshold-sweep endpoint from the same decoder family. OPTD obtains the highest average AUP (313.18), compared with 245.59 for TAD-S, 230.50 for d3LLM, and 218.07 for TAD-Q. It leads on GSM8K and HumanEval; TAD-S leads on MATH-500, and TAD-Q leads on MBPP. 
+
+Complete inference stacks. On full GSM8K with each method’s released inference strategy, TAD-S reaches 81.35%/8.512 Acc/TPF and d3LLM 72.71%/9.212, close to their reported operating points. Policy-matched K3 reaches 78.85%/10.805: it exceeds d3LLM on both metrics and of-fers a higher-parallelism point than TAD-S. Decoder, cache, sharding, and hardware details are in the technical appendix. 
+
+Ablation Experiments 
+
+We first isolate the learned transition policy from the infer-ence stack, then ablate its state source, teacher update, set reduction, and verification unit. Each comparison changes only the named factor and otherwise matches the evaluator, training budget, and decoding configuration. 
+
+Transition-policy attribution. We evaluate d3LLM and set-bottleneck OPTD on the same full-GSM8K examples with one evaluator, a 256-token generation budget, and a single-block prefix-cache decoder. Under this matched set-ting, OPTD improves accuracy from 75.13% to 79.91% and TPF from 6.842 to 6.995. It corrects 157 examples that d3LLM fails and regresses on 94 examples (exact McNemar 
+
+p = 8 .41 × 10 −5). Average NFE is essentially unchanged On-policy Off-policy   
+
+> 46 47 48 49
+> Macro accuracy (%)
+> 48.51
+> 46.62 77.1 7.2 256 512 1024
+> Training updates
+> Effective TPF
+> 7.22
+> 7.23
+> +1.88 pp
+> At 1,024, TPF gap = -0.016
+
+Figure 3: Single-seed matched state-source learning curves. Accuracy is the macro average over full GSM8K, MATH-500, MBPP-500, and HumanEval; TPF uses the same de-coder. The on-policy accuracy gap grows with training while efficiency remains matched. (34.74 versus 34.87), while OPTD outputs are 2.62% longer. The TPF gain therefore reflects more decoded tokens per for-ward rather than fewer forwards at this operating point; we do not claim an NFE reduction. 
+
+State source. We keep the TAD-S initialization, frozen teacher, verifier, loss, update budget, and decoder fixed. The teacher-state control applies the identical objective to frozen-teacher states; OPTD instead trains on student-visited states. Both use rank-128 LoRA, learning rate 10 −6, and a confi-dence Multi-Block decoder with K = 3 and τ = 0 .8.Figure 3 provides the state-source attribution. On-policy macro accuracy improves monotonically from 47.14% to 47.85% to 48.51% across 256/512/1,024 updates. Its gap over off-policy changes from −0.20 to +0 .78 to +1 .88 points, whereas final macro TPF is nearly identical (7.217 versus 7.233). At 1,024 updates, on-policy gains 0.45/3.00/4.88 Table 2: Matched loss ablation at 1,024 updates and τ = 0 .8.Benchmark columns report full-set accuracy; Avg. and TPF are four-benchmark macro means. 
+
+Loss GSM MATH MBPP HE Avg. TPF Mean 76.57 35.00 34.80 37.80 46.04 7.44 
+
+Proj. KL 76.80 33.60 37.20 37.20 46.20 7.19 Set bottleneck (ours) 77.86 36.20 37.40 39.02 47.62 7.20 
+
+points on GSM8K/MATH-500/HumanEval and loses 0.80 on MBPP-500. The observed aggregate gap becomes posi-tive only after sufficient optimization; we do not claim dom-inance at every checkpoint or on every task. This single-seed curve provides matched learning-curve evidence rather than a variance estimate. 
+
+Teacher update. Refreshing the teacher to match the current student before every update yields 79.98%/6.285 Acc/TPF, versus 81.05%/6.171 for the frozen teacher at matched checkpoints. Self-teaching collapses the residual anchor KL to 4.66 ×10 −9, leaving only future-release sharp-ening; the frozen teacher maintains an anchor KL of 0.00697 and prevents recursive certainty drift (the student teaching it-self ever-higher confidence) on student-visited states during training. 
+
+Set reduction. Table 2 shows that mean hinge gains 0.24 TPF but loses 1.58 accuracy points; projection KL (forward KL to a teacher distribution whose verified targets are lifted to the release boundary; technical appendix) loses 1.42 points at similar speed. Since the least-ready member controls joint release, we adopt the max hinge as our primary, accuracy-oriented objective. Its early disadvantage at 256 updates re-verses by 512 (technical appendix), so we do not claim dom-inance at every operating point. In the earlier single-block recipe, set bottleneck at evaluation threshold 0.85 gains 0.83 accuracy points over mean hinge at a 1.47% TPF cost; at the nearest-speed operating points the paired difference is not significant ( p = 0 .930 ; technical appendix). 
+
+Verification unit. Independent verification admits more tokens per state (2.875 versus 1.327), but 10 of 416 unions of individually valid tokens fail the joint check. Joint testing gains 0.67/0.89 accuracy points at updates 256/512, whereas independent testing gains 0.16/0.26 TPF. Thus joint testing is the appropriate unit of verification; independent testing trades quality for speed. 
+
+Analysis Experiments 
+
+Having isolated the design choices above, we next ana-lyze why on-policy collection is needed, how much state-dependent compression is available, whether its gain sur-vives a decoder-matched comparison, and how much of the compression benefit is attributable to adaptive scheduling alone. These studies diagnose the mechanism and its op-erating regime; the final one isolates scheduling adaptivity outside the full OPTD stack. 
+
+On-policy distribution shift. We show that the states vis-ited by the accelerated student drift away from frozen-teacher trajectories, so purely offline supervision covers them poorly. We sample one state uniformly from each complete roll-out and compare it against every state of the corresponding frozen-teacher trajectory. Only 33.7% are covered (95% Wil-son CI [30 .9, 36 .6] ). Coverage decreases from 55.0% during student steps 0 through 7 to 6.5% after step 40 ( r = −0.317 ,permutation p < 10 −4). Meanwhile, normalized generated-sequence Hamming distance to the nearest teacher state in-creases from 0.0119 to 0.4510 ( r = 0 .561 , p < 10 −4). This confirms that teacher trajectories provide poor support for student-visited states. For action comparison, we select a teacher state in the same current block by remaining-mask count. Among sampled states, 61.2% have an exactly count-matched teacher state, and 75.6% differ by at most one mask. We then run the frozen teacher and the same outcome-consistency verifier on both states. Figure 4 shows that progress matching does not make their actions interchangeable. Among teacher states for which the verifier selects a nonempty future set, only 50.3% remain outcome-preserving after transfer to the paired student state. Validity falls from 78.9% during steps 0 through 7 to 14.3% after step 40 (r = −0.381 , permutation p < 10 −4). The frozen teacher is also less certain on student states: mean confidence de-creases by 0.0170 (95% bootstrap CI [−0.0262 , −0.0080] ), and the fraction above the 0.9 release threshold decreases by 4.97 points (CI [−7.02 , −3.01] ). The shift affects release cal-ibration and action validity rather than introducing harmless progress noise. 
+
+Verified compression space. On student-visited states at threshold 0.9, the mean of |A1|, |V (x)|, and |S(x)| is 9.43, 4.52, and 13.94, and the mean verified horizon is 2.41 waves; 
+
+|C (x)| = 0 in 31.4% of states. The full diagnostic in the tech-nical appendix shows that a requested 8 × span is fully avail-able in only 10.1% of states, and the realized span adaptively caps at 3.16 ×; at a requested 16 ×, utilization falls to 21.2%. A rank-256 LoRA yields essentially the same cap (3.17 ×). Teacher-wave span should not be confused with TPF: under the matched decoder, OPTD reaches 6.995 TPF against the practical single-block ceiling of 8 (32-token blocks decoded in at least 4 forwards). The single-block frozen-teacher run accepts 42.5% of states and promotes 1.33 future tokens per state. 
+
+Decoder-matched policy attribution. We apply the same confidence Multi-Block decoder to released TAD-S and 
+
+OPTD on all four full benchmarks. Under the identical decoder and threshold, OPTD raises macro accuracy from 47.30 to 47.97 ( +0 .67 points) and average TPF from 6.86 to 7.16 ( +4 .4% ), with per-task TPF gains of 3.0–6.7%. The shared decoder supplies base cross-block parallelism, but the learned policy further improves release efficiency; accuracy does not improve universally. 
+
+Transfer from base LLaDA. We also test whether useful compression can be learned without the TAD-S initializer. Starting from LLaDA-8B-Instruct with no adapter, we train (a) Teacher-trajectory support                
+
+> 025 50 75 100 0-7 8-15 16-23 24-31 32-39 40+
+> Student states covered (%)
+> Student decoding step (NFE)
+> overall: 33.7% raw-step trend: r = -.317 (p < 1e-4)
+> (b) Distance from teacher support
+> 0.0 0.2 0.4 0.6 0-7 8-15 16-23 24-31 32-39 40+
+> Nearest-state Hamming
+> Student decoding step (NFE)
+> raw-step trend: r = .561 (p < 1e-4)
+> (c) Offline action transfer
+> 025 50 75 100 0-7 8-15 16-23 24-31 32-39 40+
+> Valid transferred actions (%)
+> Student decoding step (NFE)
+> overall: 50.3% raw-step trend: r = -.381 (p < 1e-4)
+
+Figure 4: Student states leave teacher support (a,b), while transferred teacher actions become unreliable (c) over matched rollouts; shading gives 95% intervals. Table 3: Decoder-matched full-benchmark results under con-fidence Multi-Block decoding (no explicit active-block cap, 
+
+τ = 0 .8); TAD-S has no OPTD adapter. 
+
+TAD-S OPTD 
+
+Benchmark Acc. TPF Acc. TPF GSM8K 77.79 9.74 77.86 10.04 
+
+MATH-500 34.40 6.66 37.20 6.96 
+
+HumanEval 37.80 7.18 38.41 7.66 
+
+MBPP-500 39.20 3.87 38.40 3.99 
+
+Average 47.30 6.86 47.97 7.16 
+
+Table 4: Transfer from base LLaDA. Vanilla is the TPF-1
+
+conservative decode of the trained checkpoint; “fast valid” reports Acc./TPF at each task’s fastest endpoint within the five-point quality constraint. 
+
+Task Vanilla Acc. Fast valid AUP GSM8K 79.53 79.98/4.21 332.40 MATH-500 35.60 32.20/3.37 78.62 HumanEval 40.85 41.46/4.06 77.59 MBPP-500 41.40 38.20/3.48 66.47 Average 49.35 47.96/3.78 138.77 
+
+a rank-128 adapter for 320 updates. A frozen base model, decoded with Fast-dLLM at confidence 0.9, supplies teacher trajectories. This stress test changes multiple training and de-coding factors relative to the primary model, so it is evidence of transfer rather than a controlled initializer ablation. The accelerated endpoints retain 47.96% macro accuracy versus 49.35% under the conservative decode while reach-ing 3.78 average TPF; the full curves yield 138.77 macro AUP. This is substantially below the TAD-S-initialized pri-mary result (313.18 AUP and 7.87 TPF), consistent with the initializer supplying much of the available cross-block paral-lelism. Because the recipes are not matched, we do not assign this gap causally to initialization alone. 
+
+Operating-regime analysis. The transfer curve separates endpoint quality from available parallelism. At confidence 0.9, its four-task macro operating point is 49.01% accu-racy at 2.71 TPF. Lowering the threshold to 0.8 increases average TPF by 26.3% to 3.43, with a 1.05-point accuracy cost; selecting each task’s fastest valid endpoint further raises TPF by 10.4% to 3.78 while leaving the macro accuracy at 47.96%. Thus, the learned policy supplies a useful threshold-controlled speed range even when the student begins from vanilla LLaDA. The range is nevertheless much narrower than for the TAD-S-initialized model. In particular, the trans-fer endpoint is slightly more accurate than the primary oper-ating point (47.96% versus 47.21%) but reaches less than half its TPF (3.78 versus 7.87); endpoint accuracy alone therefore does not predict AUP. The task curves also show where transfer is retained. GSM8K preserves nearly 80% accuracy throughout the ac-cepted range and contributes 332.40 AUP, whereas MATH-500 and HumanEval contribute 78.62 and 77.59. MBPP reaches only 66.47 AUP, but this is closest to the primary model’s 82.56 among the four tasks in relative terms. Con-versely, GSM8K has the largest absolute AUP gap to the primary model (332.40 versus 848.31), despite its strong accuracy. These differences suggest that the amount of com-pressible transition structure available before OPD training is task dependent. Because the transfer recipe changes sev-eral factors, this observation motivates a future matched-initializer study rather than establishing a backbone effect. 
+
+Adaptive compression horizon. We finally isolate the scheduling benefit of adaptive compression from the con-sistency verifier. Starting directly from LLaDA-8B-Instruct, without the TAD-S initialization used elsewhere, we train matched fixed- and adaptive-horizon policies under the same off-policy setup, disable verification in both arms, and ap-ply the same certainty-forcing objective, which trains each committed token’s confidence toward the 0.9 release thresh-old (Chen et al. 2025). Table 5 reports four-benchmark macro results. Adaptive selection yields higher TPF at every matched horizon. At H = 2 , macro accuracy is essentially unchanged (+0.08 points) while TPF increases by 7.2%. Larger horizons trade 1.05–1.53 accuracy points for 20.7–29.2% more TPF. Table 5: Single-seed fixed versus adaptive compression, with four-benchmark macro Acc. and ∆TPF relative to fixed.                      
+
+> HAcc. TPF ∆TPF Fixed Adaptive Fixed Adaptive 246.77 46.85 4.824 5.172 +7.2% 447.08 46.03 4.634 5.594 +20.7% 846.68 45.15 4.116 5.318 +29.2%
+
+Fixed TPF instead falls from 4.824 to 4.116 as H grows, so adaptivity reaches operating points unattained by fixed horizons. It therefore controls a state-dependent quality– efficiency trade-off rather than unconditionally improving ac-curacy; the full method’s consistency check is the accuracy-oriented guardrail omitted here. 
+
+## Conclusion 
+
+We presented OPTD , an on-policy transition-distillation framework for few-step diffusion language models. It col-lects student-visited states and uses a frozen, question-only teacher to construct state-dependent compressed tran-sitions without gold responses. Across reasoning and code-generation tasks, it offers a favorable quality–efficiency trade-off. Matched analyses support student-state supervision and adaptive transition horizons; a decoder-controlled compari-son shows 0.67-point higher macro accuracy and 4.4% higher average TPF beyond the common decoder. The guarantee covers teacher-verified targets, not inference-time actions; confidence calibration and cross-backbone transfer remain open. Improving both will be essential for translating OPTD ’s training-time gains into reliable acceleration across model families, domains, and deployment settings. More broadly, 
+
+OPTD suggests that transition distillation should optimize not only token predictions, but also the state-dependent scope of each parallel action. OPTD links learned release scope to caching, verification, and decoding, enabling use in more models, tasks, chips, systems, and domains. Joint systems evaluation is an important next step. Future work should test whether these gains persist under larger response budgets, diverse domains, and decoders with alternative cache and release policies. 
+
+## References 
+
+Agarwal, R.; Vieillard, N.; Zhou, Y.; Stanczyk, P.; Ramos, S.; Geist, M.; and Bachem, O. 2023. On-Policy Distillation of Language Models: Learning from Self-Generated Mistakes. 
+
+arXiv preprint arXiv:2306.13649 .Arriola, M.; Gokaslan, A.; Chiu, J. T.; Yang, Z.; Qi, Z.; Han, J.; Sahoo, S. S.; and Kuleshov, V. 2025. Block Dif-fusion: Interpolating Between Autoregressive and Diffusion Language Models. In International Conference on Learning Representations .Austin, J.; Johnson, D. D.; Ho, J.; Tarlow, D.; and van den Berg, R. 2021a. Structured Denoising Diffusion Models in Discrete State-Spaces. In Advances in Neural Information Processing Systems .Austin, J.; Odena, A.; Nye, M.; Bosma, M.; Michalewski, H.; Dohan, D.; Jiang, E.; Cai, C.; Terry, M.; Le, Q.; and Sutton, C. 2021b. Program Synthesis with Large Language Models. 
+
+arXiv preprint arXiv:2108.07732 .Chen, M.; Tworek, J.; Jun, H.; Yuan, Q.; Pinto, H. P. d. O.; Kaplan, J.; Edwards, H.; Burda, Y.; Joseph, N.; Brockman, G.; Ray, A.; Puri, R.; Krueger, G.; Petrov, M.; Khlaaf, H.; Sastry, G.; Mishkin, P.; Chan, B.; Gray, S.; Ryder, N.; Pavlov, M.; Power, A.; Kaiser, L.; Bavarian, M.; Winter, C.; Tillet, P.; Such, F. P.; Cummings, D.; Plappert, M.; Paino, A.; Tezak, N.; Tang, J.; Babuschkin, I.; Balaji, S.; Jain, S.; Saunders, W.; Hesse, C.; Carr, A. N.; Leike, J.; Achiam, J.; Misra, V.; Morikawa, E.; Knight, M.; Brundage, M.; Murati, M.; Mayer, K.; Welinder, P.; McGrew, B.; Amodei, D.; McCan-dlish, S.; Sutskever, I.; and Zaremba, W. 2021. Evaluating Large Language Models Trained on Code. arXiv preprint arXiv:2107.03374 .Chen, Z.; Fang, G.; Ma, X.; Yu, R.; and Wang, X. 2025. dParallel: Learnable Parallel Decoding for dLLMs. arXiv preprint arXiv:2509.26488 .Cheng, S.; Bian, Y.; Liu, D.; Jiang, Y.; Liu, Y.; Zhang, L.; Wang, W.; Guo, Q.; Chen, K.; Qi, B.; and Zhou, B. 2025. SDAR: A Synergistic Diffusion-Autoregression Paradigm for Scalable Sequence Generation. arXiv preprint arXiv:2510.06303 .Cobbe, K.; Kosaraju, V.; Bavarian, M.; Chen, M.; Jun, H.; Kaiser, L.; Plappert, M.; Tworek, J.; Hilton, J.; Nakano, R.; Hesse, C.; and Schulman, J. 2021. Training Verifiers to Solve Math Word Problems. arXiv preprint arXiv:2110.14168 .Hendrycks, D.; Burns, C.; Kadavath, S.; Arora, A.; Basart, S.; Tang, E.; Song, D.; and Steinhardt, J. 2021. Measur-ing Mathematical Problem Solving with the MATH Dataset. 
+
+arXiv preprint arXiv:2103.03874 .Hoogeboom, E.; Nielsen, D.; Jaini, P.; Forre, P.; and Welling, M. 2021. Argmax Flows and Multinomial Diffusion: Learn-ing Categorical Distributions. In Advances in Neural Infor-mation Processing Systems .Hu, E. J.; Shen, Y.; Wallis, P.; Allen-Zhu, Z.; Li, Y.; Wang, S.; Wang, L.; and Chen, W. 2022. LoRA: Low-Rank Adaptation of Large Language Models. In International Conference on Learning Representations .Kim, M.; Xu, C.; Hooper, C.; Singh, H.; Athiwaratkun, B.; Zhang, C.; Keutzer, K.; and Gholami, A. 2026. CDLM: Con-sistency Diffusion Language Models for Faster Sampling. In 
+
+Proceedings of the 9th Conference on Machine Learning and Systems .Liang, Y.; Wang, Z.; Chen, H.; Sun, X.; Wu, J.; Yu, X.; Liu, J.; Barsoum, E.; Liu, Z.; and Jha, N. K. 2026. CD4LM: Con-sistency Distillation and Adaptive Decoding for Diffusion Language Models. arXiv preprint arXiv:2601.02236 .Luo, Y.; Chen, Z.; Wang, H.; Hu, X.; Zhang, Y.; Sha, Z.; and Liu, S. 2026. Learning from the Self-Future: On-Policy Self-Distillation for dLLMs. arXiv preprint arXiv:2606.18195 .Nie, S.; Zhu, F.; You, Z.; Zhang, X.; Ou, J.; Hu, J.; Zhou, J.; Lin, Y.; Wen, J.-R.; and Li, C. 2025. Large Language Diffusion Models. arXiv preprint arXiv:2502.09992 .Qian, Y.-Y.; Su, J.; Hu, L.; Zhang, P.; Deng, Z.; Zhao, P.; and Zhang, H. 2026. d3LLM: Ultra-Fast Diffusion LLM using Pseudo-Trajectory Distillation. arXiv preprint arXiv:2601.07568 .Ren, H.; Huang, Z.; Yuan, C.; Zhao, J.; and Liu, K. 2026. Trace-Based On-Policy Distillation for Masked Diffusion Language Models. arXiv preprint arXiv:2607.16872 .Sahoo, S. S.; Arriola, M.; Schiff, Y.; Gokaslan, A.; Marro-quin, E.; Chiu, J. T.; Rush, A. M.; and Kuleshov, V. 2024. Simple and Effective Masked Diffusion Language Models. In Advances in Neural Information Processing Systems .Salimans, T.; and Ho, J. 2022. Progressive Distillation for Fast Sampling of Diffusion Models. In International Con-ference on Learning Representations .Shen, Q.; Yang, X.; Ma, X.; Fang, G.; and Wang, X. 2026. SPEED: Sharpened-Teacher Distillation for Parallel Decod-ing of Diffusion Language Models. In Proceedings of the 43rd International Conference on Machine Learning .Song, Y.; Dhariwal, P.; Chen, M.; and Sutskever, I. 2023. Consistency Models. In International Conference on Ma-chine Learning .Su, X.; Helwig, J.; Parashar, S.; Chagi, A.; Jotsna, L.; Zhi, D.; Caverlee, J.; Kalathil, D.; and Ji, S. 2026. Data-Efficient Autoregressive-to-Diffusion Language Models via On-Policy Distillation. arXiv preprint arXiv:2606.06712 .Wang, X.; Xu, C.; Jin, Y.; Jin, J.; Zhang, H.; and Deng, Z. 2026. Diffusion LLMs Can Do Faster-Than-AR Inference via Discrete Diffusion Forcing. In International Conference on Learning Representations .Wu, C.; Zhang, H.; Xue, S.; Liu, Z.; Diao, S.; Zhu, L.; Luo, P.; Han, S.; and Xie, E. 2025. Fast-dLLM: Training-free Acceleration of Diffusion LLM by Enabling KV Cache and Parallel Decoding. arXiv preprint arXiv:2505.22618 .Ye, J.; Xie, Z.; Zheng, L.; Gao, J.; Wu, Z.; Jiang, X.; Li, Z.; and Kong, L. 2025. Dream 7B: Diffusion Large Language Models. arXiv preprint arXiv:2508.15487 .Zhang, T.; Zhang, X.; Han, L.; Shi, H.; He, X.; Li, Z.; Wang, H.; Xu, K.; Srivastava, A.; Pavlovic, V.; and Metaxas, D. N. 2026. T3D: Few-Step Diffusion Language Models via Trajec-tory Self-Distillation with Direct Discriminative Optimiza-tion. arXiv preprint arXiv:2602.12262 .Zhou, H.; Kong, L.; Ren, S.; Wang, X.; Liang, S.; Wang, G.; and Pan, Z. 2026. TAD: Temporal-Aware Trajectory Self-Distillation for Fast and Accurate Diffusion LLM. arXiv preprint arXiv:2605.09536 .
