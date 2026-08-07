@@ -7,45 +7,54 @@
 
 ## 每次日报
 - 最新运行日期：2026-08-07
-- 运行时间：2026-08-07 01:02:51 UTC
+- 运行时间：2026-08-07 20:41:06 UTC
 - 运行状态：成功
-- 本次总论文数：8
-- 精读区：4
-- 速读区：4
+- 本次总论文数：11
+- 精读区：8
+- 速读区：3
 
 ### 今日简报（AI）
-今日聚焦在线策略蒸馏（On-Policy Distillation）研究，8篇论文中精读4篇、速读4篇，核心围绕视觉与扩散模型优化；  
-两篇满分论文《SPOT》与《OPD-V》分别从稀疏探测+结果校准和模态平衡角度提升蒸馏效果，最值得深读；  
-建议优先精读这两篇，后续可跟进速读中的多教师流模型及扩散模型输出目标改进方向。
+今日精读8篇、速读3篇，共11篇论文，焦点集中在策略蒸馏与自蒸馏方法。  
+最值得关注的是两篇10分论文《SPOT》与《On-Policy Delta Distillation》，分别针对在线策略蒸馏与多语言数学推理的蒸馏校准。  
+建议优先阅读这两篇满分工作，再结合速读中的Agent蒸馏与奖励塑形，可系统把握当前蒸馏技术前沿。
 - 详情：[/202608/07/README](/202608/07/README)
 
 ### 精读区论文标签
 1. [SPOT: Sparse Probing and Outcome Calibration for On-Policy Distillation](/202608/07/2608.04419v1-spot-sparse-probing-and-outcome-calibration-for-on-policy-distillation)  
    标签：评分：10.0/10、query:policy-dist
-   evidence：直接针对在线策略蒸馏提出稀疏探测与结果校准目标
-2. [OPD-V: Visual On-Policy Self-Distillation with Modality Balance](/202608/07/2608.05131v1-opd-v-visual-on-policy-self-distillation-with-modality-balance)  
+   evidence：通过稀疏探针和结果校准改进同策略蒸馏
+2. [On-Policy Delta Distillation for Multilingual Math Reasoning](/202608/07/2608.05802v1-on-policy-delta-distillation-for-multilingual-math-reasoning)  
    标签：评分：10.0/10、query:policy-dist
-   evidence：面向多模态大语言模型后训练的在线自蒸馏与模态平衡方法
-3. [Not Every Divergence Should Be Suppressed: Counterfactual Recoverability in On-Policy Distillation](/202608/07/2608.04408v1-not-every-divergence-should-be-suppressed-counterfactual-recoverability-in-on-policy-distillation)  
+   evidence：直接研究LLM后训练中的在线策略蒸馏及其Delta变体，用于多语言数学推理
+3. [Distill What the Student Can See: Fisher-Projected On-Policy Distillation for Vision-Language Models](/202608/07/2608.01263v2-distill-what-the-student-can-see-fisher-projected-on-policy-distillation-for-vision-language-models)  
    标签：评分：9.0/10、query:policy-dist
-   evidence：直接探讨在线策略蒸馏中的反事实可恢复性
-4. [Agentic Reinforcement Learning with Observation-Calibrated Self-Distillation](/202608/07/2608.04788v1-agentic-reinforcement-learning-with-observation-calibrated-self-distillation)  
+   evidence：针对视觉语言后训练的在线策略蒸馏方法
+4. [Not Every Divergence Should Be Suppressed: Counterfactual Recoverability in On-Policy Distillation](/202608/07/2608.04408v1-not-every-divergence-should-be-suppressed-counterfactual-recoverability-in-on-policy-distillation)  
    标签：评分：9.0/10、query:policy-dist
-   evidence：面向智能体强化学习的观测校准在线自蒸馏，提供词元级稠密监督
+   evidence：在线策略蒸馏中的反事实可恢复性判断
+5. [Agentic Reinforcement Learning with Observation-Calibrated Self-Distillation](/202608/07/2608.04788v1-agentic-reinforcement-learning-with-observation-calibrated-self-distillation)  
+   标签：评分：9.0/10、query:policy-dist
+   evidence：面向LLM智能体后训练的在线自蒸馏及观测校准
+6. [DASH: Divergence-Adaptive Supervision Horizons for On-Policy Self-Distillation of Reasoning Models](/202608/07/2608.06243v1-dash-divergence-adaptive-supervision-horizons-for-on-policy-self-distillation-of-reasoning-models)  
+   标签：评分：9.0/10、query:policy-dist
+   evidence：面向推理模型在线自蒸馏，解决稀疏奖励下的监督问题
+7. [On-Policy Self-Distillation without Any Supervision](/202608/07/2608.06296v1-on-policy-self-distillation-without-any-supervision)  
+   标签：评分：9.0/10、query:policy-dist
+   evidence：基于内部一致性的无监督在线自蒸馏，无需外部监督
+8. [RP-OPSD: Reasoning-Pivot-Guided On-Policy Self-Distillation for Multilingual Reasoning Transfer](/202608/07/2608.06347v1-rp-opsd-reasoning-pivot-guided-on-policy-self-distillation-for-multilingual-reasoning-transfer)  
+   标签：评分：9.0/10、query:policy-dist
+   evidence：用推理枢轴引导同策略自蒸馏以提升多语言大模型迁移
 
 ### 速读区论文标签
-1. [Instruction-Conditioned Exploration for Reinforcement Learning with Self-Distillation to an Unconditioned Policy](/202608/07/2608.02087v2-instruction-conditioned-exploration-for-reinforcement-learning-with-self-distillation-to-an-unconditioned-policy)  
-   标签：评分：7.0/10、query:policy-dist
-   evidence：将RL用于LLM后训练；通过自蒸馏得到无条件策略
-2. [Poly-OPD: Heterogeneous Multi-Teacher On-Policy Distillation for Capability-Selectable Flow Models](/202608/07/2608.04349v1-poly-opd-heterogeneous-multi-teacher-on-policy-distillation-for-capability-selectable-flow-models)  
-   标签：评分：7.0/10、query:policy-dist
-   evidence：面向异构多教师流模型的在线策略蒸馏方法
-3. [STEP-OPD: Rethinking Output Targets and Internal Dynamics in On-Policy Distillation for Diffusion Models](/202608/07/2608.04887v1-step-opd-rethinking-output-targets-and-internal-dynamics-in-on-policy-distillation-for-diffusion-models)  
-   标签：评分：7.0/10、query:policy-dist
-   evidence：面向多任务图像生成的在线策略蒸馏框架；可迁移的输出目标与内部表征约束设计
-4. [SKILL-KD: Contrastive Skill Distillation for LLM Agents](/202608/07/2607.28048v2-skill-kd-contrastive-skill-distillation-for-llm-agents)  
-   标签：评分：6.0/10、query:policy-dist
-   evidence：基于对比学习的LLM智能体技能蒸馏
+1. [SKILL-KD: Contrastive Skill Distillation for LLM Agents](/202608/07/2607.28048v2-skill-kd-contrastive-skill-distillation-for-llm-agents)  
+   标签：评分：8.0/10、query:policy-dist
+   evidence：面向LLM智能体的对比技能蒸馏，在强弱智能体间传递可复用策略技能
+2. [Instruction-Conditioned Exploration for Reinforcement Learning with Self-Distillation to an Unconditioned Policy](/202608/07/2608.02087v2-instruction-conditioned-exploration-for-reinforcement-learning-with-self-distillation-to-an-unconditioned-policy)  
+   标签：评分：8.0/10、query:policy-dist
+   evidence：强化学习结合向无条件策略的自蒸馏
+3. [Agentic Reinforcement Learning with Self-Distilled Reward Shaping](/202608/07/2608.03223v1-agentic-reinforcement-learning-with-self-distilled-reward-shaping)  
+   标签：评分：8.0/10、query:policy-dist
+   evidence：在智能体强化学习中使用自蒸馏进行奖励塑形
 
 
 <div class="dpr-home-promo-card">
