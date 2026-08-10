@@ -6,26 +6,27 @@
 </div>
 
 ## 每次日报
-- 最新运行日期：2026-08-09
-- 运行时间：2026-08-09 20:19:29 UTC
+- 最新运行日期：2026-08-10
+- 运行时间：2026-08-10 19:57:14 UTC
 - 运行状态：成功
-- 本次总论文数：2
-- 精读区：2
+- 本次总论文数：3
+- 精读区：3
 - 速读区：0
 
 ### 今日简报（AI）
-今日精读2篇，均聚焦《OPD-V》视觉在线策略自蒸馏与模态平衡方法。  
-该论文在视觉强化学习方面表现出色，值得关注其模态平衡设计与自蒸馏机制。  
-建议后续对比不同评分版本原文，进一步拆解实验细节与适用场景。
-- 详情：[/202608/09/README](/202608/09/README)
+今日精读两篇关于推理模型在线自蒸馏的论文，聚焦监督水平与预热机制。最值得关注的是《DASH》提出发散自适应监督水平，而《Simple-OPD》揭示预热阶段的关键作用。建议读者结合两者思路，在自蒸馏实验中先调整预热策略再适配监督范围。
+- 详情：[/202608/10/README](/202608/10/README)
 
 ### 精读区论文标签
-1. [OPD-V: Visual On-Policy Self-Distillation with Modality Balance](/202608/09/2608.05131v2-opd-v-visual-on-policy-self-distillation-with-modality-balance)  
-   标签：评分：10.0/10、query:policy-dist
-   evidence：面向多模态大模型后训练的视觉在线策略自蒸馏
-2. [OPD-V: Visual On-Policy Self-Distillation with Modality Balance](/202608/09/2608.05131v1-opd-v-visual-on-policy-self-distillation-with-modality-balance)  
+1. [DASH: Divergence-Adaptive Supervision Horizons for On-Policy Self-Distillation of Reasoning Models](/202608/10/2608.06243v2-dash-divergence-adaptive-supervision-horizons-for-on-policy-self-distillation-of-reasoning-models)  
    标签：评分：9.0/10、query:policy-dist
-   evidence：带模态平衡的视觉on-policy自蒸馏
+   evidence：面向推理模型的on-policy自蒸馏，提出发散自适应监督水平，直接相关
+2. [Simple-OPD: Demystifying Warm-up for On-policy Distillation](/202608/10/2608.06802v1-simple-opd-demystifying-warm-up-for-on-policy-distillation)  
+   标签：评分：9.0/10、query:policy-dist
+   evidence：分析LLM后训练中在线蒸馏的热身阶段
+3. [MemOPD: On-Policy Distillation through Memory State Alignment for Long-Horizon Agents](/202608/10/2608.07068v1-memopd-on-policy-distillation-through-memory-state-alignment-for-long-horizon-agents)  
+   标签：评分：9.0/10、query:policy-dist
+   evidence：面向长时程RL智能体的记忆状态对齐同策略蒸馏
 
 ### 速读区论文标签
 - 本次无速读推荐。
