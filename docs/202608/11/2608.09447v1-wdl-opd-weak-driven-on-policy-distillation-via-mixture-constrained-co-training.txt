@@ -1,0 +1,300 @@
+Title: WDL-OPD: Weak-Driven On-Policy Distillation via Mixture-Constrained Co-Training
+
+URL Source: https://arxiv.org/pdf/2608.09447v1
+
+Published Time: Tue, 11 Aug 2026 02:42:39 GMT
+
+Number of Pages: 12
+
+Markdown Content:
+# WDL-OPD: Weak-Driven On-Policy Distillation via Mixture-Constrained Co-Training 
+
+Zehao Chen 1,2,∗ Gongxun Li 1,2,∗ Tianxiang Ai 2,∗ Yifei Li 1,2
+
+Zixuan Huang 1 Wang Zhou 2 Tao Huang 2 Fuzhen Zhuang 1
+
+Xianglong Liu 1 Jianxin Li 1 Deqing Wang 1,† Yikun Ban 1,†
+
+> 1
+
+Beihang University 2China Telecom eSurfing Cloud 
+
+> ∗
+
+Equal contribution †Corresponding authors 
+
+zehaochenacid@buaa.edu.cn 
+
+August 2026 
+
+Abstract 
+
+On-policy distillation (OPD) aligns a student with a teacher on trajectories sampled from the student itself, reducing the train–test state mismatch of offline distillation. The same feedback loop can nevertheless be unstable: each update changes both the policy and the states on which the next update is computed. We introduce WDL-OPD , a mixture-constrained co-training method with two trainable policies. An anchor policy generates every rollout, an auxiliary policy evaluates the same visited states, and a geometric mixture of their token distributions is matched to a frozen teacher by reverse KL. Both policies receive gradient. We show that freezing the auxiliary recovers an anchor-plus-contrast proxy target closely related to OPD 2 and W2S-OPD, whereas joint training creates branch-level degrees of freedom that a static delta cannot express. In recorded Qwen3 experiments at 1.7B and 4B scale, WDL-OPD produces the strongest student checkpoint in each of four scale–domain settings. It raises MATH500 accuracy from 0 .630 to 0 .685 at 4B and from 0 .521 to 0 .585 at 1.7B. In code generation, seven single-policy OPD configurations exhibit entropy growth or trajectory degradation, while co-training reaches independently re-evaluated development scores of 0 .637 and 0 .375. Because several comparisons differ in curriculum or initialization, these results support a stabilization hypothesis rather than a universal causal claim. We provide the exact training algorithm, failure evidence, and the controlled comparison matrix needed to test that hypothesis. 
+
+# 1 Introduction 
+
+On-policy distillation (OPD) trains a student on its own generated states while a teacher supplies dense token-level supervision (Agarwal et al., 2024; Lu & Lab, 2025). Compared with distillation on fixed teacher trajectories, this removes a central source of exposure bias: the teacher is queried at prefixes that the deployed student can actually visit. OPD has consequently become a practical alternative or complement to reward-based post-training. The benefit comes with a dynamical cost. An OPD update changes the student, the updated student changes the next rollout distribution, and that distribution determines where the teacher is queried. A locally useful correction can therefore alter future state visitation before its downstream effect is known. Empirical studies find that OPD depends on compatible teacher–student reasoning patterns, useful residual teacher capability, and a small shared set of high-probability tokens (Li et al., 2026). Initialization and target construction matter as well: teacher-compatible warm-up can 1arXiv:2608.09447v1 [cs.LG] 10 Aug 2026 rescue an otherwise failing run (Liu et al., 2026), while outcome-calibrated targets can improve the coverage of plausible continuations (Qu et al., 2026). Recent methods modify the learning signal by comparing frozen models. OPD 2 transfers the probability change between a post-trained teacher and its base model (Heo et al., 2026). W2S-OPD adds a positive-minus-negative weak-model contrast to a frozen student-base anchor, yielding a proxy teacher adjacent to the student (Yu et al., 2026). These results establish that a model difference can encode a useful capability direction. They leave open a different question: what happens when the auxiliary model is not a fixed direction but a second learner on the same on-policy states? 
+
+We study this question through Weak-Driven Learning (WDL), which originally mixes historical and current logits during supervised fine-tuning (Chen et al., 2026). WDL-OPD transfers the joint-logit principle to on-policy distillation. An anchor policy generates trajectories; an auxiliary 
+
+policy sees the same prefixes; their distributions are geometrically mixed on the anchor’s top-k
+
+support; and both policies are updated by the reverse KL from this mixture to a frozen teacher. At inference time, either branch can be selected, so the second policy adds training cost but no mandatory serving cost. The key distinction is co-adaptation. If the auxiliary is frozen, exact mixture matching reduces algebraically to a static extrapolated target. If it is trainable, the loss identifies the mixture more strongly than either branch: the anchor and auxiliary can divide a teacher correction according to their different Jacobians, optimizer states, and rollout roles. This suggests an optimization-buffer hypothesis : part of a sharp correction may be absorbed by the non-rollout branch instead of immediately moving the future state distribution. The hypothesis is testable, but it is not implied by better endpoint accuracy alone. Our contributions are: 
+
+• We formulate mixture-constrained two-policy OPD and give an explicit algorithm whose rollout, support construction, loss, and gradient paths match the implementation. 
+
+• We characterize its relation to frozen-delta methods. A frozen-auxiliary limit yields an anchor-plus-contrast proxy target, while joint training introduces a branch-level null space and makes both policies candidate final artifacts. 
+
+• We consolidate experiments across two model scales and two domains, including negative runs and independent re-evaluations. We state the curriculum, initialization, and compute confounds that separate current evidence from a controlled causal comparison. 
+
+# 2 Background and Related Work 
+
+2.1 On-policy distillation 
+
+Let x be a prompt, y ∼ πθ(· | x) a student rollout, and st = ( x, y <t ) a visited prefix. Generalized knowledge distillation trains on student-generated sequences and permits different divergences between student and teacher distributions (Agarwal et al., 2024). A sampled-token OPD signal is 
+
+AOPD  
+
+> t
+
+= log πT (yt | st) − log πθ(yt | st), (1) whereas distributional implementations minimize a forward or reverse KL on the full vocabulary or a shared truncated support. We use reverse KL because it is the loss used by the recorded implementation and recent reasoning OPD systems (Li et al., 2026; Yu et al., 2026). The success of OPD is conditional. Compatible reasoning patterns and residual teacher capability are empirically important, and most shared mass often lies on a small token set (Li et al., 2026). 2Method Rollout source Distillation target Auxiliary status Trainable policies Moving auxiliary Standard OPD Student Frozen teacher None 1 No OPD 2 Student Teacher/base delta Frozen 1 No W2S-OPD Student Base-plus-contrast proxy Frozen 1 No WDL-OPD Anchor Teacher through mixture Trainable 2 Yes 
+
+Table 1: The methodological axis studied here. WDL-OPD does not claim novelty for model subtraction or logit extrapolation; it makes the auxiliary distribution part of the optimization state. EffOPD studies early update directions and accelerates training by extrapolating along them (Cai et al., 2026); Simple-OPD studies teacher-compatible warm-up (Liu et al., 2026); and SPOT allocates sparse continuation probes before constructing outcome-calibrated targets (Qu et al., 2026). These approaches modify initialization, target quality, or update efficiency. Our method instead changes how trainable capacity is coupled to a fixed teacher target. 
+
+2.2 Static model differences and weak checkpoints 
+
+OPD 2 defines a centered delta signal from a post-trained teacher and its pre-training base, then keeps sign-consistent updates relative to standard OPD (Heo et al., 2026). W2S-OPD forms 
+
+πproxy ∝ exp zB + α(z+ − z−) , (2) where the anchor B and the positive/negative contrast models are frozen (Yu et al., 2026). Only one student is optimized in both methods. WDL takes a different view of weak checkpoints: they are optimization memory, not inferior teachers. Its supervised objective mixes historical and current logits before applying a target, allowing a weak state to compete with and reshape a stronger state (Chen et al., 2026). WDL-OPD retains this joint-logit operation but replaces fixed supervised examples with anchor-generated states and a frozen teacher distribution. 
+
+# 3 Mixture-Constrained Co-Training 
+
+3.1 Anchor-policy rollouts and shared support 
+
+We maintain an anchor policy πA, an auxiliary policy πU , and a frozen teacher πT . Only the anchor generates trajectories: 
+
+y ∼ πA(· | x). (3) The resulting prefixes are on-policy for πA but not for πU . We use on-policy only in this precise sense. At state st, let zi(· | st) be the logits of model i ∈ { A, U, T } and let Kt contain the k highest-logit tokens of the anchor. All three models are evaluated on this same support. Their support-conditional log probabilities are 
+
+ℓi(v | st) = zi(v | st) − log X
+
+> u∈K t
+
+exp zi(u | st), v ∈ K t. (4) The shared support ensures that mixture and teacher distributions refer to the same events. It also follows the empirical observation that a small common token set contains most of the mass in successful OPD (Li et al., 2026). 3Algorithm 1 WDL-OPD with anchor-generated trajectories 
+
+Require: prompt set D; anchor πA; auxiliary πU ; frozen teacher πT ; mixture weight λ; support size k 
+
+> 1:
+
+for each optimization step do  
+
+> 2:
+
+sample a prompt batch B ⊂ D  
+
+> 3:
+
+generate y ∼ πA(· | x) for each x ∈ B ▷ no gradient through sampling  
+
+> 4:
+
+initialize L ← 0 and valid-token count N ← 0 
+
+> 5:
+
+for each visited response state st = ( x, y <t ) do  
+
+> 6:
+
+Kt ← TopK (zA(· | st), k ) 
+
+> 7:
+
+compute ℓA, ℓ U , ℓ T on Kt using Equation 4  
+
+> 8:
+
+mt ← λℓ A + (1 − λ)ℓU 
+
+> 9:
+
+ℓM ← mt − LogSumExp (mt) 
+
+> 10:
+
+L ← L + P 
+
+> v∈K t
+
+eℓM (v)[ℓM (v) − ℓT (v)]  
+
+> 11:
+
+N ← N + 1  
+
+> 12:
+
+end for  
+
+> 13:
+
+backpropagate L/N to πA and πU 
+
+> 14:
+
+step both optimizers; keep πT fixed  
+
+> 15:
+
+end for Ensure: validation-selected anchor or auxiliary checkpoint 
+
+3.2 Geometric mixture and reverse KL 
+
+For λ ∈ (0 , 1), define the mixed log score 
+
+mt(v) = λℓ A(v | st) + (1 − λ)ℓU (v | st), (5) and renormalize once more: 
+
+ℓM (v | st) = mt(v) − log X
+
+> u∈K t
+
+exp mt(u). (6) Thus qM = exp ℓM is the normalized geometric mean qλAq1−λU . The token loss is 
+
+Lt = DKL (qM (· | st) ∥ qT (· | st)) = X
+
+> v∈K t
+
+qM (v | st)ℓM (v | st) − ℓT (v | st). (7) With response mask rt, the batch objective is the token mean 
+
+LWDL-OPD =
+
+P 
+
+> x,y,t
+
+rtLt
+
+P 
+
+> x,y,t
+
+rt
+
+. (8) The teacher and discrete support selection are detached. Gradients from Equation 8 update both 
+
+trainable policies, each with its own optimizer state. The mixture KL is the policy-training loss, not an auxiliary reward added to a separate policy-gradient objective. 
+
+3.3 Co-adaptive degrees of freedom 
+
+Let 
+
+gt = ∇mt DKL (qM ∥qT ). (9) 4Ignoring the discrete top-k operation, the support-logit derivatives are 
+
+∇zA Lt = λg t, ∇zU Lt = (1 − λ)gt. (10) They point in the same mixed-logit direction but are transformed by different parameter Jacobians and optimizer histories. Furthermore, perturbations satisfying 
+
+λ∆zA + (1 − λ)∆ zU = c(st)1 (11) leave qM unchanged. The objective therefore identifies the mixture more strongly than either branch. Equation 11 is not by itself a claim that the optimizer will discover a beneficial decomposition; it identifies the freedom that makes such a decomposition possible. 
+
+3.4 Frozen-auxiliary limit 
+
+Proposition 1 (Equivalence to an extrapolated target) . Fix the auxiliary support logits zU . If the mixture can exactly match the teacher on Kt, then every exact anchor solution satisfies 
+
+z∗ 
+
+> A
+
+= zT + 1 − λλ (zT − zU ) + c′(st)1. (12) 
+
+Proof. Equality of two softmax distributions implies equality of their logits up to a state-dependent scalar. Hence λz A + (1 − λ)zU = zT + c(st)1. Solving for zA and absorbing c/λ into c′ gives Equation 12. The right-hand side is a teacher anchor plus a teacher-minus-auxiliary contrast. If U is the teacher’s base checkpoint, the contrast is the raw direction used by OPD 2; as a logit proxy it has the same anchor-plus-contrast form as W2S-OPD. The novelty of WDL-OPD is therefore not subtraction or extrapolation. It is the transition from a fixed contrast to a moving auxiliary that shares the loss with the rollout policy. 
+
+# 4 Experiments 
+
+4.1 Research questions 
+
+The experiments ask three questions: 1. RQ1: Does the two-policy system produce a stronger student checkpoint than the recorded single-policy alternatives? 2. RQ2: Do anchor and auxiliary branches behave as redundant copies, or can their trajectories and final capabilities diverge? 3. RQ3: In code settings where single-policy OPD degrades, does co-training avoid the same observable failure signature? The current evidence answers these questions descriptively. It is not a single factorial study, and we keep that distinction explicit throughout. 5Setting Anchor initialization Auxiliary initialization Frozen teacher Main evaluation Math 4B Single-OPD checkpoint Qwen3-4B-Base 4B math teacher MATH500 avg@4 Math 1.7B Trained 1.7B checkpoint Qwen3-1.7B-Base 1.7B math teacher Seven math sets Code 4B Trained code checkpoint Qwen3-4B-Base Qwen3-4B-Instruct-2507 Dev500 and code suite Code 1.7B GRPO code checkpoint Qwen3-1.7B-Base Qwen3-4B-Instruct-2507 Dev500 and code suite 
+
+Table 2: Initialization and teacher map. The unequal initializations are part of the current method recipe, but they are also a confound for causal comparison with single-policy OPD. 
+
+4.2 Models, data, and evaluation 
+
+We study Qwen3-1.7B and Qwen3-4B models (Yang et al., 2025). The mathematical reasoning line uses execution- or answer-verified prompts. The 4B single-policy and two-policy stages both use a 104,935-prompt pool. The 1.7B single-policy stage uses a 5,662-prompt sweet-zone curriculum, after which the two-policy stage switches to the full 104,935-prompt pool. Math evaluation includes GSM8K (Cobbe et al., 2021), MATH500 (Hendrycks et al., 2021; Lightman et al., 2024), AMC and AIME competition sets, OlympiadBench (He et al., 2024), and Minerva-style quantitative reasoning (Lewkowycz et al., 2022). Unless stated otherwise, we report sampled accuracy with four responses per problem and eight for AIME. The code line uses 20,247 execution-verified training problems and a disjoint 500-problem development set. External evaluation uses HumanEval+ and MBPP+ from EvalPlus (Liu et al., 2023), BigCodeBench (Zhuo et al., 2025), and LiveCodeBench (Jain et al., 2024). These external scores use the same chat-format harness within each scale; development scores are independently re-evaluated from preserved checkpoints. 
+
+4.3 Optimization and comparison scope 
+
+All headline WDL-OPD runs use λ = 0 .5, k = 16, temperature 1 .0, and four anchor rollouts per prompt. The 4B math run uses a constant learning rate of 10 −6 for 300 steps and a 4096-token response cap. Code runs use 10 −6 for 300 steps, with response caps between 4096 and 6144 tokens. The late 1.7B math continuation reduces the rate to 5 × 10 −7. Both branch optimizers are stepped once per batch. Appendix A records the run-level provenance. Table 2 shows why the results should not be read as a compute-matched benchmark against OPD 2 or W2S-OPD. The code experiments also include a health rule: a checkpoint is reportable only if the development score is confirmed without severe repetition or length pathology. For the 4B run, this rule selects step 90 before repetition appears at steps 100–109. 
+
+# 5 Results 
+
+5.1 RQ1: performance across scale and domain 
+
+Table 3 summarizes the four scale–domain cells. In math, the best two-policy branch improves over the selected single-OPD checkpoint by 5 .5 points at 4B and 6 .4 points at 1.7B. In code, the contrast is larger: the 4B single-policy sweep does not yield a healthy final candidate, and the 1.7B single-policy run falls below base. WDL-OPD yields the strongest recorded student checkpoint in all four cells. This result answers RQ1 for the project record, not for a controlled method comparison. In particular, the 1.7B math curriculum changes between stages and the code anchor is already trained 6Domain Scale Base Single OPD WDL-OPD anchor WDL-OPD aux. Teacher Math 4B 0.544 0.630 0.640 0.685 0.805 Math 1.7B 0.390 0.521 0.585 0.518 0.799 Code 4B 0.463 unstable (6/6) 0.637 0.472 0.784 Code 1.7B 0.184 0.106 0.375 0.283 0.784 
+
+Table 3: Project-level evidence map. Math reports sampled MATH500 accuracy; code reports independent Dev500 re-evaluation. Bold marks the strongest student branch, not the teacher. The unstable marker means that all six recorded 4B single-policy configurations degraded or developed entropy/repetition pathologies. Protocols are not matched across every row.                      
+
+> Step 040 80 150 190 250 290 Anchor 0.630 0.628 0.609 –––0.640 Auxiliary 0.544 0.636 0.666 0.678 0.683 0.685 0.683
+
+Table 4: Qwen3-4B MATH500 avg@4 during co-training. Dashes denote steps at which the anchor was not retained in the evaluation record. before the two-policy stage. The table shows that the recipe can produce a stronger artifact; it does not isolate which component causes the gain. 
+
+5.2 RQ2: branch dynamics and specialization 
+
+The 4B math trajectory is informative because both branches are evaluated during training. The anchor begins at the selected single-OPD checkpoint (0 .630), whereas the auxiliary begins at base (0 .544). The initially weaker auxiliary crosses the anchor by step 40 and becomes the best final artifact. The anchor is non-monotonic, falling to 0 .609 before recovering to 0 .640. This trajectory is inconsistent with a picture in which both policies simply move together toward one midpoint. It is consistent with branch-level freedom, although endpoint scores alone cannot identify the underlying gradient decomposition. At 1.7B, the roles reverse: the anchor is the stronger final branch. Table 5 shows that it improves over single OPD on all seven benchmarks. The gain is largest on GSM8K (+9 .1 points) and MATH500 (+7 .6), and smaller on Minerva and AIME. Across math and code, the best deployment branch is therefore not fixed in advance. This answers RQ2: branch identity matters empirically, and validation must retain both branches. 
+
+5.3 RQ3: code stability and external evaluation 
+
+The code line exposes a repeatable failure signature. Six 4B single-policy variants span two prompt renderings, two teachers, and multiple learning rates; all plateau or decline while entropy or repetition increases. A separate 1.7B single-policy run falls from 0 .181 to 0 .106 as response entropy grows from approximately 2 .4 to 4 .2. Representative 4B runs increase from approximately 1 .4 to 2 .9. These seven runs motivate stabilization, but they do not prove that entropy growth is the root cause. The two-policy runs do not remove every pathology. The selected 4B checkpoint reaches an online development peak of 0 .669 at step 90, then develops repetition around steps 100–109. Independent re-evaluation of the preserved healthy checkpoint gives 0 .637, which is the value reported in Table 3. 7Model GSM8K MATH500 AMC23 Olympiad Minerva AIME24 AIME25 Base 0.481 0.416 0.178 0.162 0.118 0.029 0.013 Single OPD 0.621 0.509 0.266 0.217 0.174 0.033 0.025 WDL-OPD aux. 0.627 0.516 0.259 0.192 0.138 0.025 0.017 WDL-OPD anchor 0.712 0.585 0.316 0.246 0.183 0.062 0.054 
+
+Table 5: Qwen3-1.7B mathematical reasoning. Accuracy is avg@ n with a 4k response budget; AIME uses eight samples and the other tasks use four. The single- and two-policy stages use different training pools. 
+
+Scale Model HumanEval+ MBPP+ BigCodeBench LiveCodeBench 4B Base 0.707 0.664 0.469 0.018 4B WDL-OPD anchor 0.774 0.643 0.496 0.253 4B Teacher 0.854 0.653 0.511 0.365 
+
+1.7B Base 0.598 0.595 0.319 0.004 1.7B WDL-OPD auxiliary 0.634 0.574 0.339 0.038 1.7B WDL-OPD anchor 0.640 0.585 0.328 0.062 
+
+Table 6: External code evaluation under a common chat-format harness within each scale. Bold marks the best deployable student result in each block; the 4B teacher is a reference upper bound. The 1.7B run is non-monotonic but recovers to an online 0 .408 at its terminal checkpoint; independent re-evaluation gives 0 .375. Table 6 shows that the gains are not uniform. At 4B, LiveCodeBench increases from 0 .018 at base to 0 .253, while MBPP+ decreases. At 1.7B, the anchor leads on HumanEval+ and LiveCodeBench, whereas the auxiliary leads on BigCodeBench. Co-training therefore avoids the exact single-policy failure signature long enough to produce useful checkpoints and supports RQ3 descriptively. The MBPP+ regression and later 4B repetition rule out a blanket stability or monotonic-improvement claim. 
+
+# 6 Analysis and Discussion 
+
+What is new relative to OPD 2 and W2S-OPD? All three methods exploit differences between model distributions. Proposition 1 shows that our frozen-auxiliary limit is already a proxy-target construction. We therefore claim neither teacher-minus-base deltas nor logit extrapolation as novel. The new object is a moving auxiliary policy that shares the mixture loss with the rollout anchor. This creates branch-level degrees of freedom, makes either branch a possible final artifact, and permits specialization that a fixed proxy cannot express. 
+
+The optimization-buffer hypothesis. Equation 10 splits the immediate mixed-logit derivative while the anchor alone controls future state visitation. One possible mechanism is that the auxiliary absorbs part of a sharp correction, reducing how quickly the rollout distribution moves. The observed entropy failures and branch trajectories are compatible with this explanation, but several alternatives remain: extra trainable capacity, different initializations, implicit ensembling in the loss, or checkpoint selection may account for part of the gain. 8Measurements that can distinguish mechanisms. A direct test should log per-branch gradient norms, cosine similarity, parameter displacement, entropy, top-k support mass, and state-distribution drift. A dual-compute control should train two independent policies toward the teacher without a shared mixture. If extra capacity alone explains the result, that control should match WDL-OPD. If mixture coupling matters, its branch trajectories and rollout drift should differ even at matched FLOPs. 
+
+Controlled baseline matrix. The definitive comparison should hold prompts, teacher, initializa-tion, rollout states, support, optimizer, and wall-clock budget fixed while comparing standard OPD, OPD 2, W2S-style fixed proxy distillation, a frozen-auxiliary mixture, fully trainable WDL-OPD, and the independent two-policy control. Simple-OPD-style warm-up (Liu et al., 2026) should either be shared by every row or treated as a separate factor. This matrix is more informative than adding another unmatched endpoint to Table 3. 
+
+# 7 Limitations 
+
+The current study has five material limitations. First, the 1.7B math curriculum differs between single- and two-policy stages. Second, several code comparisons use different starting checkpoints, and the selected 4B checkpoint precedes a later repetition failure. Third, training two policies costs more than standard OPD; a FLOP- and wall-clock-matched control is missing. Fourth, we have not yet run OPD 2, W2S-OPD, Simple-OPD, or SPOT in the same harness. Fifth, all experiments use the Qwen3 family and mostly single-answer reasoning or executable code. The conclusions may not transfer to open-ended generation, different model families, or interactive agents. These limitations prevent a universal causal claim that WDL-OPD stabilizes every OPD setting. 
+
+# 8 Conclusion 
+
+WDL-OPD extends weak-driven joint-logit training to anchor-generated trajectories. It co-trains an anchor and an auxiliary through the reverse KL between their geometric mixture and a frozen teacher. The frozen-auxiliary limit recovers a familiar proxy-target form; the trainable case adds branch-level freedom and produces distinct candidate models. Across the current 1.7B/4B math and code record, the method yields stronger student checkpoints and avoids several single-policy failure trajectories. The evidence is promising but not yet compute- or curriculum-matched. The next scientific step is therefore not a broader claim, but the controlled matrix that distinguishes mixture coupling from initialization, capacity, and target design. 
+
+# References 
+
+Rishabh Agarwal, Nino Vieillard, Yongchao Zhou, Piotr Stanczyk, Sabela Ramos, Matthieu Geist, and Olivier Bachem. On-policy distillation of language models: Learning from self-generated mistakes. In International Conference on Learning Representations , 2024. Yuchen Cai, Ding Cao, Liang Lin, Chunxi Luo, Xin Xu, Kai Yang, Weijie Liu, Saiyong Yang, Tianxiang Zhao, Guangzhong Sun, Guiquan Liu, and Junfeng Fang. Learning to foresee: Unveiling the unlocking efficiency of on-policy distillation. arXiv preprint arXiv:2605.11739 , 2026. 9Zehao Chen, Gongxun Li, Tianxiang Ai, Zixuan Huang, Xiaodong Liu, Yifei Li, Wang Zhou, Fuzhen Zhuang, Xianglong Liu, Jianxin Li, Deqing Wang, and Yikun Ban. Weak-driven learning: How weak agents make strong agents stronger. arXiv preprint arXiv:2602.08222 , 2026. Karl Cobbe, Vineet Kosaraju, Mohammad Bavarian, Mark Chen, Heewoo Jun, Lukasz Kaiser, Matthias Plappert, Jerry Tworek, Jacob Hilton, Reiichiro Nakano, Christopher Hesse, and John Schulman. Training verifiers to solve math word problems. arXiv preprint arXiv:2110.14168 ,2021. Chaoqun He, Renjie Luo, Yuzhuo Bai, Shengding Hu, Zhen Leng Thai, Junhao Shen, Jinyi Hu, Xu Han, Yujie Huang, Yuxiang Zhang, Jie Liu, Lei Qi, Zhiyuan Liu, and Maosong Sun. Olympiad-Bench: A challenging benchmark for promoting AGI with olympiad-level bilingual multimodal scientific problems. In Annual Meeting of the Association for Computational Linguistics , 2024. Dan Hendrycks, Collin Burns, Saurav Kadavath, Akul Arora, Steven Basart, Eric Tang, Dawn Song, and Jacob Steinhardt. Measuring mathematical problem solving with the MATH dataset. In 
+
+Advances in Neural Information Processing Systems , 2021. Byeongho Heo, Jaehui Hwang, Sangdoo Yun, and Dongyoon Han. On-policy delta distillation. arXiv preprint arXiv:2607.15161 , 2026. Naman Jain, King Han, Alex Gu, Wen-Ding Li, Fanjia Yan, Tianjun Zhang, Sida Wang, Armando Solar-Lezama, Koushik Sen, and Ion Stoica. LiveCodeBench: Holistic and contamination free evaluation of large language models for code. arXiv preprint arXiv:2403.07974 , 2024. Aitor Lewkowycz, Anders Andreassen, David Dohan, Ethan Dyer, Henryk Michalewski, Vinay Ramasesh, Ambrose Slone, Cem Anil, Imanol Schlag, Theo Gutman-Solo, Yuhuai Wu, Behnam Neyshabur, Guy Gur-Ari, and Vedant Misra. Solving quantitative reasoning problems with language models. In Advances in Neural Information Processing Systems , 2022. Yaxuan Li, Yuxin Zuo, Bingxiang He, Jinqian Zhang, Chaojun Xiao, Cheng Qian, Tianyu Yu, Huan-ang Gao, Wenkai Yang, Zhiyuan Liu, and Ning Ding. Rethinking on-policy distillation of large language models: Phenomenology, mechanism, and recipe. arXiv preprint arXiv:2604.13016 ,2026. Hunter Lightman, Vineet Kosaraju, Yura Burda, Harri Edwards, Bowen Baker, Teddy Lee, Jan Leike, John Schulman, Ilya Sutskever, and Karl Cobbe. Let’s verify step by step. In International Conference on Learning Representations , 2024. Jiawei Liu, Chunqiu Steven Xia, Yuyao Wang, and Lingming Zhang. Is your code generated by ChatGPT really correct? rigorous evaluation of large language models for code generation. arXiv preprint arXiv:2305.01210 , 2023. Tao Liu, Taiqiang Wu, Mao Zheng, Xuan Luo, Runming Yang, Xuewei Yang, Junjie Wang, and Yujiu Yang. Simple-OPD: Demystifying warm-up for on-policy distillation. arXiv preprint arXiv:2608.06802 , 2026. Kevin Lu and Thinking Machines Lab. On-policy distillation. Thinking Machines Lab blog, 2025. Published October 27, 2025. Zikun Qu, Min Zhang, Mingze Kong, Zhiwei Shang, Yikun Ban, Shuang Qiu, and Zhongxiang Dai. SPOT: Sparse probing and outcome calibration for on-policy distillation. arXiv preprint arXiv:2608.04419 , 2026. 10 An Yang, Anfeng Li, Baosong Yang, et al. Qwen3 technical report. arXiv preprint arXiv:2505.09388 ,2025. Fangxu Yu, Weijia Xu, Michael Xu, Tianyi Zhou, and Zinan Lin. Weak-to-strong on-policy distillation. arXiv preprint arXiv:2607.26246 , 2026. Terry Yue Zhuo, Minh Chien Vu, Jenny Chim, et al. BigCodeBench: Benchmarking code generation with diverse function calls and complex instructions. In International Conference on Learning Representations , 2025. 
+
+# A Reproducibility Details 
+
+A.1 Recorded run configurations                                 
+
+> Setting Train prompts Steps Learning rate Rollouts Response cap Notes Math 4B 104,935 300 10 −644096 anchor=single OPD, auxiliary=base Math 1.7B 104,935 800 10 −6→5×10 −744096 single-OPD precursor used 5,662 prompts Code 4B 20,247 300 10 −644096–6144 reportable checkpoint selected by health rule Code 1.7B 20,247 300 10 −646144 anchor initialized from GRPO step 120
+
+Table 7: Run-level parameters recovered from launch scripts and experiment records. All rows use 
+
+λ = 0 .5, k = 16, teacher temperature 1 .0, and token-mean aggregation. The implementation uses separate optimizer states for anchor and auxiliary, bfloat16 model execution, dynamic micro-batching, and the anchor-only top-k strategy. The same learning rate drives both branches within a run. The teacher distribution is detached before loss construction. When WDL-OPD is enabled, the implementation fails explicitly if the auxiliary module, top-k
+
+targets, or teacher-on-anchor support probabilities are missing; it does not silently fall back to standard OPD. 
+
+A.2 Evaluation and checkpoint selection 
+
+Math results use temperature 0 .7 with a 4096-token generation budget. GSM8K, MATH500, OlympiadBench, and Minerva use four samples; AMC and AIME use eight where listed in Table 5. The 4B trajectory table reports the recorded avg@4 curve and does not interpolate missing anchor evaluations. Code development evaluation samples two responses per problem in the thinking-enabled chat format. External code evaluation uses the same chat-format harness within a scale. The 4B code checkpoint at step 90 was preserved after reaching the best healthy validation score; later checkpoints were excluded after the predeclared repetition checks fired. The reported 0 .637 is an independent rerun of that preserved checkpoint rather than its online 0 .669 peak. The 1.7B value 0 .375 is likewise an independent rerun of the terminal checkpoint. 11 A.3 Minimal implementation identity 
+
+For every response token, the implementation computes mix = λ log pA + (1 − λ) log pU , (13) log qM = mix − logsumexp(mix) , (14) log qT = log pT − logsumexp(log pT ), (15) 
+
+Lt = X
+
+> v
+
+qM (v) [log qM (v) − log qT (v)] . (16) Only pT is detached. Consequently, this is exactly the geometric-mixture reverse KL in Algorithm 1, not a sampled-token reward or a teacher-only surrogate. 
+
+# B Required Controlled Ablations 
+
+For clarity, the highest-priority missing experiment is a single matrix with fixed prompts, rollout trajectories, teacher, initialization, token support, optimizer, update count, and total compute. The rows should be: 1. standard single-policy OPD; 2. OPD 2 with the teacher’s base model; 3. W2S-style frozen proxy distillation; 4. frozen-auxiliary geometric-mixture training; 5. fully trainable WDL-OPD; and 6. two independently trained policies without mixture coupling. Reporting anchor and auxiliary curves, not only the best selected branch, is necessary to test the co-adaptation explanation. 12
