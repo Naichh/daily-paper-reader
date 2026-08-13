@@ -6,32 +6,34 @@
 </div>
 
 ## 每次日报
-- 最新运行日期：2026-08-12
-- 运行时间：2026-08-12 21:12:48 UTC
+- 最新运行日期：2026-08-13
+- 运行时间：2026-08-13 21:05:20 UTC
 - 运行状态：成功
 - 本次总论文数：4
 - 精读区：3
 - 速读区：1
 
 ### 今日简报（AI）
-今日聚焦4篇论文，重点精读2篇高分自蒸馏研究；最值得看的是自适应监督锚定与重排序提示词两类在线策略自蒸馏方法，均获9分；下一步可循此思路探索小模型智能体的分层记忆蒸馏，但其评分仅6分仅供参考。
-- 详情：[/202608/12/README](/202608/12/README)
+今日聚焦4篇论文，精读2篇满分研究，均围绕在线策略蒸馏（On-Policy Distillation）展开。  
+最值得关注的是《REOPD》与《Towards Understanding On-Policy Distillation》，分别提出可靠性自适应奖励外推和测试时缩放视角下的理论理解。  
+建议普通读者优先精读这两篇满分论文，并速读《LoongReflect》以了解搜索智能体的长程反思蒸馏思路。
+- 详情：[/202608/13/README](/202608/13/README)
 
 ### 精读区论文标签
-1. [Adaptive Supervised Anchoring for On-Policy Self-Distillation](/202608/12/2608.07935v2-adaptive-supervised-anchoring-for-on-policy-self-distillation)  
+1. [REOPD: Reliability-Adaptive Reward Extrapolation for On-Policy Distillation](/202608/13/2608.11698v1-reopd-reliability-adaptive-reward-extrapolation-for-on-policy-distillation)  
+   标签：评分：10.0/10、query:policy-dist
+   evidence：直接提出带自适应奖励外推的在线策略蒸馏方法
+2. [Towards Understanding On-Policy Distillation through the Lens of Test-Time Scaling](/202608/13/2608.11829v1-towards-understanding-on-policy-distillation-through-the-lens-of-test-time-scaling)  
+   标签：评分：10.0/10、query:policy-dist
+   evidence：从测试时缩放角度分析在线策略蒸馏的机制
+3. [Privileged, but Biased: How PI-Conditioned Teachers Break Self-Distillation](/202608/13/2608.04794v1-privileged-but-biased-how-pi-conditioned-teachers-break-self-distillation)  
    标签：评分：9.0/10、query:policy-dist
-   evidence：直接研究语言模型后训练中的在线自蒸馏方法
-2. [ReOrder-OPD:Reliability-Aware Prompt Ordering for On-Policy Distillation](/202608/12/2608.10905v1-reorder-opdreliability-aware-prompt-ordering-for-on-policy-distillation)  
-   标签：评分：9.0/10、query:policy-dist
-   evidence：直接通过提示级教师可靠性改进在线策略蒸馏
-3. [BOUND: Brief-Guided Corrective Preference Distillation at Search-Control Boundaries](/202608/12/2608.08768v1-bound-brief-guided-corrective-preference-distillation-at-search-control-boundaries)  
-   标签：评分：8.0/10、query:policy-dist
-   evidence：面向大语言模型搜索代理的简报引导纠正式偏好蒸馏
+   evidence：关于特权信息条件自蒸馏在大模型中的批判性研究
 
 ### 速读区论文标签
-1. [Agent Memory Distillation: Empowering Small LLM Agents with Hierarchical Teacher Memory](/202608/12/2608.07169v1-agent-memory-distillation-empowering-small-llm-agents-with-hierarchical-teacher-memory)  
+1. [LoongReflect: Boosting Long-Horizon Reflection in Search Agents via Global Perspective Distillation](/202608/13/2608.11967v1-loongreflect-boosting-long-horizon-reflection-in-search-agents-via-global-perspective-distillation)  
    标签：评分：6.0/10、query:policy-dist
-   evidence：通过层级记忆将教师智能体行为蒸馏给小型学生，属于策略蒸馏方法
+   evidence：通过全局视角蒸馏来提升强化学习代理的反思策略
 
 
 <div class="dpr-home-promo-card">
