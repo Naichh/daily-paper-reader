@@ -6,44 +6,29 @@
 </div>
 
 ## 每次日报
-- 最新运行日期：2026-08-14
-- 运行时间：2026-08-14 20:45:11 UTC
+- 最新运行日期：2026-08-15
+- 运行时间：2026-08-15 19:44:11 UTC
 - 运行状态：成功
-- 本次总论文数：8
-- 精读区：7
-- 速读区：1
+- 本次总论文数：2
+- 精读区：0
+- 速读区：2
 
 ### 今日简报（AI）
-今日精读7篇、速读1篇，重点围绕策略优化与奖励设计展开。最值得关注两篇满分论文：REOPD提出可靠性自适应奖励外推用于在线策略蒸馏，另一篇则强调步骤级自蒸馏以超越结果奖励。建议普通读者后续多留意奖励建模与步骤监督在智能体训练中的实际效果。
-- 详情：[/202608/14/README](/202608/14/README)
+今日精读缺席，速读2篇视觉语言理解前沿论文，均获7分。  
+最值得关注：视觉压缩≠推理能力，以及GUI定位可通过反思式自蒸馏在测试时持续进化。  
+建议后续优先精读这两篇，深挖“Agentic策略缺口”与“自进化范式”对多模态智能体的启示。
+- 详情：[/202608/15/README](/202608/15/README)
 
 ### 精读区论文标签
-1. [REOPD: Reliability-Adaptive Reward Extrapolation for On-Policy Distillation](/202608/14/2608.11698v2-reopd-reliability-adaptive-reward-extrapolation-for-on-policy-distillation)  
-   标签：评分：10.0/10、query:policy-dist
-   evidence：直接研究在线策略蒸馏中的奖励外推方法，用于大模型后训练
-2. [Beyond Outcome Rewards: Step-Level Self-Distilled Policy Optimization for Deep Search Agents](/202608/14/2608.12764v1-beyond-outcome-rewards-step-level-self-distilled-policy-optimization-for-deep-search-agents)  
-   标签：评分：10.0/10、query:policy-dist
-   evidence：面向深度搜索智能体的步骤级自蒸馏策略优化
-3. [I-SDPO: Instance-Level Adaptive Self-Distillation Policy Optimization](/202608/14/2608.12957v1-i-sdpo-instance-level-adaptive-self-distillation-policy-optimization)  
-   标签：评分：10.0/10、query:policy-dist
-   evidence：将实例级自适应自蒸馏与GRPO结合用于LLM后训练，按实例调整教师依赖
-4. [Latent On-Policy Self-Distillation](/202608/14/2608.13040v1-latent-on-policy-self-distillation)  
-   标签：评分：10.0/10、query:policy-dist
-   evidence：在线策略自蒸馏中可学习的特权上下文
-5. [Teach the Magnitude, Not the Direction: Verifier-Bounded Credit Assignment for Multi-Turn Multi-step LLM Agents](/202608/14/2608.13179v1-teach-the-magnitude-not-the-direction-verifier-bounded-credit-assignment-for-multi-turn-multi-step-llm-agents)  
-   标签：评分：10.0/10、query:policy-dist
-   evidence：将RLVR与在线策略蒸馏结合用于多轮智能体
-6. [DreOPD: Degraded-Reference Extrapolative On-Policy Distillation for Flow-matching Models](/202608/14/2608.09233v2-dreopd-degraded-reference-extrapolative-on-policy-distillation-for-flow-matching-models)  
-   标签：评分：9.0/10、query:policy-dist
-   evidence：用于流匹配模型后训练的在线策略蒸馏方法
-7. [CROP: Task Relevance via Counterfactuals for Selective On-Policy Distillation](/202608/14/2608.13387v1-crop-task-relevance-via-counterfactuals-for-selective-on-policy-distillation)  
-   标签：评分：9.0/10、query:policy-dist
-   evidence：基于反事实的任务相关性用于选择性在线策略蒸馏
+- 本次无精读推荐。
 
 ### 速读区论文标签
-1. [Vid2WAM: Distilling Video Diffusion Priors into World Action Models](/202608/14/2608.08558v1-vid2wam-distilling-video-diffusion-priors-into-world-action-models)  
+1. [Reading is not Reasoning: Bridging the Agentic Policy Gap in Vision-Text Compression](/202608/15/2608.08960v1-reading-is-not-reasoning-bridging-the-agentic-policy-gap-in-vision-text-compression)  
    标签：评分：7.0/10、query:policy-dist
-   evidence：向世界行动模型策略进行离线蒸馏
+   evidence：跨模态智能体策略自蒸馏框架，用于弥合视觉压缩带来的策略差距
+2. [Test-Time Self-Evolving GUI Visual Grounding via Reflection-Guided On-Policy Self-Distillation](/202608/15/2608.11191v1-test-time-self-evolving-gui-visual-grounding-via-reflection-guided-on-policy-self-distillation)  
+   标签：评分：7.0/10、query:policy-dist
+   evidence：测试时on-policy自蒸馏的智能体自适应方法，属于策略蒸馏方法但非LLM后训练
 
 
 <div class="dpr-home-promo-card">
