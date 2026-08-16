@@ -6,29 +6,22 @@
 </div>
 
 ## 每次日报
-- 最新运行日期：2026-08-15
-- 运行时间：2026-08-15 19:44:11 UTC
+- 最新运行日期：2026-08-16
+- 运行时间：2026-08-16 19:14:15 UTC
 - 运行状态：成功
-- 本次总论文数：2
+- 本次总论文数：0
 - 精读区：0
-- 速读区：2
+- 速读区：0
 
 ### 今日简报（AI）
-今日精读缺席，速读2篇视觉语言理解前沿论文，均获7分。  
-最值得关注：视觉压缩≠推理能力，以及GUI定位可通过反思式自蒸馏在测试时持续进化。  
-建议后续优先精读这两篇，深挖“Agentic策略缺口”与“自进化范式”对多模态智能体的启示。
-- 详情：[/202608/15/README](/202608/15/README)
+> 今日无新推荐，系统未产出可展示论文。
+- 详情：[/202608/16/README](/202608/16/README)
 
 ### 精读区论文标签
 - 本次无精读推荐。
 
 ### 速读区论文标签
-1. [Reading is not Reasoning: Bridging the Agentic Policy Gap in Vision-Text Compression](/202608/15/2608.08960v1-reading-is-not-reasoning-bridging-the-agentic-policy-gap-in-vision-text-compression)  
-   标签：评分：7.0/10、query:policy-dist
-   evidence：跨模态智能体策略自蒸馏框架，用于弥合视觉压缩带来的策略差距
-2. [Test-Time Self-Evolving GUI Visual Grounding via Reflection-Guided On-Policy Self-Distillation](/202608/15/2608.11191v1-test-time-self-evolving-gui-visual-grounding-via-reflection-guided-on-policy-self-distillation)  
-   标签：评分：7.0/10、query:policy-dist
-   evidence：测试时on-policy自蒸馏的智能体自适应方法，属于策略蒸馏方法但非LLM后训练
+- 本次无速读推荐。
 
 
 <div class="dpr-home-promo-card">
