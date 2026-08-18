@@ -6,29 +6,43 @@
 </div>
 
 ## 每次日报
-- 最新运行日期：2026-08-17
-- 运行时间：2026-08-17 19:22:22 UTC
+- 最新运行日期：2026-08-18
+- 运行时间：2026-08-18 20:06:16 UTC
 - 运行状态：成功
-- 本次总论文数：3
-- 精读区：1
+- 本次总论文数：7
+- 精读区：5
 - 速读区：2
 
 ### 今日简报（AI）
-今日精读1篇、速读2篇，聚焦强化学习中的策略蒸馏与推理优化。最值得关注的是满分论文《SimpleOPD》，提出简单且与分词器无关的在线策略蒸馏方法，用于长上下文推理；另两篇分别探讨自监督视觉蒸馏和Rollout RL中的子空间几何约束。建议普通读者优先精读满分论文，并留意在线蒸馏在长任务中的效率优势，后续可关注其代码开源与实验复现。
-- 详情：[/202608/17/README](/202608/17/README)
+今日精读两篇满分策略蒸馏论文，聚焦“on-policy蒸馏”的核心改进。
+最值得看“Tail-Aware Top-k”与“Step-Level”两种方法，均在蒸馏与微调间给出高分思路。
+下一步可优先读这两篇精读，再借速读中的分布视角与策略混合扩展理解。
+- 详情：[/202608/18/README](/202608/18/README)
 
 ### 精读区论文标签
-1. [SimpleOPD: Simple Tokenizer-Agnostic On-Policy Distillation for Long-Context Reasoning](/202608/17/2608.14277v1-simpleopd-simple-tokenizer-agnostic-on-policy-distillation-for-long-context-reasoning)  
+1. [Tail-Aware Top-$k$ On-Policy Distillation](/202608/18/2608.14728v1-tail-aware-top-k-on-policy-distillation)  
    标签：评分：10.0/10、query:policy-dist
-   evidence：明确研究语言模型长上下文推理的在线策略蒸馏
+   evidence：语言模型间的Top-k在线策略蒸馏
+2. [Step-Level On-Policy Distillation: Interpolating Between On-Policy Distillation and Supervised Fine-Tuning](/202608/18/2608.16333v1-step-level-on-policy-distillation-interpolating-between-on-policy-distillation-and-supervised-fine-tuning)  
+   标签：评分：10.0/10、query:policy-dist
+   evidence：面向语言模型的步级在线策略蒸馏
+3. [CROP: Task Relevance via Counterfactuals for Selective On-Policy Distillation](/202608/18/2608.13387v2-crop-task-relevance-via-counterfactuals-for-selective-on-policy-distillation)  
+   标签：评分：9.0/10、query:policy-dist
+   evidence：基于反事实任务相关性的选择性在线策略蒸馏
+4. [Trust Is Not Enough: Influence Calibration for On-Policy Self-Distillation in Agentic RL](/202608/18/2608.14945v1-trust-is-not-enough-influence-calibration-for-on-policy-self-distillation-in-agentic-rl)  
+   标签：评分：9.0/10、query:policy-dist
+   evidence：智能体强化学习中的在线自蒸馏与影响校准
+5. [MINT: Min-Selection Preference Distillation for Balanced Multi-Objective Alignment](/202608/18/2608.14828v1-mint-min-selection-preference-distillation-for-balanced-multi-objective-alignment)  
+   标签：评分：8.0/10、query:policy-dist
+   evidence：面向多目标对齐的偏好蒸馏方法
 
 ### 速读区论文标签
-1. [Self-Supervised Visual On-Policy Distillation](/202608/17/2608.14144v1-self-supervised-visual-on-policy-distillation)  
+1. [The Distributional View of Knowledge Distillation](/202608/18/2608.15215v1-the-distributional-view-of-knowledge-distillation)  
    标签：评分：7.0/10、query:policy-dist
-   evidence：在无特权信息的视觉强化学习中应用在线策略蒸馏
-2. [GCPO: Diagnosing and Constraining Subspace Geometry in Rollout RL for LLMs](/202608/17/2608.11674v1-gcpo-diagnosing-and-constraining-subspace-geometry-in-rollout-rl-for-llms)  
-   标签：评分：6.0/10、query:policy-dist
-   evidence：面向LLM后训练的在线策略强化学习，与在线策略蒸馏的稳定性问题相关
+   evidence：基于多温度视图与几何感知聚合的分布化知识蒸馏目标
+2. [Adaptive Mixing of Policies from Searching and Policies from Learning](/202608/18/2608.15700v1-adaptive-mixing-of-policies-from-searching-and-policies-from-learning)  
+   标签：评分：7.0/10、query:policy-dist
+   evidence：通过蒸馏自适应混合搜索策略与学习策略
 
 
 <div class="dpr-home-promo-card">
