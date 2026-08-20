@@ -1,0 +1,722 @@
+Title: Rethinking Privileged Information in On-Policy Self-Distillation
+
+URL Source: https://arxiv.org/pdf/2608.18271v1
+
+Published Time: Thu, 20 Aug 2026 00:08:46 GMT
+
+Number of Pages: 21
+
+Markdown Content:
+# RETHINKING PRIVILEGED INFORMATION IN ON-P OLICY SELF -D ISTILLATION 
+
+Samyak Shrestha 
+
+FirstPrinciples 
+
+samyak.shrestha@utdallas.edu 
+
+Alexander Tessier 
+
+FirstPrinciples 
+
+alexander@firstprinciples.com 
+
+# ABSTRACT 
+
+On-policy self-distillation (OPSD) trains a student on its own responses using token-level supervision from the same model conditioned on privileged reference information. We investigate whether performance gains from OPSD show that the student learned the information in the reference or instead reflect recovery of reasoning behavior already present in the base model. We perform OPSD exper-iments on science and mathematics datasets using Qwen3 models ranging from 1.7B to 8B. Our analysis framework separates the supervision induced by the ref-erence from the supervision provided by the teacher without the reference and measures how each aligns with changes in the student’s predictions. The correct reference does not provide a consistent performance benefit across teacher gener-ation modes, model sizes, and training datasets. Students can improve without the correct reference, and a solution from another problem can outperform the correct solution on several mathematical reasoning benchmarks. The student’s predictions align more strongly with the base model’s thinking behavior than with the super-vision induced by the reference, but controls constructed from other problems reproduce much of both alignments. Moreover, stronger alignment attributable to the correct reference does not reliably coincide with a greater performance benefit from the reference. Performance gains and distributional alignment alone there-fore cannot determine how privileged reference information contributes to student learning in OPSD. 
+
+# 1 INTRODUCTION 
+
+On-policy distillation (OPD) has become a widely used method in the post-training of large lan-guage models (LLMs), including recent releases such as DeepSeek-V4 (DeepSeek-AI, 2026), GLM-5 (GLM-5 Team, 2026), Kimi K3 (Kimi Team, 2026), Nemotron-Cascade 2 (Yang et al., 2026), and Qwen3 (Yang et al., 2025). Unlike supervised fine-tuning (SFT), which is prone to exposure bias from training on fixed target sequences (Bengio et al., 2015), OPD trains the student on trajectories sampled from its current policy. A teacher provides dense, token-level supervision on the states visited by the student (Agarwal et al., 2024; Gu et al., 2024; Lu & Thinking Machines Lab, 2025). On-policy self-distillation (OPSD) uses the same model as both teacher and student under differ-ent contexts (Zhao et al., 2026a). The student generates a response from the problem alone, while the teacher evaluates the same response with access to privileged information, typically a reference solution unavailable to the student. The central premise of OPSD is that privileged reference information improves the teacher’s super-vision and transfers useful information to the student (Zhao et al., 2026a). However, increasing the teacher’s exposure to a reference is not consistently beneficial and can alter uncertainty expression or reasoning behavior (Han et al., 2026; Kim et al., 2026; Kaur et al., 2026). Reference-conditioned supervision may also contain information that the student cannot use when the reference is absent at inference time (Zhu et al., 2026; Shen et al., 2026). Performance alone therefore cannot deter-mine whether the student learned from the reference. This question becomes more difficult when the teacher operates in thinking mode because the teacher then differs from the student in both its context and its generation mode. 1arXiv:2608.18271v1 [cs.LG] 18 Aug 2026 student        
+
+> base model + LoRA non-thinking mode sees xonly samples on-policy
+> teacher
+> base model (frozen) sees x+ reference
+> two teacher modes
+> thinking non-thinking
+> problem x
+> reference context
+> seen only by the teacher
+> student response, evaluated token by token next-token training targets
+> Central question. Does the student learn the information contained in the reference?
+
+Figure 1: OPSD setup and experimental conditions. The student remains in non-thinking mode while we vary the teacher’s generation mode and reference context. We therefore ask three questions. First, is the correct reference necessary for OPSD to improve performance? Second, must the reference correspond to the problem being solved? Third, do the gains reflect learning from the reference or recovery of reasoning behavior already present in the base model? We study these questions using Qwen3-8B, Qwen3-4B, and Qwen3-1.7B students trained on NuminaMath and MegaScience. For OPSD, pairing a non-thinking student with a thinking teacher produces the largest performance gains among the tested mode combinations (Zhao et al., 2026a). In our experiments, the student remains in non-thinking mode during both training and evaluation, while we vary the teacher’s generation mode and reference context. Holding the student’s generation mode fixed isolates these teacher-side effects. It also allows us to test whether supervision from a thinking teacher moves the student toward behavior associated with the base model’s thinking mode. We introduce an analysis framework that separates the supervision induced by the reference from the remaining teacher supervision. We measure how each form of supervision aligns with changes in the student’s predictions during training and repeat the measurements using teacher contexts from other problems. Figure 1 summarizes the OPSD setup and the teacher and reference conditions used in our experiments. Our contributions are as follows: • We show that the benefit of the correct reference depends on the teacher’s generation mode, the model size, and the training dataset. Students can improve without the correct refer-ence, and a solution from another problem can outperform the correct solution on several mathematical reasoning benchmarks. • We introduce an analysis framework that separates reference-induced supervision from the remaining teacher supervision and measures how each aligns with changes in the student’s predictions. The change in the student’s predictions aligns more strongly with the base model’s thinking behavior than with the supervision induced by the reference. • We compare these alignments with controls constructed from other problems. The con-trols reproduce much of the apparent alignment, and stronger alignment attributable to the correct reference does not reliably coincide with a greater performance benefit from the reference. Together, these results show that performance gains and distributional align-ment alone cannot determine how privileged reference information contributes to student learning in OPSD. 
+
+# 2 RELATED WORK 
+
+On-policy distillation. Knowledge distillation trains a student to match the output distribution of a teacher model (Hinton et al., 2015). Sequence-level distillation adapts this approach to autoregres-sive models by training the student on complete responses generated by the teacher (Kim & Rush, 22016). Since these responses are not generated by the student’s current policy, the prefixes seen during training may differ from those encountered during inference, creating exposure bias and al-lowing errors to accumulate throughout the generated response (Bengio et al., 2015; Agarwal et al., 2024). Imitation-based distillation addresses this mismatch by training on student-generated trajec-tories, with the teacher providing supervision at the states visited by the student (Lin et al., 2020). OPD applies this principle to LLMs by evaluating the teacher on trajectories sampled from the stu-dent’s current policy (Gu et al., 2024; Lu & Thinking Machines Lab, 2025). Training minimizes a token-level KL divergence between the teacher’s and student’s next-token distributions, providing dense supervision at every position in the generated response (Agarwal et al., 2024). 
+
+On-policy self-distillation. On-policy self-distillation (OPSD) removes the need for a separate teacher by instantiating the teacher and student from a single model under different contexts (Zhao et al., 2026a). The student is conditioned on the problem alone, while the teacher also receives priv-ileged information such as a reference solution. The student generates the training trajectories, and the teacher provides token-level supervision by evaluating the same prefixes with access to the ad-ditional context. Closely related work applies this principle using expert demonstrations and textual feedback (Shenfeld et al., 2026; H¨ ubotter et al., 2026). Other methods extend the teacher’s con-text beyond reference solutions to include experiential knowledge extracted from historical solution traces and optimized system prompts (Ye et al., 2026), action-only privileged information (Penaloza et al., 2026), source documents (Stein et al., 2026), and natural-language skills extracted from com-pleted trajectories (Wang et al., 2026). Together, these methods use contextual information available during training to create a more informed teacher policy. 
+
+Privileged context in OPSD. A more informed teacher does not necessarily provide more use-ful supervision. Privileged information specific to an individual problem may not transfer reliably to a student that lacks that information at inference time (Zhu et al., 2026). Providing more of the reference can increase the mismatch between teacher and student (Han et al., 2026), while rich teacher context can suppress uncertainty and impair out-of-distribution generalization (Kim et al., 2026). Privileged-context distillation can also degrade thinking models by suppressing verification and self-correction (Kaur et al., 2026). Proposed remedies adapt the amount of reference shown to the teacher (Han et al., 2026), reduce the influence of high-entropy token positions (Ke et al., 2026), restrict distillation to identified reasoning errors (Zhao et al., 2026b), or remove reference-specific shortcuts from the teacher’s signal (Shen et al., 2026). Concurrent work finds that a solu-tion from another problem can preserve or improve OPSD performance (Ichihara et al., 2026) and shows that likelihood changes induced by privileged context do not necessarily provide useful token credit (Nguyen et al., 2026). Our study complements this work by separating reference-dependent from reference-free teacher supervision and comparing how each relates to changes in the student’s predictions using controls constructed from other problems. 
+
+# 3 ANALYSIS FRAMEWORK 
+
+3.1 TRAINING OBJECTIVE 
+
+In OPSD, a student model πS generates trajectories from its current policy, while a frozen teacher πT
+
+instantiated from the same base model provides token-level supervision with access to a reference solution (Agarwal et al., 2024; Zhao et al., 2026a). Let D denote the training dataset. For a problem 
+
+x ∼ D with reference solution r, the student samples a trajectory y ∼ πS (· | x). The training objective is 
+
+L(πS ) = Ex∼D , y ∼πS (·| x)
+
+
+
+> |y|
+
+X
+
+> t=1
+
+DJSD (πT (· | x, r, y <t ) ∥ πS (· | x, y <t )) 
+
+ , (1) where DJSD denotes the generalized Jensen–Shannon divergence. 3.2 REFERENCE -D EPENDENT AND REFERENCE -F REE SUPERVISION 
+
+Equation 1 specifies how the student learns from the teacher, but it does not identify which part of the teacher’s supervision comes from the reference. Motivated by the decomposition approach 3introduced in Purified OPSD (Shen et al., 2026), we isolate the contribution made by the reference by comparing the teacher’s next-token distributions with and without it. To make this comparison, we let the student at checkpoint c generate a response y(c) ∼ π(c) 
+
+> S
+
+(· | x) to problem x. At each position t of the response, let Sc denote the student’s next-token distribution. Let 
+
+T and N denote the next-token distributions of the teacher with and without reference r, respectively. Thus, for every token v in the vocabulary V,
+
+T (v) = πT (v | x, r, y (c) 
+
+> <t
+
+), N (v) = πT (v | x, y (c) 
+
+> <t
+
+), Sc(v) = π(c) 
+
+> S
+
+(v | x, y (c) 
+
+> <t
+
+). (2) We represent each distribution by its vector of log probabilities: 
+
+log T :=  log T (v) 
+
+> v∈V
+
+∈ R|V| ,
+
+with log N and log Sc defined analogously. The total difference D(c)tot between the log-probability vectors of the teacher and the student can be decomposed as 
+
+log T − log Sc
+
+| {z }
+
+> D(c)tot
+
+= log T − log N
+
+| {z }
+
+> D(c)ref
+
++ log N − log Sc
+
+| {z }
+
+> D(c)rec
+
+, (3) where D(c)ref is the reference direction that measures the difference between the teacher with and without the reference, and D(c)rec is the recovery direction that measures the difference between the teacher without the reference and the student. 3.3 COMPOSITION OF TEACHER SUPERVISION 
+
+Before analyzing how the student changes during training, we measure the component of the ref-erence direction Dref along the total teacher supervision Dtot . We compute this measurement at training step 0 using responses generated by the initial student. For each problem x, the initial student generates a response y(0) ∼ π(0)  
+
+> S
+
+(· | x). Let I0 denote the set of all problem-position pairs (x, t ) in these responses. For any two directions A and B, let 
+
+Ax,t , B x,t ∈ R|V| denote their values at position t of the response to problem x. We define the inner product and its induced norm as 
+
+⟨A, B ⟩I0 = 1
+
+|I 0|
+
+X
+
+> (x,t )∈I 0
+
+⟨Ax,t , B x,t ⟩, ∥A∥I0 = p⟨A, A ⟩I0 , (4) where ∥A∥I0 is the root-mean-square magnitude of A across problem-position pairs. We define the reference projection coefficient as 
+
+wref = ⟨Dref , D tot ⟩I0
+
+∥Dtot ∥2
+
+> I0
+
+. (5) 3.4 CHANGES IN STUDENT PREDICTIONS ON FIXED RESPONSES 
+
+Our analysis so far has focused on the teacher’s supervision. To measure how the student’s pre-dictions change during training, we evaluate every checkpoint c on the responses generated by the initial student at training step 0. At each position t, let S0 and Sc denote the next-token distributions of the initial student and the student at checkpoint c, conditioned on the same generated prefix: 
+
+S0(v) = π(0)  
+
+> S
+
+(v | x, y (0)  
+
+> <t
+
+), Sc(v) = π(c) 
+
+> S
+
+(v | x, y (0)  
+
+> <t
+
+). (6) We also compute the teacher distributions T and N from Section 3.2 on these prefixes. Let B denote the distribution produced by the base model in thinking mode without the reference: 
+
+B(v) = πthink  
+
+> T
+
+(v | x, y (0)  
+
+> <t
+
+).
+
+4We define the change in the student’s log probabilities as 
+
+∆Sc = log Sc − log S0. (7) The teacher directions are defined on the same fixed responses: 
+
+Dref = log T − log N, Drec = log N − log S0, Dthink = log B − log S0.
+
+The responses, generated prefixes, and teacher distributions remain fixed across checkpoints. Only the student distribution Sc and the resulting change ∆Sc vary with c. This allows us to compare changes in the student’s predictions while keeping the text on which the distributions are computed fixed. When the teacher operates in non-thinking mode without the reference, its model and context are the same as those of the initial student. Therefore, N = S0 and Drec = 0 .3.5 RELATIONSHIP BETWEEN TEACHER SUPERVISION AND STUDENT PREDICTIONS 
+
+We characterize the student’s change in three ways. We first measure its projection onto each teacher direction and its cosine similarity with that direction. We then measure how much of the student’s change can be represented by a linear combination of two teacher directions. Finally, we measure the magnitude of ∆Sc and the KL divergence from the reference-free teacher distribution N to Sc.Let D denote any nonzero teacher direction defined in Section 3.4. We measure the component of ∆Sc along direction D using the projection coefficient 
+
+β(c) 
+
+> D
+
+= ⟨∆Sc, D ⟩I0
+
+∥D∥2
+
+> I0
+
+. (8) The projection coefficient depends on the relative magnitudes of ∆Sc and D as well as on their directions. To compare the directions independently of magnitude, we use cosine similarity: 
+
+cos θ(c) 
+
+> D
+
+= ⟨∆Sc, D ⟩I0
+
+∥∆Sc∥I0 ∥D∥I0
+
+. (9) When comparing teacher directions, we compute the cosine similarity between the reference direc-tion Dref and the thinking direction Dthink .We next measure the fraction of ∥∆Sc∥2 
+
+> I0
+
+preserved by its orthogonal projection onto the span of two teacher directions. We use Dref and Drec for a thinking teacher. Because Drec = 0 for a non-thinking teacher, we use Dref and Dthink instead. At each problem-position pair, we define the span as 
+
+Wx,t =
+
+(span Dx,t  
+
+> ref
+
+, D x,t  
+
+> rec
+
+, thinking teacher ,
+
+span Dx,t  
+
+> ref
+
+, D x,t  
+
+> think
+
+, non-thinking teacher . (10) Let PWx,t denote the orthogonal projection onto this span. We define this fraction as 
+
+R2 
+
+> c
+
+=
+
+P 
+
+> (x,t )∈I 0
+
+∥PWx,t ∆Sx,t c ∥22
+
+P 
+
+> (x,t )∈I 0
+
+∆Sx,t c
+
+> 22
+
+. (11) Finally, we measure the magnitude of ∆Sc using ∥∆Sc∥I0 . We measure the average token-level KL divergence from N to Sc as 
+
+KL I0 (N ∥Sc) = 1
+
+|I 0|
+
+X
+
+> (x,t )∈I 0
+
+KL  N x,t ∥Sx,t c
+
+ .
+
+3.6 PROBLEM -S PECIFIC EFFECTS OF TEACHER SUPERVISION 
+
+The metrics in Section 3.5 compare the student’s change with the teacher directions. Because the teacher and student share the same base model and evaluate the same generated prefix, some of the measured similarity may not be specific to the problem. We control for this by repeating each comparison using the teacher context from a different problem. 5To construct the control, we keep the student-generated response fixed and condition the teacher on a different problem. If the teacher receives a reference, it receives the reference for this different problem. This produces the control distributions T ∗, N ∗, and B∗. The control directions are: 
+
+D∗ 
+
+> ref
+
+= log T ∗ − log N ∗, D∗ 
+
+> rec
+
+= log N ∗ − log S0, D∗ 
+
+> think
+
+= log B∗ − log S0.
+
+The student distributions S0 and Sc remain fixed, so ∆Sc does not change. When comparing two teacher directions, we keep the problem and generated prefix fixed and replace only the reference with one from another problem. This comparison measures whether the alignment between the two teacher directions depends on using the correct reference. For the measurements defined in Section 3.5, we replace the original teacher directions with the control directions defined above. The difference between the original and control measurements isolates dependence on the correct problem context. Because assigning a different teacher context can change a direction’s magnitude, we use cosine similarity as the primary directional measure and report projection coefficients with the corresponding direction norms. We estimate uncertainty using a paired bootstrap over problems. To verify that the results do not depend on a particular pairing between evaluated and control problems, we repeat each control construction under three different pairings while keeping the student responses and original measurements fixed. 
+
+# 4 EXPERIMENTS 
+
+4.1 EXPERIMENTAL SETUP 
+
+Models and datasets. Our main experiments use Qwen3-8B (Yang et al., 2025). We repeat the core performance and distributional comparisons with Qwen3-4B and Qwen3-1.7B. Complete re-sults for these models appear in Appendix C. At each scale, the student and teacher are instantiated from the same base model. Each student uses LoRA with rank 64 and alpha 128 (Hu et al., 2022) and operates in non-thinking mode. The teacher is frozen and operates in either thinking or non-thinking mode. We curate a 10,000-problem subset of NuminaMath (Li et al., 2024) and another 10,000-problem subset of MegaScience (Fan et al., 2025). Both subsets contain worked solutions with extractable boxed answers, and we remove overlaps with the corresponding evaluation bench-marks. 
+
+Training conditions and implementation. At all three scales, we train students using thinking and non-thinking teachers. For the thinking teacher, we compare training with and without the reference. For the non-thinking teacher, we compare the correct reference with a reference from another problem. At 8B, we additionally compare answer-only references, abstract hints, canonical solutions, and reasoning traces generated by Qwen3-8B and Qwen3-32B. We use the same 4,953 NuminaMath problems for the answer-only references, canonical solutions, and reasoning traces. The abstract-hint condition uses 4,898 of these problems after removing 55 hints that reveal the answer. We train for 300 steps with a learning rate of 5 × 10 −6 and an effective batch size of 32. We generate on-policy student trajectories with vLLM (Kwon et al., 2023) at temperature 1.1 with top-p
+
+0.95 and top-k 20. We set the generalized Jensen–Shannon interpolation parameter to β = 0 . For experiments with a non-thinking teacher, we set the maximum student completion length to 4,096 tokens on NuminaMath and 2,048 tokens on MegaScience, with pointwise clipping at 10 −7. For experiments with a thinking teacher, we set the maximum student completion length to 1,024 tokens and use pointwise clipping at 0.06. 
+
+Evaluation. We evaluate mathematical reasoning on MATH-500 (Hendrycks et al., 2021), AIME 2024, AIME 2025, and HMMT 2025, and scientific reasoning on GPQA-Diamond (Rein et al., 2023), MMLU-Pro (Wang et al., 2024), and UGPhysics (Xu et al., 2025). We report Avg@ k, the mean accuracy across k sampled responses. The main AIME, HMMT, and GPQA-Diamond com-parisons use k = 12 . MATH-500 uses k = 4 , while the 8B reference-type comparison in Table 9 uses k = 12 . MMLU-Pro and UGPhysics use k = 1 . The primary evaluations use non-thinking mode to hold the student’s generation mode fixed. Appendix A.5 reports an auxiliary Qwen3-8B evaluation with thinking enabled. All evaluations use temperature 1.0, with top-p 0.8 in non-thinking mode and 0.95 in thinking mode. We use a repetition penalty of 1.3 for students trained with a non-thinking teacher and 1.0 for students trained with a thinking teacher. We grade free-response 6Table 1: Main benchmark results for Qwen3-8B. The base model and all OPSD students are eval-uated in non-thinking mode. Ref. denotes the reference solution. Avg. is the unweighted mean across benchmarks. AIME, HMMT, and GPQA-Diamond use Avg@12, MATH-500 uses Avg@4, and MMLU-Pro and UGPhysics use Avg@1.                                                             
+
+> Method NuminaMath MATH-500 AIME24 AIME25 HMMT25 Avg.
+> Base model 84.7 25.0 19.7 13.1 35.6 OPSD, non-thinking teacher, correct ref. 91.5 66.7 49.2 30.6 59.5 OPSD, non-thinking teacher, mismatched ref. 94.4 71.9 61.7 42.2 67.6 OPSD, thinking teacher, correct ref. 88.0 65.3 52.8 31.7 59.4 OPSD, thinking teacher, no ref. 89.5 63.6 51.1 36.9 60.3
+> Method MegaScience MATH-500 GPQA-D MMLU-Pro UGPhysics Avg.
+> Base model 84.7 47.9 66.1 12.6 52.8 OPSD, non-thinking teacher, correct ref. 86.2 49.7 64.0 13.4 53.3 OPSD, non-thinking teacher, mismatched ref. 88.0 49.8 64.3 12.7 53.7 OPSD, thinking teacher, correct ref. 92.8 53.4 69.5 27.1 60.7 OPSD, thinking teacher, no ref. 92.7 53.5 69.8 27.2 60.8
+
+mathematics by symbolic equivalence and use benchmark-specific answer matching for the remain-ing evaluations. Uncertainty estimation, checkpoint-selection procedures, and complete evaluation settings are reported in Appendices A.4 and C. We describe one student as performing better than another only when the paired 95% interval for their score difference does not contain zero. 4.2 EFFECTS OF TEACHER MODE , R EFERENCE INFORMATION , AND MODEL SCALE ON 
+
+PERFORMANCE 
+
+Table 1 reports the complete Qwen3-8B results. On NuminaMath, students trained with either teacher mode score above the non-thinking base model on average. On MegaScience, students trained with a thinking teacher score above the non-thinking base model on all four benchmarks, whereas students trained with a non-thinking teacher show smaller and less consistent differences. Adding the reference to a thinking teacher provides no consistent advantage at 8B. On Numina-Math, the student trained with the reference scores higher on AIME 2024 and AIME 2025, while the student trained without it scores higher on MATH-500 and HMMT 2025. On MegaScience, their scores differ by at most 0.3 points across the four benchmarks. At 4B and 1.7B, the effect of the reference depends on the training dataset. On NuminaMath, paired comparisons support improvements on AIME 2024, AIME 2025, and HMMT 2025 at 4B, and on AIME 2024 and HMMT 2025 at 1.7B. For students trained on MegaScience, the student trained with the reference does not outperform the student trained without it at 4B. At 1.7B, removing the reference improves all three science benchmarks. Complete results appear in Tables 16 and 17. Under a non-thinking teacher, replacing the correct solution with a solution from another problem improves AIME 2025 and HMMT 2025 at 8B, and all three competition mathematics benchmarks at 4B and 1.7B. For students trained on MegaScience, the student trained with a solution from another problem does not outperform the student trained with the correct solution on any of the three science benchmarks at 4B or 1.7B. The corresponding 8B scores and paired comparisons appear in Table 10. Across the tested models, the performance value of the reference therefore depends on the teacher’s generation mode, the model scale, and the training dataset. 4.3 EFFECTS OF REFERENCE INFORMATION ON THE TEACHER ’S PREDICTIONS 
+
+Performance does not reveal how the reference changes the teacher’s predictions. We measure this effect at Qwen3-8B using the decomposition defined in Section 3.2. At training step 0, the reference projection coefficient wref is 0.46 on NuminaMath and 0.39 on MegaScience. The reference there-7canonical 32B trace 8B trace hint answer-only   
+
+> 0.0 0.2 0.4 0.6
+> cos  θ
+> cos θ, non-thinking teacher
+> Evaluated problem Control
+
+Figure 2: Cosine similarity between the reference and thinking directions on NuminaMath under a non-thinking teacher, across five reference types. Error bars show 1.96 bootstrap standard errors across problems. fore changes the teacher’s predictions even though adding it provides no consistent performance advantage at this scale. On NuminaMath, under a non-thinking teacher, we compare the reference direction Dref , induced by adding the reference, with the thinking direction Dthink , induced by enabling thinking mode. We construct the control D∗ 
+
+> ref
+
+by replacing the correct reference with a reference from another problem. Figure 2 reports this comparison across five reference types. In every condition, the cosine similarity between Dref and Dthink is lower than the cosine similarity between D∗ 
+
+> ref
+
+and Dthink . This ordering holds under all three control assignments. The direction induced by the correct reference therefore does not align more closely with Dthink than the direction induced by a reference from another problem. 4.4 EFFECTS OF TEACHER SUPERVISION ON THE STUDENT ’S PREDICTIONS 
+
+We next measure how the student’s next-token predictions change during training. We denote this change by ∆Sc. In addition to the reference direction Dref introduced above, we use the recovery direction Drec , which compares the predictions of the reference-free teacher with those of the initial student. For each direction D, we compare the cosine similarity between ∆Sc and D with the corresponding similarity for the control direction D∗ constructed from another problem. 0 100 200 300 0.2 0.4 0.6 0.8 
+
+(a) NuminaMath    
+
+> 0100 200 300 0.2 0.4 0.6 0.8
+
+(b) MegaScience    
+
+> 0100 200 300 −0.4 0.0 0.4
+
+(c) NuminaMath    
+
+> 0100 200 300 −0.4 0.0 0.4
+
+(d) MegaScience 
+
+> cos  θ
+
+Training step 
+
+Thinking teacher Non-thinking teacher    
+
+> Dref , evaluated problem Dref , control Drec , evaluated problem Drec , control
+
+Figure 3: Alignment between changes in the Qwen3-8B student’s predictions and the teacher direc-tions during training. 8Under a thinking teacher, Figures 3(a) and 3(b) show higher alignment with Drec than with Dref . The directions for the evaluated problem and their controls follow similar trajectories on both datasets. The higher alignment with Drec therefore also occurs when the recovery direction is constructed from another problem. Under a non-thinking teacher, Figures 3(c) and 3(d) show lower alignment with Dref than with D∗ 
+
+> ref
+
+. At step 150, the difference between these cosine similarities is −0.23 ±
+
+0.03 on NuminaMath and −0.38 ± 0.04 on MegaScience. Dref Drec Dref Drec             
+
+> 012
+> β
+> math science
+> (a) β
+> Dref Drec Dref Drec
+> 0.0 0.2 0.4 0.6 0.8
+> cos  θ
+> math science
+> (b) cos θ
+> Evaluated problem Control reference direction Dref recovery direction Drec
+
+Figure 4: Changes in the Qwen3-8B student’s predictions measured against the teacher directions and their controls. (a) Projection coefficients onto Dref and Drec under a thinking teacher. (b) Cosine similarity with the same directions. Figure 4(a) reports larger projection coefficients for Drec . Because a projection coefficient also de-pends on the magnitude of the teacher direction, a larger coefficient does not necessarily indicate stronger alignment. Figure 4(b) removes this dependence through cosine similarity. At 8B, the co-sine similarity with Dref exceeds that with D∗ 
+
+> ref
+
+by 0.05 on NuminaMath and 0.10 on MegaScience. The corresponding differences for Drec are −0.08 and 0.01. The student therefore shows only weak additional alignment with Dref beyond the alignment reproduced by its control, and no consistent additional alignment with Drec .Table 2 reports R2 
+
+> c
+
+, the fraction of ∥∆Sc∥2 that lies in the span of the teacher directions. For di-rections constructed from the evaluated problem, R2 
+
+> c
+
+ranges from 0.88 to 0.97. For the control directions, it ranges from 0.94 to 0.98. The control values match or exceed the values for the evalu-ated problem under both teacher modes and on both datasets. A high value of R2 
+
+> c
+
+therefore does not indicate dependence on the correct problem context. Table 2: Fraction R2 
+
+> c
+
+of the squared change in the Qwen3-8B student’s log probabilities that lies in the span of the teacher directions at checkpoint 300. 
+
+Teacher Dataset Evaluated problem Control 
+
+Thinking NuminaMath 0.94 0.96 Thinking MegaScience 0.97 0.98 Non-thinking NuminaMath 0.88 0.94 Non-thinking MegaScience 0.94 0.96 
+
+The corresponding results at 4B and 1.7B appear in Table 18. Under a thinking teacher, across the three tested model sizes, the difference cos θ(c) 
+
+> Dref
+
+− cos θ(c)
+
+> D∗
+> ref
+
+increases in the order 8B, 4B, and 1.7B on both datasets. This ordering describes the three models tested here, but does not establish that model size caused the differences. On NuminaMath, the larger cosine differences at 4B and 1.7B coincide with higher performance for the student trained with the reference. On MegaScience, the cosine difference is largest at 1.7B, but the student trained without the reference performs better on 9all three science benchmarks. A larger cosine difference therefore does not reliably indicate a larger performance benefit from the reference. Under a non-thinking teacher, the cosine similarity between ∆Sc and Dref , before comparison with its control, changes sign across model scales. It is positive at 4B on both datasets and negative or near zero at 8B and 1.7B. However, at 8B, 4B, and 1.7B on both NuminaMath and MegaScience, 
+
+Dref aligns less with ∆Sc than D∗ 
+
+> ref
+
+. The sign of the cosine similarity with Dref therefore does not determine whether Dref aligns more strongly than its control. 
+
+# 5 LIMITATIONS 
+
+Our study has several limitations. Our experiments use Qwen3 models at 8B, 4B, and 1.7B. Whether the results generalize to other model families remains unknown. Our training datasets cover mathe-matical and scientific reasoning, so the results may not generalize to coding or other domains. We train each condition once, so our results do not measure variation across repeated training runs. 
+
+# 6 CONCLUSION 
+
+We investigated what privileged reference information contributes to OPSD. We developed an anal-ysis framework that separates the supervision induced by the reference from the remaining teacher supervision and tests both against controls constructed from other problems. Across Qwen3-8B, Qwen3-4B, and Qwen3-1.7B students trained on NuminaMath and MegaScience, we evaluate the performance benefit of the reference, its alignment with changes in the student’s predictions, and whether either depends on using the reference for the correct problem. The experiments provide three forms of evidence. First, students can improve without the correct reference, and a solution from another problem can outperform the correct solution. Whether the correct reference improves performance depends on the teacher’s generation mode, the model size, and the training dataset. Second, we compare the change in the student’s predictions during training with the supervision induced by the reference and with the base model’s thinking behavior. The student’s predictions align more strongly with the base model’s thinking behavior than with the supervision induced by the reference. Because controls constructed from other problems reproduce much of the alignment with both forms of supervision, the stronger alignment with thinking behavior does not establish that recovering this behavior caused the performance gains. Third, the alignment gained by using the correct reference instead of a reference from another problem does not imply a greater performance benefit. Among the tested model sizes and training datasets, this increase in alignment is largest at 1.7B on MegaScience. Nevertheless, the student trained without the reference performs better. Together, the performance experiments and distributional analysis show that the contribution of privileged reference information to OPSD cannot be inferred from performance gains or distributional alignment alone. 
+
+# ACKNOWLEDGEMENTS 
+
+We thank Nate Woodward, Collin Farquhar, Shaghayegh Sadeghi, and Nawar Ismail for their feed-back and suggestions on earlier drafts of this paper. 
+
+# REFERENCES 
+
+Rishabh Agarwal, Nino Vieillard, Yongchao Zhou, Piotr Stanczyk, Sabela Ramos, Matthieu Geist, and Olivier Bachem. On-policy distillation of language models: Learning from self-generated mistakes. In International Conference on Learning Representations (ICLR) , 2024. Samy Bengio, Oriol Vinyals, Navdeep Jaitly, and Noam Shazeer. Scheduled sampling for sequence prediction with recurrent neural networks. In Advances in Neural Information Processing Systems (NeurIPS) , 2015. DeepSeek-AI. DeepSeek-V4: Towards highly efficient million-token context intelligence. Tech-nical report, DeepSeek-AI, 2026. URL https://huggingface.co/deepseek-ai/ DeepSeek-V4-Flash .10 Run-Ze Fan, Zengzhi Wang, and Pengfei Liu. MegaScience: Pushing the frontiers of post-training datasets for science reasoning. arXiv preprint arXiv:2507.16812 , 2025. GLM-5 Team. GLM-5: from vibe coding to agentic engineering. arXiv preprint arXiv:2602.15763 ,2026. Yuxian Gu, Li Dong, Furu Wei, and Minlie Huang. MiniLLM: Knowledge distillation of large language models. In International Conference on Learning Representations (ICLR) , 2024. URL 
+
+https://openreview.net/forum?id=5h0qf7IBZZ .Zihao Han, Tiangang Zhang, Huaibin Wang, and Yilun Sun. Adaptive teacher exposure for self-distillation in LLM reasoning. arXiv preprint arXiv:2605.11458 , 2026. Dan Hendrycks, Collin Burns, Saurav Kadavath, Akul Arora, Steven Basart, Eric Tang, Dawn Song, and Jacob Steinhardt. Measuring mathematical problem solving with the MATH dataset. In 
+
+Advances in Neural Information Processing Systems (NeurIPS) , 2021. Geoffrey Hinton, Oriol Vinyals, and Jeff Dean. Distilling the knowledge in a neural network. arXiv preprint arXiv:1503.02531 , 2015. Edward J. Hu, Yelong Shen, Phillip Wallis, Zeyuan Allen-Zhu, Yuanzhi Li, Shean Wang, Lu Wang, and Weizhu Chen. LoRA: Low-rank adaptation of large language models. In International Con-ference on Learning Representations (ICLR) , 2022. Jonas H¨ ubotter, Frederike L¨ ubeck, Lejs Behric, Anton Baumann, Marco Bagatella, Daniel Marta, Ido Hakimi, Idan Shenfeld, Thomas Kleine Buening, Carlos Guestrin, and Andreas Krause. Re-inforcement learning via self-distillation. arXiv preprint arXiv:2601.20802 , 2026. Yuki Ichihara, Naoto Iwase, Mohammad Atif Quamar, and Junpei Komiyama. Privileged solu-tions or context-induced teacher behavior? dissecting on-policy self-distillation. arXiv preprint arXiv:2608.09228 , 2026. Simran Kaur, Narutatsu Ri, Yinghui He, Liam Fowl, and Sanjeev Arora. Rethinking on-policy self-distillation for thinking models. arXiv preprint arXiv:2607.05184 , 2026. Junlong Ke, Zichen Wen, Weijia Li, Conghui He, and Linfeng Zhang. Respecting self-uncertainty in on-policy self-distillation for efficient LLM reasoning. arXiv preprint arXiv:2605.13255 , 2026. Jeonghye Kim, Xufang Luo, Minbeom Kim, Sangmook Lee, Dohyung Kim, Jiwon Jeon, Dongsheng Li, and Yuqing Yang. Why does self-distillation (sometimes) degrade the reasoning capability of LLMs? arXiv preprint arXiv:2603.24472 , 2026. Yoon Kim and Alexander M. Rush. Sequence-level knowledge distillation. In Proceedings of the 2016 Conference on Empirical Methods in Natural Language Processing , pp. 1317– 1327. Association for Computational Linguistics, 2016. doi: 10.18653/v1/D16-1139. URL 
+
+https://aclanthology.org/D16-1139/ .Kimi Team. Kimi K3: Open frontier intelligence. arXiv preprint arXiv:2607.24653 , 2026. Woosuk Kwon, Zhuohan Li, Siyuan Zhuang, Ying Sheng, Lianmin Zheng, Cody Hao Yu, Joseph E. Gonzalez, Hao Zhang, and Ion Stoica. Efficient memory management for large language model serving with PagedAttention. In Proceedings of the ACM SIGOPS 29th Symposium on Operating Systems Principles (SOSP) , 2023. Jia Li, Edward Beeching, Lewis Tunstall, Ben Lipkin, Roman Soletskyi, Shengyi Costa Huang, Kashif Rasul, Longhui Yu, Albert Jiang, Ziju Shen, Zihan Qin, Bin Dong, Li Zhou, Yann Fleureau, Guillaume Lample, and Stanislas Polu. NuminaMath. Hugging Face dataset reposi-tory, 2024. URL https://huggingface.co/datasets/AI-MO/NuminaMath-CoT .Alexander Lin, Jeremy Wohlwend, Howard Chen, and Tao Lei. Autoregressive knowledge distil-lation through imitation learning. In Proceedings of the 2020 Conference on Empirical Meth-ods in Natural Language Processing , pp. 6121–6133. Association for Computational Linguis-tics, 2020. doi: 10.18653/v1/2020.emnlp-main.494. URL https://aclanthology.org/ 2020.emnlp-main.494/ .11 Kevin Lu and Thinking Machines Lab. On-policy distillation. Thinking Machines Lab: Connectionism, October 2025. URL https://thinkingmachines.ai/blog/ on-policy-distillation/ .Xuan-Phi Nguyen, Shrey Pandit, Yiran Zhao, Anurag Koul, Zeyu Liu, and Shafiq Joty. Privileged likelihood is not automatically value: Three checks for token credit in on-policy self-distillation. 
+
+arXiv preprint arXiv:2608.09263 , 2026. Emiliano Penaloza, Dheeraj Vattikonda, Nicolas Gontier, Alexandre Lacoste, Laurent Charlin, and Massimo Caccia. Privileged information distillation for language models. arXiv preprint arXiv:2602.04942 , 2026. David Rein, Betty Li Hou, Asa Cooper Stickland, Jackson Petty, Richard Yuanzhe Pang, Julien Dirani, Julian Michael, and Samuel R. Bowman. GPQA: A graduate-level google-proof Q&A benchmark. arXiv preprint arXiv:2311.12022 , 2023. Zhanming Shen, Jintao Tong, Shaotian Yan, Chen Shen, Hao Chen, Wentao Ye, Xiaomeng Hu, Rui Miao, Haobo Wang, Junbo Zhao, Gang Chen, and Jieping Ye. Purified OPSD: On-policy self-distillation without losing how to think. arXiv preprint arXiv:2607.02234 , 2026. Idan Shenfeld, Mehul Damani, Jonas H¨ ubotter, and Pulkit Agrawal. Self-distillation enables con-tinual learning. arXiv preprint arXiv:2601.19897 , 2026. Alex Stein, Furong Huang, and Tom Goldstein. GATES: Self-distillation under privileged context with consensus gating. arXiv preprint arXiv:2602.20574 , 2026. Hao Wang, Guozhi Wang, Han Xiao, Yufeng Zhou, Yue Pan, Jichao Wang, Ke Xu, Yafei Wen, Xiaohu Ruan, Xiaoxin Chen, and Honggang Qi. Skill-SD: Skill-conditioned self-distillation for multi-turn LLM agents. arXiv preprint arXiv:2604.10674 , 2026. Yubo Wang, Xueguang Ma, Ge Zhang, Yuansheng Ni, Abhranil Chandra, Shiguang Guo, Weim-ing Ren, Aaran Arulraj, Xuan He, Ziyan Jiang, Tianle Li, Max Ku, Kai Wang, Alex Zhuang, Rongqi Fan, Xiang Yue, and Wenhu Chen. MMLU-Pro: A more robust and challenging multi-task language understanding benchmark. In Advances in Neural Information Processing Systems (NeurIPS), Datasets and Benchmarks Track , 2024. Xin Xu, Qiyun Xu, Tong Xiao, Tianhao Chen, Yuchen Yan, Jiaxin Zhang, Shizhe Diao, Can Yang, and Yang Wang. UGPhysics: A comprehensive benchmark for undergraduate physics reasoning with large language models. In International Conference on Machine Learning (ICML) , 2025. An Yang et al. Qwen3 technical report. arXiv preprint arXiv:2505.09388 , 2025. Zhuolin Yang, Zihan Liu, Yang Chen, Wenliang Dai, Boxin Wang, Sheng-Chieh Lin, Chankyu Lee, Yangyi Chen, Dongfu Jiang, Jiafan He, Renjie Pi, Grace Lam, Nayeon Lee, Alexander Bukharin, Mohammad Shoeybi, Bryan Catanzaro, and Wei Ping. Nemotron-Cascade 2: Post-training LLMs with cascade RL and multi-domain on-policy distillation. arXiv preprint arXiv:2603.19220 , 2026. Tianzhu Ye, Li Dong, Xun Wu, Shaohan Huang, and Furu Wei. On-policy context distillation for language models. arXiv preprint arXiv:2602.12275 , 2026. Siyan Zhao, Zhihui Xie, Mengchen Liu, Jing Huang, Guan Pang, Feiyu Chen, and Aditya Grover. Self-distilled reasoner: On-policy self-distillation for large language models. arXiv preprint arXiv:2601.18734 , 2026a. Ziqi Zhao, Xinyu Ma, Liu Yang, Yujie Feng, Daiting Shi, Jingzhou He, Xin Xin, Zhaochun Ren, and Xiao-Ming Wu. ROSD: Reflective on-policy self-distillation for language model reasoning across domains. arXiv preprint arXiv:2605.28014 , 2026b. Siqi Zhu, Xuyan Ye, Hongyu Lu, Weiye Shi, and Ge Liu. The many faces of on-policy distillation: Pitfalls, mechanisms, and fixes. arXiv preprint arXiv:2605.11182 , 2026. 12 A ADDITIONAL EXPERIMENTAL DETAILS 
+
+A.1 DATASET CONSTRUCTION 
+
+NuminaMath. We construct the NuminaMath training set from the training split of NuminaMath-CoT (Li et al., 2024). We retain problems with an extractable boxed answer and sample 10,000 examples using the source quotas in Table 3. Sampling within each source and the final shuffle use seed 42. We remove exact overlaps with AIME 2024 and MATH-500 after lowercasing the problem text and collapsing whitespace. AIME 2025 and HMMT 2025 postdate the NuminaMath snapshot and are not included in the decontamination set. 
+
+MegaScience. We construct the MegaScience training set from the textbook reasoning por-tion of MegaScience (Fan et al., 2025). We retain solutions that contain an extractable boxed answer and at least 250 characters. We then sample 10,000 examples using the subject quotas in Table 3. Sampling uses seed 42. We remove exact problem matches and shared word 8-grams with GPQA-Diamond, MMLU-Pro, UGPhysics, SciBench, MATH-500, and GSM8K. Table 3: Composition of the training subsets.           
+
+> Dataset Source or subject Problems
+> NuminaMath Olympiads 6,500 AoPS forum 2,000 Synthetic AMC 1,000 MATH 500 MegaScience Physics 4,000 Mathematics 2,500 Chemistry 2,500 Biology 1,000
+
+Comparison of reference types. Qwen3-8B and Qwen3-32B generate reasoning traces in think-ing mode while receiving the original dataset solution as an answer anchor. We retain traces whose final boxed answer agrees with the original answer and whose rendered teacher prompt contains at most 15,900 tokens. The common set is the deduplicated intersection of the surviving 8B and 32B trace sets. The agreement and length filters favor problems for which both models produce a correct trace within the limit. Results on this set are therefore not directly comparable to results on the full 10,000-problem set. Table 4 gives the final artifact counts. The original solution, two reasoning traces, and answer-only condition use the same 4,953 problems in the same order. The hint condition contains 4,898 of these problems because 55 answer-leaking hints are removed. Table 4: Training-set sizes for the reference-type comparison.       
+
+> Reference condition Problems
+> Original dataset solution 4,953 Qwen3-8B reasoning trace 4,953 Qwen3-32B reasoning trace 4,953 Answer-only reference 4,953 Abstract hint 4,898
+
+A.2 REFERENCE CONDITIONS AND PROMPTS 
+
+Table 5 summarizes the information provided to the teacher. In every condition except the no-reference condition, the selected text occupies the reference field in the same teacher prompt. The student does not receive this text. 13 Table 5: Reference conditions used during training. 
+
+Condition Information provided to the teacher 
+
+Original dataset solution The complete solution supplied by the training dataset. Answer-only Only the final answer extracted from the last \boxed {} expression in the original solution. Abstract hint Method-level guidance generated from the problem and original solution without a worked derivation or final answer. Qwen3-8B trace A verified full reasoning trace generated by Qwen3-8B in thinking mode. Qwen3-32B trace A verified full reasoning trace generated by Qwen3-32B in thinking mode. Mismatched reference The original dataset solution from another problem. No reference No additional text; the teacher receives only the problem. 
+
+Generated references. The abstract hints are generated by Qwen3-32B in non-thinking mode at temperature 0.7 with top-p 0.8, top-k 20, and a 512-token limit. The model is prompted to produce three to five concise bullets. Hints that contain \boxed or reproduce the extracted answer are removed. The Qwen3-8B and Qwen3-32B traces are generated in thinking mode at temperature 0.6 with top-p 0.95, top-k 20, and a 32,768-token limit. All generated-reference procedures use seed 42. 
+
+Abstract-hint generation prompt. Before applying the Qwen3-32B chat template, we construct the following user message: 
+
+You are a math tutor. Given a problem and a reference solution, write an abstract hint that helps a student solve the problem without revealing the solution. The hint should mention the core idea, theorem, transformation, invariant, case split, or caution needed to solve the problem. It should be specific and useful, but not a full solution. Rules: - Do not reveal the final answer. - Do not use \boxed {} .- Do not reproduce the solution steps. - Avoid long calculations or decisive intermediate numeric values. - Keep it to 3-5 concise bullets. Problem: 
+
+{problem }
+
+Reference solution: 
+
+{solution }
+
+Abstract hint: 
+
+We replace the placeholders with the problem and original dataset solution, render the prompt as a single user message, and disable thinking mode. 
+
+Mismatched references. For NuminaMath, we apply a seed-42 derangement to the solution col-umn with no self-pairs. For MegaScience, we apply the same construction within each subject. The problem and all other fields remain unchanged. 
+
+OPSD training prompts. The student user message is 
+
+Problem: {problem }
+
+Please reason step by step, and put your final answer within 
+
+\boxed {} .
+
+14 When a reference is used, the teacher user message is                                                                                
+
+> Problem: {problem }
+> Here is areference solution to this problem: === Reference Solution Begin ===
+> {reference }
+> === Reference Solution End === After reading the reference solution above, make sure you truly understand the reasoning behind each step |do not copy or paraphrase it. Now, using your own words and independent reasoning, derive the same final answer to the problem above. Think step by step, explore different approaches, and don’t be afraid to backtrack or reconsider if something doesn’t work out: Please reason step by step, and put your final answer within
+> \boxed {} .
+
+In the no-reference condition, the teacher receives the student user message. We render both mes-sages with the Qwen3 chat template and set thinking mode independently for the student and teacher. A.3 TRAINING CONFIGURATION 
+
+The teacher is the frozen Qwen3-8B base model. During teacher scoring, the student’s LoRA adapter is disabled. We minimize the full-vocabulary forward KL divergence KL( πT ∥πS ). Both distribu-tions are computed at temperature 1.1. Pointwise clipping is applied to each vocabulary coordinate’s contribution before summation, masking, and reduction. We list the common hyperparameters in Table 6 and the dataset- and mode-specific settings in Table 7. Table 6: Shared OPSD training configuration.                                 
+
+> Setting Value
+> Base model Qwen3-8B Student mode Non-thinking LoRA rank / alpha 64 / 128 LoRA target modules q,k,v,o,gate ,up ,down proj
+> Learning rate 5×10 −6
+> Optimizer Fused AdamW Adam betas / epsilon 0.9,0.999 /10 −8
+> Weight decay / warmup 0 / 0 Learning-rate schedule Linear Maximum gradient norm 0.1 Effective batch size 32 Training steps 300 Checkpoint interval 25 steps Training and data-shuffle seed 42 Student rollout temperature 1.1 Student rollout top-p/ top-k0.95 / 20 Student rollout context limit 20,000 Precision bfloat16 Distributed training DeepSpeed ZeRO-2 with CPU optimizer offload
+
+The standard microbatch contains two examples per GPU with two gradient-accumulation steps across eight GPUs. The full-trace conditions use one example per GPU with four accumulation steps. We use FlashAttention 2, gradient checkpointing, and colocated vLLM generation with tensor parallel size one. The vLLM rollout engines use their data-parallel process indices as seeds. The 20,000-token setting limits the student rollout context. Student prompts are truncated to leave room for the maximum completion. Teacher prompts are separately truncated at 20,000 tokens before the sampled student completion is appended. It is therefore not a universal limit on the 15 combined teacher sequence. For the full-trace conditions, the 15,900-token prompt filter and 4,096-token completion limit keep the combined sequence below 20,000 tokens. Table 7: Settings that vary by dataset and teacher mode.                
+
+> Dataset Teacher mode Completion limit KL clip per coordinate
+> NuminaMath Non-thinking 4,096 10 −7
+> NuminaMath Thinking 1,024 0.06 MegaScience Non-thinking 2,048 10 −7
+> MegaScience Thinking 1,024 0.06
+
+A.4 EVALUATION 
+
+We define Avg@ k as the mean accuracy across k sampled responses. Unparseable responses count as incorrect. Table 8 gives the main reported read and grader for each benchmark. Table 8: Evaluation benchmarks and grading procedures.                         
+
+> Benchmark Problems Reported read Grading
+> MATH-500 500 Avg@4 Final boxed answer with symbolic equivalence. AIME 2024 30 Avg@12 Final boxed answer with symbolic equivalence. AIME 2025 30 Avg@12 Final boxed answer with symbolic equivalence. HMMT 2025 30 Avg@12 Final boxed answer with symbolic equivalence. GPQA-Diamond 198 Avg@12 Parsed answer choice with exact letter matching. MMLU-Pro 12,032 Avg@1 Parsed answer choice with exact letter matching. UGPhysics 5,520 Avg@1 Official type-aware rule grader at precision 0.01.
+
+The reference-type comparison uses Avg@12 on AIME 2024. Every trained student is evaluated in non-thinking mode at temperature 1.0 and top-p 0.8. Students trained with a non-thinking teacher use repetition penalty 1.3, while students trained with a thinking teacher use 1.0. Base non-thinking evaluations use repetition penalty 1.0. Separate base-model evaluations in thinking mode use tem-perature 1.0 and top-p 0.95. 
+
+Uncertainty estimation. We compare two students by resampling the same benchmark problems for both students 10,000 times and recomputing the difference in Avg@ k. The paired 95% interval contains the 2.5th through 97.5th percentiles of these differences. In Table 9, each reference type is compared with the canonical solution. In Table 10, the solution from another problem is compared with the correct solution. No other pairs are tested. Table 9: Reference-type comparison on AIME 2024 under a non-thinking teacher (Avg@12).                       
+
+> Reference provided to the teacher Avg@12 Difference from canonical Paired 95% interval
+> Canonical solution 61.1 ––Answer only 66.7 +5 .6[−1.4,+12 .8]
+> Abstract hint 31.1 −30 .0[−39 .4,−20 .6]
+> Qwen3-8B reasoning trace 69.4 +8 .3[+3 .3,+13 .9]
+> Qwen3-32B reasoning trace 63.3 +2 .2[−2.5,+6 .7]
+
+Table 10: Correct and mismatched references under a non-thinking teacher (Avg@12).                    
+
+> Benchmark Correct solution Solution from another problem Difference Paired 95% interval
+> AIME 2024 66.7 71.9 +5 .3[−0.6,+11 .1]
+> AIME 2025 49.2 61.7 +12 .5[+6 .4,+18 .9]
+> HMMT 2025 30.6 42.2 +11 .7[+6 .1,+17 .5]
+
+16 Checkpoint selection. For each trained condition, we evaluate saved checkpoints on two selec-tion benchmarks using Avg@4 and select the checkpoint with the highest mean across them. We use MATH-500 and AIME 2024 for NuminaMath, and MATH-500 and GPQA-Diamond for Mega-Science. The remaining benchmarks are evaluated only after checkpoint selection. Table 11 gives the selected Qwen3-8B checkpoints. Table 11: Checkpoints used for the main benchmark comparison.                   
+
+> Training data Condition Checkpoint
+> NuminaMath Non-thinking teacher, correct reference 50 NuminaMath Non-thinking teacher, mismatched reference 50 NuminaMath Thinking teacher, correct reference 200 NuminaMath Thinking teacher, no reference 200 MegaScience Non-thinking teacher, correct reference 150 MegaScience Non-thinking teacher, mismatched reference 150 MegaScience Thinking teacher, correct reference 300 MegaScience Thinking teacher, no reference 250
+
+Generation limits. Table 12 reports the maximum generated tokens in the main performance eval-uations. Every condition compared within a benchmark uses the same completion limit, so a single limit per benchmark applies to all conditions. Table 12: Generation limits for the main reported evaluations.       
+
+> Benchmark Completion limit (tokens)
+> MATH-500 38,912 AIME 2024, AIME 2025, HMMT 2025 32,768 GPQA-Diamond 32,768 MMLU-Pro 32,768 UGPhysics 32,768
+
+UGPhysics coverage. The base, non-thinking-teacher, and mismatched-reference rows use all 5,520 UGPhysics questions. The thinking-teacher row uses 5,477 questions after a transient dataset-configuration load failure. The corresponding no-reference row uses 5,175 questions because one 345-problem evaluation shard did not complete before the job limit. A.5 EVALUATION IN THINKING MODE 
+
+We additionally evaluate the Qwen3-8B base model and the students trained on NuminaMath with a thinking teacher, with and without the reference. Thinking mode is enabled for every model, as in Zhao et al. (2026a). We set the maximum generation length to 38,912 tokens, temperature to 1.0, top-p to 0.95, top-k to −1, and the repetition penalty to 1.0. Table 13 reports Avg@12 accuracy on AIME 2024, AIME 2025, and HMMT 2025. The checkpoints were selected using the main non-thinking evaluation. A.6 SOFTWARE AND COMPUTE 
+
+We train on one node with eight NVIDIA H200 GPUs. Each training condition uses one training run. Primary launchers request 64 CPU cores and 256 GB of host memory. Table 14 gives the principal software versions from the training environment. 17 Table 13: Thinking-mode evaluation of Qwen3-8B on mathematical reasoning benchmarks.                 
+
+> Method AIME24 AIME25 HMMT25 Avg.
+> Base model 74.72 67.78 45.00 62.50 OPSD, thinking teacher, correct ref. 75.28 70.56 47.50 64.45 OPSD, thinking teacher, no ref. 76.67 71.39 45.00 64.35
+
+Table 14: Principal software versions.                    
+
+> Package Version Package Version
+> Python 3.10.12 PyTorch 2.8.0 Transformers 4.57.1 TRL 0.26.0 PEFT 0.17.1 DeepSpeed 0.18.2 Datasets 3.6.0 Accelerate 1.11.0 vLLM 0.11.0 FlashAttention 2.8.3 math-verify 0.8.0
+
+# B ADDITIONAL DISTRIBUTIONAL ANALYSES 
+
+This section reports additional measurements of the teacher’s signal and the student’s change. The change-magnitude and alignment analyses use the fixed responses generated by the initial student, following Section 3.4. The policy-entropy measurements are instead recorded from the on-policy trajectories generated during training. B.1 SENSITIVITY TO CONTROL PAIRING 
+
+Each control pairs an evaluated problem with a different problem. To determine whether the results depend on this pairing, we repeat each control construction under three different assignments while keeping the student responses and original measurements fixed. Table 15 reports the range of the difference between the evaluated-problem and control cosine similarities across the three assign-ments. Table 15: Cosine-similarity differences across three control assignments. Bracketed entries show the minimum and maximum values, not confidence intervals.                                            
+
+> Analysis Comparison NuminaMath MegaScience
+> Figure 2 Canonical solution [−0.146 ,−0.133] –Figure 2 Qwen3-8B trace [−0.069 ,−0.062] –Figure 2 Qwen3-32B trace [−0.081 ,−0.068] –Figure 2 Abstract hint [−0.144 ,−0.136] –Figure 2 Answer only [−0.150 ,−0.145] –Figure 3 Reference direction at step 150 [0 .054 ,0.055] [0 .066 ,0.079]
+> Figure 3 Recovery direction at step 150 [−0.135 ,−0.129] [0 .015 ,0.017]
+> Figure 4(b) Reference direction [0 .045 ,0.048] [0 .077 ,0.099]
+> Figure 4(b) Recovery direction [−0.077 ,−0.073] [0 .014 ,0.018]
+
+The sign of every cosine difference is unchanged across the three assignments. The magnitude-sensitive reference projection in Figure 4(a) is less stable on MegaScience, where the difference between the evaluated-problem and control measurements ranges from −0.038 to 0.088 . Because the projection coefficient also depends on the direction’s magnitude, we do not interpret this varia-tion as a stable directional effect. The corresponding cosine difference remains positive across all three assignments. 18 0 100 200 300 01000 2000 3000 (a) NuminaMath          
+
+> 0100 200 300 01000 2000 3000
+> (b) MegaScience
+> 0100 200 300 0.0 0.2 0.4 0.6
+> (c) NuminaMath
+> 0100 200 300 0.0 0.1 0.2 0.3
+> (d) MegaScience
+
+Training step  
+
+> Update magnitude ‖Δ Sc‖Reference-free divergence KL( N‖Sc)
+
+Figure 5: Magnitude of the Qwen3-8B student’s log-probability change and its KL divergence from the reference-free teacher during training under a thinking teacher. 0 100 200 300 
+
+Training step 
+
+> 0.0 0.5 1.0 1.5 2.0
+> policy entropy (nats)
+> NuminaMath
+> thinking teacher non-thinking, canonical non-thinking, mismatched reference
+
+Figure 6: Policy entropy of the Qwen3-8B student during training on NuminaMath under thinking and non-thinking teachers. B.2 CHANGE MAGNITUDE AND RECOVERY DIVERGENCE 
+
+As Figure 5 shows, after the initial variation, ∥∆Sc∥I0 remains within a relatively narrow range on both datasets, while KL I0 (N ∥Sc) continues to increase. The student therefore becomes increasingly different from the reference-free teacher without a corresponding increase in the overall magnitude of its log-probability change. B.3 POLICY ENTROPY 
+
+Figure 6 shows that entropy increases under a thinking teacher but falls sharply under a non-thinking teacher. The near-identical non-thinking curves show that replacing the reference does not explain the entropy collapse. B.4 ALIGNMENT WITH THE THINKING DIRECTION 
+
+In Figure 7, both the evaluated-problem and control measurements remain negatively aligned with the thinking direction throughout training. The evaluated-problem measurement is less negative than its control, especially on NuminaMath. Thus, the positive difference between the two measurements reflects weaker opposition to the thinking direction rather than positive alignment with it. 19 0 100 200 300 −0.6 −0.4 −0.2 0.0    
+
+> cos  θthink
+> +0.25
+> (a) non-thinking teacher, NuminaMath
+> 0100 200 300
+> +0.07
+> (b) non-thinking teacher, MegaScience
+
+Training step   
+
+> cos θthink , evaluated problem control
+
+Figure 7: Cosine similarity between changes in the Qwen3-8B student’s predictions and the base model’s thinking direction under a non-thinking teacher. 
+
+# C RESULTS AT SMALLER MODEL SCALES 
+
+C.1 QWEN 3-4B P ERFORMANCE 
+
+Table 16 repeats the main performance comparison with Qwen3-4B using the same training and eval-uation procedure as for Qwen3-8B. On NuminaMath, the correct reference improves the thinking-teacher student on all three competition mathematics benchmarks, with paired bootstrap intervals excluding zero. Under a non-thinking teacher, the mismatched reference outperforms the correct reference on the same benchmarks. On MegaScience, removing the reference does not reduce thinking-teacher performance. Table 16: Qwen3-4B benchmark results under non-thinking evaluation. Evaluation reads follow Table 1. 
+
+Method NuminaMath MATH-500 AIME24 AIME25 HMMT25 Avg. 
+
+Base model 84.0 24.7 21.1 10.8 35.2 OPSD, non-thinking teacher, correct ref. 82.5 31.4 21.7 13.6 37.3 OPSD, non-thinking teacher, mismatched ref. 82.6 40.3 32.5 22.8 44.5 OPSD, thinking teacher, correct ref. 90.9 56.7 48.3 34.2 57.5 OPSD, thinking teacher, no ref. 90.0 41.9 37.5 24.4 48.5 
+
+Method MegaScience MATH-500 GPQA-D MMLU-Pro UGPhysics Avg. 
+
+Base model 84.0 43.5 62.0 12.8 50.6 OPSD, non-thinking teacher, correct ref. 81.1 42.6 58.1 12.7 48.6 OPSD, non-thinking teacher, mismatched ref. 81.0 44.4 57.8 12.8 49.0 OPSD, thinking teacher, correct ref. 93.6 49.2 64.7 26.3 58.4 OPSD, thinking teacher, no ref. 92.8 51.6 67.7 26.0 59.5 
+
+C.2 QWEN 3-1.7B P ERFORMANCE 
+
+Table 17 repeats the comparison with Qwen3-1.7B under the same evaluation protocol. On Numi-naMath, the correct reference improves the thinking-teacher student on AIME 2024 and HMMT 2025, with paired bootstrap intervals excluding zero; the interval for AIME 2025 includes zero. Under a non-thinking teacher, the mismatched reference outperforms the correct reference on all 20 three competition mathematics benchmarks. On MegaScience, removing the reference improves thinking-teacher performance on all three science benchmarks. Table 17: Qwen3-1.7B benchmark results under non-thinking evaluation. Evaluation reads follow Table 1. 
+
+Method NuminaMath MATH-500 AIME24 AIME25 HMMT25 Avg. 
+
+Base model 72.0 14.4 10.3 4.4 25.3 OPSD, non-thinking teacher, correct ref. 67.2 13.1 11.9 5.3 24.4 OPSD, non-thinking teacher, mismatched ref. 77.5 27.5 18.3 13.9 34.3 OPSD, thinking teacher, correct ref. 76.5 32.2 20.8 14.7 36.1 OPSD, thinking teacher, no ref. 79.1 22.2 16.7 10.0 32.0 
+
+Method MegaScience MATH-500 GPQA-D MMLU-Pro UGPhysics Avg. 
+
+Base model 72.0 30.4 46.3 8.9 39.4 OPSD, non-thinking teacher, correct ref. 71.4 29.0 39.4 8.4 37.0 OPSD, non-thinking teacher, mismatched ref. 70.0 26.8 34.4 7.9 34.8 OPSD, thinking teacher, correct ref. 81.5 33.4 50.9 13.5 44.8 OPSD, thinking teacher, no ref. 87.6 36.7 55.7 17.2 49.3 
+
+C.3 DISTRIBUTIONAL RESULTS ACROSS MODEL SCALES 
+
+We repeat the cosine-similarity analysis at 8B, 4B, and 1.7B. Table 18 reports each cosine similarity and its difference from the corresponding control across three control assignments. The checkpoint used for each measurement is listed in the table. Table 18: Cosine similarities at 8B, 4B, and 1.7B. Bracketed entries give the range across three control assignments, not confidence intervals. 
+
+(a) Thinking teacher Dataset Scale Checkpoint Reference direction Dref Recovery direction Drec 
+
+cos θ(c) 
+
+> Dref
+
+cos θ(c) 
+
+> Dref
+
+− cos θ(c)
+
+> D∗
+> ref
+
+cos θ(c) 
+
+> Drec
+
+cos θ(c) 
+
+> Drec
+
+− cos θ(c)
+
+> D∗
+> rec
+
+NuminaMath 8B 250 0.3785 [+0 .0447 , +0 .0479] 0.5989 [−0.0773 , −0.0727] 
+
+NuminaMath 4B 150 0.4020 [+0 .2161 , +0 .2308] 0.7910 [+0 .0206 , +0 .0219] 
+
+NuminaMath 1.7B 150 0.5668 [+0 .2699 , +0 .2963] 0.8396 [−0.0152 , −0.0139] 
+
+MegaScience 8B 300 0.3037 [+0 .0775 , +0 .0994] 0.7787 [+0 .0140 , +0 .0176] 
+
+MegaScience 4B 300 0.4809 [+0 .1367 , +0 .1394] 0.8991 [+0 .0555 , +0 .0576] 
+
+MegaScience 1.7B 100 0.5210 [+0 .3998 , +0 .4123] 0.9183 [+0 .0076 , +0 .0092] 
+
+(b) Non-thinking teacher Dataset Scale Checkpoint Reference direction Dref 
+
+cos θ(c) 
+
+> Dref
+
+cos θ(c) 
+
+> Dref
+
+− cos θ(c)
+
+> D∗
+> ref
+
+NuminaMath 8B 50 −0.2272 [−0.2873 , −0.2621] 
+
+NuminaMath 4B 50 +0 .2997 [−0.2550 , −0.2392] 
+
+NuminaMath 1.7B 50 −0.1410 [−0.2461 , −0.2289] 
+
+MegaScience 8B 150 −0.1276 [−0.3825 , −0.3632] 
+
+MegaScience 4B 100 +0 .3556 [−0.2524 , −0.2481] 
+
+MegaScience 1.7B 100 +0 .0240 [−0.3907 , −0.3525] 
+
+21
