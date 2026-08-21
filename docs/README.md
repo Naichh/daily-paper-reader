@@ -6,35 +6,32 @@
 </div>
 
 ## 每次日报
-- 最新运行日期：2026-08-20
-- 运行时间：2026-08-20 19:45:50 UTC
+- 最新运行日期：2026-08-21
+- 运行时间：2026-08-21 20:30:04 UTC
 - 运行状态：成功
-- 本次总论文数：5
-- 精读区：4
-- 速读区：1
+- 本次总论文数：3
+- 精读区：3
+- 速读区：0
 
 ### 今日简报（AI）
-今日聚焦多教师同策略蒸馏，两篇满分精读直指能力失衡与长上下文推理；速读关注多轮工具调用智能体的钻石拓扑自蒸馏。最值得深挖：Open-MOPD如何诊断并修复教师间能力不均，以及超越教师似然的群组校准方法。下一步建议从这两篇切入，理解同策略蒸馏的关键瓶颈与校准思路，再辅以工具调用案例验证。
-- 详情：[/202608/20/README](/202608/20/README)
+今日精读两篇高分论文（均9.0/10），聚焦大模型知识蒸馏的样本筛选与加权策略。  
+最值得关注的方向：利用推理进度过滤低质量样本，以及用排名分类实现“截断坏的、加权好的”BoN式蒸馏。  
+建议普通读者结合这两篇思路，尝试在自身蒸馏流程中优先引入推理进度过滤，再按排名重加权。
+- 详情：[/202608/21/README](/202608/21/README)
 
 ### 精读区论文标签
-1. [Open-MOPD: Diagnosing and Fixing Capability Imbalance in Multi-Teacher On-Policy Distillation](/202608/20/2608.19098v1-open-mopd-diagnosing-and-fixing-capability-imbalance-in-multi-teacher-on-policy-distillation)  
-   标签：评分：10.0/10、query:policy-dist
-   evidence：面向LLM后训练的多教师在线策略蒸馏基准与分析，采用oracle路由隔离路由歧义
-2. [Beyond Teacher Likelihood: Group-Calibrated On-Policy Distillation for Long-Context Reasoning](/202608/20/2608.19181v1-beyond-teacher-likelihood-group-calibrated-on-policy-distillation-for-long-context-reasoning)  
-   标签：评分：10.0/10、query:policy-dist
-   evidence：直接面向长上下文推理中的大模型后训练在线策略蒸馏问题
-3. [Rethinking Privileged Information in On-Policy Self-Distillation](/202608/20/2608.18271v1-rethinking-privileged-information-in-on-policy-self-distillation)  
+1. [Beyond Imitation: Filtering On-Policy Distillation by Reasoning Progress](/202608/21/2608.19408v1-beyond-imitation-filtering-on-policy-distillation-by-reasoning-progress)  
    标签：评分：9.0/10、query:policy-dist
-   evidence：分析大模型后训练中带特权参考的在线策略自蒸馏（OPSD）
-4. [Accelerating Visual On-Policy Distillation with Batched Speculative Jacobi Rollouts](/202608/20/2608.18183v1-accelerating-visual-on-policy-distillation-with-batched-speculative-jacobi-rollouts)  
+   evidence：在OPD中按推理进展过滤教师奖励，解决奖励与真实进展冲突的问题。
+2. [Truncate Bad, Upweight Good: BoN-Style Distillation via Rank-Based Classification](/202608/21/2608.19748v1-truncate-bad-upweight-good-bon-style-distillation-via-rank-based-classification)  
+   标签：评分：9.0/10、query:policy-dist
+   evidence：针对LLM对齐的Best-of-N策略蒸馏
+3. [Swift-Image: Exploring the Performance Frontier of Compact Unified Image Generation Models](/202608/21/2608.20334v1-swift-image-exploring-the-performance-frontier-of-compact-unified-image-generation-models)  
    标签：评分：8.0/10、query:policy-dist
-   evidence：直接针对在线策略蒸馏（OPD），提出批量投机性雅可比展开以加速其训练
+   evidence：后训练采用并行专家强化学习与多教师在线策略蒸馏
 
 ### 速读区论文标签
-1. [DART-SD: Diamond-topology Aware Retrieval and Tuning for Self-Distillation of Multi-Turn Tool-Calling Agents](/202608/20/2608.18524v1-dart-sd-diamond-topology-aware-retrieval-and-tuning-for-self-distillation-of-multi-turn-tool-calling-agents)  
-   标签：评分：7.0/10、query:policy-dist
-   evidence：面向LLM工具调用智能体策略的自蒸馏框架，用钻石拓扑感知检索与微调克服轨迹模仿导致的策略多样性退化
+- 本次无速读推荐。
 
 
 <div class="dpr-home-promo-card">
