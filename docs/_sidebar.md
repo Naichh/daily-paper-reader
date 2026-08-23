@@ -1,6 +1,9 @@
 * <a class="dpr-sidebar-root-link" href="#/">首页</a>
 * <a class="dpr-sidebar-root-link dpr-sidebar-noactive-link" href="javascript:void(0)" data-dpr-hash="#/tutorial/README">使用教程</a>
 * Daily Papers
+  * 2026-08-23 <!--dpr-date:20260823-->
+    * 精读区
+      * <a class="dpr-sidebar-item-link dpr-sidebar-item-structured" href="#/202608/23/2608.16316v1-deep-thought-alignment-trajectory-level-latent-distillation-for-video-reasoning" data-sidebar-item="{&quot;title&quot;: &quot;Deep Thought Alignment: Trajectory-Level Latent Distillation for Video Reasoning&quot;, &quot;link&quot;: &quot;https://arxiv.org/abs/2608.16316v1-deep-thought-alignment-trajectory-level-latent-distillation-for-video-reasoning&quot;, &quot;score&quot;: &quot;8.0&quot;, &quot;tags&quot;: [{&quot;kind&quot;: &quot;query&quot;, &quot;label&quot;: &quot;policy-dist&quot;}], &quot;evidence&quot;: &quot;提出Latent-OPD，一种同时约束潜在表示的on-policy蒸馏变体&quot;}">Deep Thought Alignment: Trajectory-Level Latent Distillation for Video Reasoning</a>
   * 2026-08-21 <!--dpr-date:20260821-->
     * 精读区
       * <a class="dpr-sidebar-item-link dpr-sidebar-item-structured" href="#/202608/21/2608.19408v1-beyond-imitation-filtering-on-policy-distillation-by-reasoning-progress" data-sidebar-item="{&quot;title&quot;: &quot;Beyond Imitation: Filtering On-Policy Distillation by Reasoning Progress&quot;, &quot;link&quot;: &quot;https://arxiv.org/abs/2608.19408v1-beyond-imitation-filtering-on-policy-distillation-by-reasoning-progress&quot;, &quot;score&quot;: &quot;9.0&quot;, &quot;tags&quot;: [{&quot;kind&quot;: &quot;query&quot;, &quot;label&quot;: &quot;policy-dist&quot;}], &quot;evidence&quot;: &quot;在OPD中按推理进展过滤教师奖励，解决奖励与真实进展冲突的问题。&quot;}">Beyond Imitation: Filtering On-Policy Distillation by Reasoning Progress</a>
