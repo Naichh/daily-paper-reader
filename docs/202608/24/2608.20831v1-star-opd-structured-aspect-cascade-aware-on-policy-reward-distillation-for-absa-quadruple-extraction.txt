@@ -1,0 +1,665 @@
+Title: STAR-OPD: Structured Aspect-Cascade-Aware On-Policy Reward Distillation for ABSA Quadruple Extraction
+
+URL Source: https://arxiv.org/pdf/2608.20831v1
+
+Published Time: Mon, 24 Aug 2026 00:32:14 GMT
+
+Number of Pages: 18
+
+Markdown Content:
+# STAR-OPD: Structured Aspect-Cascade-Aware On-Policy Reward Distillation for ABSA Quadruple Extraction 
+
+Tong Sun 1, Mingyang Ma 1, Jiayang Yu 1
+
+> 1
+
+Alibaba International Digital Commerce Group 
+
+> st422019@alibaba-inc.com mingyang.mmy@lazada.com yujiayang.jy@alibaba-inc.com
+
+Abstract 
+
+Aspect-based sentiment analysis (ABSA) quadruple extraction requires jointly predict-ing target, aspect, opinion, and sentiment over reviews that often contain multiple fine-grained sentiment tuples. While large chain-of-thought (CoT) models perform well on this task, distilling them into smaller deployable models remains difficult. We identify a task-specific failure mode in distilled ABSA ex-traction: student errors at the target–aspect in-terface create structurally invalid states, such as broken target–aspect bindings and halluci-nated targets, which then corrupt downstream predictions. Conventional off-policy distilla-tion is poorly suited to this setting because it trains only on teacher-generated trajecto-ries and provides little supervision on the student-induced structural states that domi-nate inference. To address this mismatch, we propose STAR-OPD ( ST ructured Aspect-cascade-aware On-Policy Reward Distillation), which builds on generic on-policy distillation and instantiates it for ABSA quadruple ex-traction with cascade-aware, set-structured re-wards. STAR-OPD trains on student rollouts and applies set-structured rewards that directly target binding consistency, target grounding, and fine-grained aspect disambiguation. Ex-periments on E-ABSA20K and SemEval-2014 show that STAR-OPD consistently outper-forms off-policy and general on-policy base-lines, reduces target hallucination, and sub-stantially improves performance on structurally hard cases. With Qwen3-4B, STAR-OPD substantially narrows the student–teacher gap while improving inference efficiency, highlight-ing the importance of on-policy structural cor-rection for distilled ABSA extraction. 
+
+1 Introduction 
+
+Aspect-based sentiment analysis (ABSA) quadruple extraction aims to identify structured sentiment tuples of the form 
+
+Figure 1: Motivation for STAR-OPD. Left: Errors at the target–aspect interface create structurally invalid tuples and corrupt downstream prediction. Center: Off-policy distillation trains only on teacher trajectories and misses student-induced cascade failures. Right: On-policy training exposes these states and uses cascade-aware rewards to correct them. 
+
+(target, aspect, opinion, sentiment ). Compared with simpler ABSA settings, it is substantially more challenging: each review may contain multiple tuples, targets may refer to products or product-parts, and aspects are selected from fine-grained domain taxonomies. Recent chain-of-thought (CoT) large language models (LLMs) perform strongly on this task, but their inference cost remains prohibitive for high-throughput e-commerce applications, motivating distillation into smaller deployable models. We identify a task-specific failure mode in dis-tilled ABSA extraction, which we call structured aspect cascade : errors at the target–aspect inter-face create structurally invalid tuple states, most commonly through broken bindings and halluci-nated non-grounded targets. In a pilot study with a SeqKD distillation baseline, we observe a sub-stantial drop from target-only to target–aspect cor-rectness, suggesting that the main bottleneck lies not in target identification alone, but in preserving valid target–aspect structure. For example, in “The leather looks premium, but the strap feels cheap,” arXiv:2608.20831v1 [cs.CL] 21 Aug 2026 misassigning strap to the wrong aspect or halluci-nating an unseen product-part can invalidate the entire tuple even if local sentiment words remain plausible. Conventional off-policy distillation is ill-suited to this problem because it supervises the student only on teacher-generated trajectories, which are overwhelmingly structurally valid. At inference time, however, the student must condition on its own predictions, including incorrect target–aspect bindings and hallucinated targets rarely observed during training. Because such errors alter tuple structure rather than only local token accuracy, off-policy imitation provides little direct supervision for recovering from the student-induced states that dominate inference-time failure. To address this mismatch, we propose STAR-OPD (ST ructured Aspect-cascade-aware On-
+
+Policy Reward Distillation), which builds on generic on-policy distillation and specializes it for ABSA quadruple extraction. STAR-OPD trains on student rollouts rather than teacher-only trajecto-ries and applies cascade-aware rewards that directly target incorrect target–aspect binding and halluci-nated non-grounded targets, with lightweight filter-ing and sampling as stabilizers. Experiments on E-ABSA20K (Sun et al., 2026) and SemEval-2014 (Pontiki et al., 2014) show that STAR-OPD consistently improves over both off-policy baselines and a strong general on-policy baseline. With Qwen3-4B, it reduces target halluci-nation from 9.75% to 7.22% and yields the largest gains on structurally hard reviews, while also im-proving deployment efficiency. 
+
+Contributions: 
+
+• We identify structured aspect cascade , a task-specific failure mode in distilled ABSA extrac-tion centered on target–aspect binding and target hallucination. • We propose STAR-OPD, an instantiation of generic on-policy distillation for ABSA quadru-ple extraction with cascade-aware rewards for binding consistency, target grounding, and aspect disambiguation. • We show consistent gains over off-policy and generic on-policy baselines on E-ABSA20K and SemEval-2014, especially on structurally hard cases. 
+
+2 Related Work 
+
+Aspect-Based Sentiment Analysis. ABSA has progressed from aspect-level classification (Pon-tiki et al., 2014) to triplet (Peng et al., 2020) and quadruple extraction (Zhang et al., 2021; Cai et al., 2021). Recent generative and LLM-based methods (Scaria et al., 2024; Wang et al., 2023; Hu et al., 2022) perform well, but existing quadruple extrac-tion work does not study the structural dependency and distillation-specific error propagation issues that arise in multi-quadruple reviews. 
+
+LLM Knowledge Distillation. SeqKD (Kim and Rush, 2016) distills teacher outputs off-policy and suffers from train–test mismatch. Recent on-policy methods address this by optimizing on student-generated sequences, including MiniLLM (Gu et al., 2024), GKD (Agarwal et al., 2024), and DistiLLM (Ko et al., 2024). Subsequent work further extends this framework, including G-OPD (Yang et al., 2026), entropy-aware distillation (Jin et al., 2026), and RLKD (Xu et al., 2026); CoT distillation (Magister et al., 2023; Ho et al., 2023) transfers reasoning traces but has not been studied for structured extraction. However, these methods are designed for general text generation and op-timize generic sequence-level objectives, without modeling field-level binding constraints or depen-dency structure in quadruple extraction. Rather than proposing a new generic on-policy distilla-tion principle, our method instantiates this family for ABSA quadruple extraction with set-structured, cascade-aware rewards that provide task-specific structural credit assignment for binding consis-tency, target grounding, and fine-grained aspect disambiguation. 
+
+Error Propagation in Structured Prediction. 
+
+Prior work on exposure bias (Bengio et al., 2015) and error propagation in structured prediction (Finkel et al., 2006) has shown that training– inference mismatch can amplify upstream mistakes. We extend this perspective to quadruple extraction distillation, where errors at the target–aspect in-terface act as a structural bottleneck that corrupts downstream fields within a single quadruple. 
+
+3 Problem Analysis 
+
+3.1 Task Structure and Failure Mode 
+
+Given a review text x, the goal of ABSA quadruple extraction is to predict a set of sentiment quadru-ples Q(x) = {(ti, a i, o i, s i)}Ki=1 , where ti is either a generic product tag or a target mention grounded in the review text, ai ∈ C is a fine-grained aspect category from a closed taxonomy, oi is an opin-ion span, and si ∈ { pos , neu , neg } is sentiment polarity. Quadruple extraction is structurally chal-lenging because each review may contain multiple tuples and the fields are semantically interdepen-dent. Among these fields, the target–aspect inter-face is especially critical because it determines how downstream opinion and sentiment should be inter-preted within each tuple. Detailed label definitions, target hierarchy, and dataset statistics are provided in Appendix A. To understand where distilled models fail on this task, we conduct a pilot diagnostic compari-son between our strong CoT teacher and a smaller direct model on E-ABSA20K-Hard. 1 We find that the smaller model is already close to the teacher when evaluation considers target identi-fication alone (91.0% vs. 97.6%), a gap of only 6.6 percentage points. However, once correct-ness requires preserving each target together with its aspect, the gap widens sharply to 30.5 points (50.6% vs. 81.1%). The same pattern continues downstream: when sentiment must also be correct, the gap further increases to 36.1 points (42.5% vs. 78.6%), and full quadruple correctness remains 36.3 points lower for the smaller model (40.0% vs. 76.3%). Viewed relatively, the smaller model retains 93.2% of teacher performance for target identification alone, but only 62.4% once correct target–aspect binding is required. This indicates that the main bottleneck is not target grounding itself, but maintaining valid target–aspect structure under fine-grained aspect ambiguity. The smaller model also exhibits a noticeably higher target hallucination rate, showing that the problem is not merely choosing the wrong aspect for an existing target, but also entering structurally invalid states with fabricated non-grounded targets. We refer to this failure pattern as structured as-pect cascade . It is centered on the target–aspect interface and manifests primarily as broken target– aspect bindings and hallucinated targets. Once such an invalid state is entered, downstream fields are conditioned on an incorrect structural interpretation of the tuple, which reduces full-quadruple correct-ness even when local sentiment expressions remain 
+
+> 1The teacher here is the same high-quality 32B model later used for pseudo-label generation and distillation; preparation details are given in Appendix D. The smaller direct model is a 4B direct baseline trained without on-policy distillation.
+
+plausible. A second pilot with a SeqKD baseline exhibits the same pattern: target identification remains rela-tively strong, but performance drops sharply once target–aspect correctness is required, and 8.1% of correctly identified target–aspect pairs still receive an incorrect sentiment label. Together, these observations suggest that the dominant failure mode of distilled ABSA extrac-tion is not generic sequence noise, but structural corruption at the target–aspect interface. All val-ues above are micro-averaged F1 unless otherwise specified; detailed statistics and metric definitions are given in Appendix B. 
+
+3.2 Why Off-Policy Distillation Is Insufficient 
+
+Off-policy distillation supervises the student on teacher-generated trajectories, which are over-whelmingly structurally valid. At inference time, however, the student conditions on its own predic-tions and may enter states with incorrect target– aspect bindings or hallucinated targets. Because these student-induced structural states are largely absent during training, off-policy imitation pro-vides little direct signal for correcting them. This mismatch is especially harmful in ABSA quadru-ple extraction, where an early structural mistake changes the semantic interpretation of the remain-ing fields rather than merely degrading local token accuracy. An effective solution therefore needs both to expose the student to its own trajectories and to provide feedback at the level of tuple struc-ture, especially around the target–aspect interface. 
+
+4 Method 
+
+4.1 Overview 
+
+To address the off-policy mismatch identified in Section 3.2, we propose STAR-OPD, which builds on generic on-policy distillation by training on student rollouts and applying structured aspect-cascade-aware rewards at the tuple level, especially for incorrect target–aspect bindings and halluci-nated targets. In practice, we first prepare a high-quality CoT teacher for pseudo-label generation and filtering, then optimize the student on-policy using stu-dent rollouts, reverse-KL distillation, and structure-aware rewards, with difficulty-aware sampling and replay as lightweight stabilizers (Appendix D, E). Figure 2: Overview of STAR-OPD. We first prepare a high-quality CoT teacher and generate filtered pseudo-labels for quadruple extraction. We then train the student on-policy under its own rollouts, using cascade-aware rewards to correct target–aspect binding errors and hallucinated targets. 
+
+4.2 On-Policy Cascade-Aware Distillation 
+
+Let πT denote the teacher policy, πS the student policy, and πref the frozen reference policy ini-tialized from the student before on-policy updates. Given an input review x, standard off-policy dis-tillation optimizes the student only on teacher-generated trajectories. In STAR-OPD, following generic on-policy distillation, the student is opti-mized on its own sampled outputs: 
+
+ˆy ∼ πS (· | x).
+
+This exposes training to the same student-induced and often structurally invalid states that occur at inference time, including incorrect target–aspect bindings and hallucinated targets. We optimize the student with a reward-weighted on-policy distillation objective: 
+
+L = LrKL + βLref , (1) where α(x, ˆy) = w(R(x, ˆy)) denotes the reward-derived rollout weight, 
+
+LrKL = Eˆy∼πS
+
+
+
+α(x, ˆy) log πS (ˆ y | x)
+
+πT (ˆ y | x)
+
+
+
+, (2) and 
+
+Lref = Eˆy∼πS
+
+
+
+log πS (ˆ y | x)
+
+πref (ˆ y | x)
+
+
+
+. (3) Here R(x, ˆy) is a cascade-aware structural re-ward, and w(·) maps the batch-normalized reward to a non-negative rollout weight (the exact trans-formation is given in Appendix E.3), and β con-trols the strength of reference regularization. In-tuitively, higher-reward rollouts receive stronger teacher-aligned updates, while low-reward rollouts contribute less. The reverse-KL term favors struc-turally valid teacher-supported outputs, and the ref-erence regularizer stabilizes on-policy updates. On-policy exposure alone, however, does not specify which structural property of a rollout should be corrected. We therefore define a cascade-aware reward over student outputs: 
+
+R(x, ˆy) = X
+
+> k
+
+λk(x)Rk(x, ˆy), (4) where each component reward targets a distinct structural failure mode of quadruple extraction. In practice, we normalize the raw reward within each batch and transform it into a non-negative rollout weight. This design turns on-policy exposure into targeted structural correction: the student is trained on its own trajectories, but updates are biased to-ward rollouts that better preserve target–aspect con-sistency and target grounding. 
+
+4.3 Cascade-Aware Rewards 
+
+Our reward design follows the structural failures identified in Section 3. Because ABSA quadruple extraction is evaluated as an unordered set predic-tion problem, rewards should reflect tuple-set struc-ture rather than generation order. We therefore com-pute all reward components after optimal bipartite matching between predicted and gold quadruples, making reward computation invariant to generation order and better aligned with set-level evaluation. The reward focuses on three dominant issues: incor-rect target–aspect binding, hallucinated targets, and ambiguity among fine-grained aspect categories. 
+
+Base matching reward. We first define a set-level alignment reward that measures overall struc-tural compatibility between predicted and gold quadruples. Let Q∗ = {q∗ 
+
+> i
+
+}K∗ 
+
+> i=1
+
+denote the gold quadruples and ˆQ = {ˆqj } ˆKj=1 the predicted quadru-ples. For each gold–prediction pair, we define            
+
+> Sij =13
+> h
+> 1[t∗
+> i= ˆ tj] + 1[a∗
+> i= ˆ aj] + 1[s∗
+> i= ˆ sj]
+> i
+> ,
+
+(5) and obtain an optimal one-to-one alignment M us-ing the Hungarian algorithm. The resulting reward is 
+
+Rbase (x, ˆy) = 1
+
+K∗
+
+X
+
+> (i,j )∈M
+
+Sij . (6) This term provides a global set-level signal for over-all tuple quality. 
+
+Binding reward. Our core reward directly tar-gets the bottleneck at the target–aspect interface:          
+
+> Rbind (x,ˆy) = 1
+> |M| +ε
+> P
+> (i,j )∈M 1[t∗
+> i= ˆ tj]1[a∗
+> i= ˆ aj].
+
+(7) Unlike Rbase , Rbind gives credit only when target and aspect are jointly correct, directly targeting the main structural bottleneck under student rollouts. 
+
+Hallucination penalty. To suppress fabricated non-PRODUCT targets, we define a grounded hallu-cination reward:              
+
+> Rhall (x,ˆy) = ⊮[|ˆQ| >0] ·
+> 
+> 1−
+> P
+> ˆqj∈ˆQHall t(ˆ qj,x)
+> |ˆQ|
+> 
+> ,
+
+(8) where ⊮[·] is the indicator function, and 
+
+Hall t(ˆ qj , x) ∈ { 0, 1} indicates that the predicted quadruple ˆqj contains a non-PRODUCT target whose entity span cannot be grounded (i.e., is absent) in the review text x.Crucially, the indicator ⊮[| ˆQ| > 0] prevents the student model from exploiting a trivial reward-hacking shortcut—specifically, generating empty predictions to mathematically bypass the halluci-nation penalty. This formulation ensures that Rhall 
+
+acts as a rigorous grounding constraint, assigning a reward of 1.0 only when the student generates a non-empty set of predictions that are entirely grounded in the source text. 
+
+Category reward. Hard matching alone provides limited guidance when several aspect labels are semantically adjacent. To preserve fine-grained teacher supervision within the aspect taxonomy, we add a teacher-support reward over the student-predicted aspect category: 
+
+Rcat (x, ˆy) = 1
+
+> |M| +ε
+
+P 
+
+> (i,j )∈M
+
+PT (ˆ aj | x, ctx j ), (9) where ˆaj is the student-predicted aspect in the aligned tuple, ctx j is the student decoding context at which the aspect for the j-th predicted tuple is produced, and PT (·) is the teacher distribution over the aspect taxonomy. In practice, PT (· | x, ctx j )
+
+is obtained by a lightweight teacher scoring step under the student rollout context at the aspect pre-diction step, after restricting and normalizing the logits over the domain taxonomy; details are given in Appendix E. This term complements the discrete binding reward with a softer signal over nearby as-pect categories. 
+
+Additional stabilizers. We further include a lightweight format-validity reward and use input-adaptive weighting, with stronger emphasis on binding consistency and hallucination suppression for reviews identified as likely product-part cases based on teacher pseudo-labels. The full cascade-aware reward is therefore      
+
+> R(x,ˆy) = P
+> k∈{ base, bind, hall, cat, fmt }λk(x)Rk(x,ˆy).
+
+(10) where the input-dependent coefficients λk(x)
+
+control the relative contribution of each compo-nent. Among these rewards, Rbind and Rhall are the most important. The former directly targets the target–aspect interface where structured aspect cas-cade is centered, while the latter suppresses hal-lucinated targets that invalidate the entire tuple. On-policy exposure and cascade-aware rewards are complementary: the former lets the student visit its own erroneous structural states, while the latter pro-vides explicit credit assignment over which struc-tural property of the rollout should be corrected. Detailed reward weights and training settings are given in Appendix E. Because the reward is rule-based, a natural con-cern is shortcut behavior; we discuss this further in Appendix E.4. 
+
+5 Experiments 
+
+We design our experiments to answer three ques-tions: (Q1) Does STAR-OPD improve overall dis-tilled ABSA extraction quality over off-policy and generic on-policy baselines? (Q2) Does it specifi-cally reduce the structural failure modes identified in Section 3, namely the target–aspect bottleneck and target hallucination? (Q3) Are the gains largest on reviews where structural ambiguity is strongest? 
+
+5.1 Setup Datasets. We evaluate on E-ABSA20K (Sun et al., 2026), a 20K-review benchmark spanning four e-commerce domains, and SemEval-2014 (Pontiki et al., 2014) (Restaurant and Laptop) for cross-domain validation. We adopt E-ABSA20K as the primary benchmark for this study, as its longer reviews and higher tuple density make target–aspect binding errors and target hallucina-tion substantially more frequent than in earlier ABSA settings. 
+
+Baselines. Unless otherwise specified, all stu-dent methods use Qwen3-4B. We compare against five baselines. Direct-SFT fine-tunes the stu-dent on filtered teacher-produced pseudo-labels as ordinary supervision targets. SeqKD (Kim and Rush, 2016) is the classical off-policy sequence-distillation baseline, training the student to imitate complete teacher-generated output sequences as hard targets. Direct-SFT treats teacher outputs as ordinary supervised targets, whereas SeqKD is re-ported as the canonical sequence-level off-policy distillation baseline. 
+
+GKD (Agarwal et al., 2024) is a general distil-lation baseline that combines off-policy and on-policy learning, training the student on both fixed target sequences and self-generated outputs with teacher feedback. 
+
+MiniLLM (Gu et al., 2024) is a strong general on-policy reverse-KL distillation method without task-specific structural rewards. We also report the 
+
+Teacher as reference. 
+
+G-OPD (Yang et al., 2026) is a generalized on-policy distillation framework that extends standard OPD with a reward scaling factor and a flexible reference model, enabling stronger student updates and, in some settings, performance beyond the teacher. GKD, MiniLLM, and G-OPD all represent generic on-policy distillation baselines without ABSA-specific structural reward design. 
+
+Evaluation metrics. Our primary metric is 
+
+Quad-F1 , with Hungarian matching over target, aspect, and sentiment, followed by opinion evalua-tion using a fuzzy character-level criterion (CharF1 with threshold τ =0 .5) to avoid over-penalizing mi-nor boundary deviations. We additionally report T-F1 , TA-F1 , TAS-F1 ,and T-Hall for structural diagnosis (Figure 3). For-mal definitions of all metrics are given in Ap-pendix B. 
+
+Implementation details. Detailed optimization settings, reward-weighting details, hardware con-figuration, and runtime statistics are reported in Appendix E. 
+
+5.2 Main Results 
+
+Table 1 reports the overall results on E-ABSA20K and SemEval-2014. STAR-OPD consistently improves over the off-policy baselines and also outperforms the generic on-policy baselines, including MiniLLM and G-OPD, on the more structurally demanding E-ABSA20K benchmark. On SemEval-2014, the gains over the generic on-policy baselines are smaller, and statistical sig-nificance is less consistent. We attribute this to the simpler review structure and lower tuple density of SemEval, which leave less room for structured cascade and therefore reduce the advantage of task-specific structural rewards. For Qwen3-4B, STAR-OPD substantially nar-rows the gap to the 32B teacher while retaining the efficiency advantage of the smaller model, and the same trend transfers to the 1.7B student. 
+
+5.3 Reducing Structured Cascade 
+
+To test whether STAR-OPD reduces the central failure mode identified in Section 3, Figure 3 re-ports field-level performance together with target hallucination rate. Across all students, target-only performance is already strong, but the much larger drop from T-F1 to TA-F1 confirms that the main bottleneck lies at the target–aspect interface, with further declines to TAS-F1 and Quad-F1 showing downstream effects on sentiment and opinion prediction. Compared with SeqKD, STAR-OPD improves every stage of this progression, with the largest gain at the target–aspect interface, substantially reducing the T–TA gap. Figure 3(b) further shows that STAR-OPD low-ers target hallucination from 9.75% to 7.22%, sug-gesting improved structural validity rather than Table 1: Main results on E-ABSA20K and SemEval-2014 (Micro F1). Best student in bold ; runner-up underlined. 
+
+†: significantly better than MiniLLM ( p< 0.05 , paired bootstrap).                                                                                      
+
+> E-ABSA20K SemEval-2014 Method WomenBags Dresses Makeup Furniture Restaurant Laptop
+> Teacher 0.756 0.762 0.757 0.812 0.746 0.516
+> Student: Qwen3-4B
+> Direct-SFT 0.685 0.691 0.692 0.720 0.685 0.470 SeqKD 0.687 0.695 0.699 0.724 0.715 0.468 GKD 0.689 0.699 0.704 0.727 0.719 0.471 MiniLLM 0.705 0.711 0.705 0.738 0.728 0.481 G-OPD 0.711 0.713 0.711 0.741 0.728 0.480
+> STAR-OPD 0.739 †0.750 †0.726 †0.771 †0.732 0.487 Student: Qwen3-1.7B
+> Direct-SFT 0.657 0.661 0.637 0.685 0.553 0.402 SeqKD 0.666 0.664 0.647 0.702 0.570 0.405 GKD 0.671 0.673 0.652 0.705 0.580 0.412 MiniLLM 0.694 0.695 0.660 0.716 0.608 0.421 G-OPD 0.699 0.702 0.662 0.717 0.607 0.421
+> STAR-OPD 0.702 †0.707 †0.673 †0.721 †0.614 †0.425
+
+Figure 3: Reducing structured aspect cascade on E-ABSA20K Test. (a) Performance at increasing levels of structural completeness: T-F1, TA-F1, TAS-F1, and Quad-F1. (b) Target hallucination rate (T-Hall; lower is better). STAR-OPD improves all stages of structural correctness, with the largest gain at the target–aspect interface, while reducing hallucinated targets. 
+
+merely surface-level imitation. 
+
+5.4 On-Policy and Reward Ablations 
+
+Table 2 evaluates the contributions of on-policy exposure and cascade-aware rewards. Removing on-policy training causes the largest drop, confirming that student rollouts are essential for covering the structurally invalid states absent from off-policy teacher supervision. Removing re-ward shaping and retaining only plain on-policy distillation also leads to a clear degradation, show-ing that on-policy exposure alone is not sufficient without explicit structural credit assignment. We further compare against a collapsed scalar reward variant that merges the main structural 
+
+Table 2: Ablation of on-policy design choices and cascade-aware rewards on E-ABSA20K Test. F1 de-notes micro Quad-F1 over the four E-ABSA20K test domains. ∆F1 is relative to full STAR-OPD .                            
+
+> Variant F1 ∆F1 STAR-OPD (full) 0.747 —
+> On-policy mechanism
+> w/o On-Policy 0.702 −0.045 w/o Rewards 0.716 −0.031
+> Reward decomposition
+> Collapsed scalar reward 0.734 −0.013
+> Cascade-aware rewards
+> w/o Rbind 0.729 −0.018 w/o Rhall 0.737 −0.010 w/o Rcat 0.738 −0.009 w/o Rfmt 0.735 −0.012 w/o Radap 0.737 −0.010
+> Matching strategy
+> Greedy (vs. Hungarian) 0.735 −0.012
+
+signals into a single outcome-level score without component-specific weighting (Appendix E.2). Its weaker performance indicates that decomposing binding, grounding, and category support provides more effective structural credit assignment than a single undifferentiated reward. Among reward terms, removing the binding re-ward Rbind causes the largest performance drop, showing that correcting target–aspect binding er-rors is central to the method. Removing Rhall , Rcat ,
+
+Rfmt , or Radap also degrades performance, indicat-ing that suppressing non-grounded targets, preserv-ing fine-grained aspect supervision, stabilizing for-Table 3: Hard-sample F1 on E-ABSA20K-Hard. PP: product-part mentions; Sarc.: colloquial sarcasm; Cont.: contrastive sentences; Impl.: implicit opinion expres-sions.                                 
+
+> Method PP Sarc. Cont. Impl. Teacher 0.687 0.717 0.722 0.723 Direct-SFT 0.632 0.664 0.657 0.679 SeqKD 0.633 0.678 0.671 0.680 GKD 0.635 0.678 0.672 0.683 MiniLLM 0.643 0.689 0.687 0.699 G-OPD 0.644 0.692 0.686 0.709
+> STAR-OPD 0.665 0.705 0.699 0.710
+
+mat validity, and emphasizing structurally difficult cases are all beneficial. Finally, replacing Hungarian matching with greedy matching also degrades performance, show-ing that order-invariant set-level alignment is impor-tant for assigning structurally meaningful rewards. These results show that on-policy exposure and structure-aware rewards are complementary: the former exposes student error states, and the latter provides explicit structural credit assignment. This is consistent with the gap between MiniLLM and STAR-OPD in Table 1. 
+
+5.5 Performance on Hard Cases 
+
+We further evaluate on E-ABSA20K-Hard, where structural ambiguity most strongly amplifies cas-cade failures. Table 3 shows that STAR-OPD achieves the best student performance on all hard subsets, with the largest gains on product-part cases and consistent improvements on contrastive and implicit-opinion reviews. Generic on-policy baselines such as GKD and G-OPD also improve over off-policy distillation on these subsets, but re-main less effective than STAR-OPD on the most structure-sensitive cases. Because aggregate scores do not reveal how dif-ferent distillation strategies fail, Figure 4 presents a representative product-part example: SeqKD pre-serves the grounded part target but drifts in target– aspect binding, MiniLLM generates a plausible yet non-grounded target, and STAR-OPD restores the intended grounded target together with its fine-grained aspect. The qualitative example in Figure 4 highlights how the baselines fail differently under product-part ambiguity. SeqKD preserves the observed part mention but drifts to a neighboring aspect, whereas MiniLLM produces a plausible yet non-grounded part target. In contrast, STAR-OPD                       
+
+> Qualitative case: product-part (womenbags) Review The bag looks elegant, but the zipper got stuck on the second day.
+> Gold (PRODUCT:bag ,Design Aesthetic ,looks ele-gant ,pos ); ( PRODUCT PART:zipper ,Hardware Quality ,got stuck ,neg )
+> SeqKD (PRODUCT PART:zipper ,Ease of Use ,got stuck ,neg ) [binding drift]
+> MiniLLM (PRODUCT PART:handle ,Hardware Quality ,
+> got stuck ,neg ) [hallucinated target]
+> STAR-OPD
+> (PRODUCT PART:zipper ,Hardware Quality ,
+> got stuck ,neg ) [correct grounding + binding]
+
+Figure 4: Representative qualitative case from E-ABSA20K-Hard. SeqKD preserves the grounded target but drifts in aspect binding, whereas MiniLLM gener-ates a plausible yet non-grounded part target. STAR-OPD restores both correct grounding and part-specific aspect binding. Additional cases are given in Ap-pendix G. 
+
+recovers the intended grounded target together with its part-specific aspect, illustrating why its gains are largest on hard subsets where target granularity and aspect assignment are tightly coupled. 
+
+6 Conclusion 
+
+We studied why distillation is brittle for ABSA quadruple extraction and found that the main chal-lenge is not teacher imitation alone, but recovery from student-induced structural states. In this task, the most damaging failures are centered on the target–aspect interface, where broken bindings and hallucinated targets degrade downstream tuple cor-rectness. STAR-OPD addresses this mismatch by building on generic on-policy distillation and adding cascade-aware rewards for binding consis-tency and target grounding. Across E-ABSA20K and SemEval-2014, this design consistently im-proves distilled students, reduces hallucination, and yields the largest gains on structurally hard reviews. More broadly, our results suggest that distilla-tion for structured extraction should be designed around inference-time student states rather than teacher-only trajectories. Our rewards operate at the structured outcome level rather than as token-level process rewards, which is natural for un-ordered quadruple extraction. Exploring finer-grained process-style rewards is an interesting di-rection for future work. 
+
+7 Limitations 
+
+Our study has several limitations. First, although we evaluate on both E-ABSA20K and SemEval-2014, the analysis is centered on ABSA quadru-ple extraction, especially in e-commerce reviews, so the generality of STAR-OPD to other struc-tured extraction settings remains to be validated. Second, our reward design operates at the struc-tured outcome level after generation rather than as a token-level or process-level reward, which may limit earlier intervention during decoding. Third, the method depends on the quality of the teacher and pseudo-label filtering pipeline, and our hard-subset analyses are intended as diagnostic evidence of failure modes rather than the sole basis for broad statistical claims. 
+
+Potential Risks. We do not identify severe direct risks beyond those typical of sentiment analysis systems, but deployment may amplify annotation biases or residual errors in target–aspect binding and target grounding. In practical settings, such er-rors could lead to incorrect summaries of user opin-ions or mischaracterization of product attributes, so the method is better viewed as a research and as-sistive analysis tool rather than a fully autonomous high-stakes decision system. 
+
+References 
+
+Rishabh Agarwal, Nino Vieillard, Yongchao Zhou, Pi-otr Stanczyk, Sabela Ramos Garea, Matthieu Geist, and Olivier Bachem. 2024. On-policy distillation of language models: Learning from self-generated mistakes. In The Twelfth International Conference on Learning Representations .Samy Bengio, Oriol Vinyals, Navdeep Jaitly, and Noam Shazeer. 2015. Scheduled sampling for sequence prediction with recurrent neural networks. In Ad-vances in Neural Information Processing Systems ,volume 28. Curran Associates, Inc. Hongjie Cai, Rui Xia, and Jianfei Yu. 2021. Aspect-category-opinion-sentiment quadruple extraction with implicit aspects and opinions. In Proceedings of the 59th Annual Meeting of the Association for Computational Linguistics and the 11th International Joint Conference on Natural Language Processing (ACL-IJCNLP 2021) , pages 340–350, Online. Asso-ciation for Computational Linguistics. Jenny Rose Finkel, Christopher D. Manning, and An-drew Y. Ng. 2006. Solving the problem of cascading errors: Approximate Bayesian inference for linguis-tic annotation pipelines. In Proceedings of the 2006 Conference on Empirical Methods in Natural Lan-guage Processing (EMNLP 2006) , pages 618–626, Sydney, Australia. Association for Computational Linguistics. Yuxian Gu, Li Dong, Furu Wei, and Minlie Huang. 2024. Minillm: Knowledge distillation of large language models. In The Twelfth International Conference on Learning Representations, ICLR 2024, Vienna, Austria, May 7-11, 2024 . OpenReview.net. Namgyu Ho, Laura Schmid, and Se-Young Yun. 2023. Large language models are reasoning teachers. In 
+
+Proceedings of the 61st Annual Meeting of the Asso-ciation for Computational Linguistics (ACL 2023) ,pages 14852–14882, Toronto, Canada. Association for Computational Linguistics. Mengting Hu, Yike Wu, Hang Gao, Yinhao Bai, and Shiwan Zhao. 2022. Improving aspect sentiment quad prediction via template-order data augmenta-tion. In Proceedings of the 2022 Conference on Em-pirical Methods in Natural Language Processing ,pages 7889–7900, Abu Dhabi, United Arab Emirates. Association for Computational Linguistics. Woogyeol Jin, Taywon Min, Yongjin Yang, Swanand Ravindra Kadhe, Yi Zhou, Dennis Wei, Nathalie Baracaldo, and Kimin Lee. 2026. Entropy-aware on-policy distillation of language models. In The 1st Workshop on Scaling Post-training for LLMs .Yoon Kim and Alexander M. Rush. 2016. Sequence-level knowledge distillation. In Proceedings of the 2016 Conference on Empirical Methods in Natural Language Processing (EMNLP 2016) , pages 1317– 1327, Austin, Texas. Association for Computational Linguistics. Jongwoo Ko, Sungnyun Kim, Tianyi Chen, and Se-Young Yun. 2024. Distillm: towards streamlined distillation for large language models. In Proceed-ings of the 41st International Conference on Machine Learning , ICML’24. JMLR.org. Woosuk Kwon, Zhuohan Li, Siyuan Zhuang, Ying Sheng, Lianmin Zheng, Cody Hao Yu, Joseph Gon-zalez, Hao Zhang, and Ion Stoica. 2023. Efficient memory management for large language model serv-ing with pagedattention. In Proceedings of the 29th Symposium on Operating Systems Principles , SOSP ’23, page 611–626, New York, NY, USA. Association for Computing Machinery. Lucie Charlotte Magister, Jonathan Mallinson, Jakub Adamek, Eric Malmi, and Aliaksei Severyn. 2023. Teaching small language models to reason. In Pro-ceedings of the 61st Annual Meeting of the Associa-tion for Computational Linguistics (Volume 2: Short Papers) , pages 1773–1781, Toronto, Canada. Associ-ation for Computational Linguistics. Haiyun Peng, Lu Xu, Lidong Bing, Fei Huang, Wei Lu, and Luo Si. 2020. Knowing what, how and why: A near complete solution for aspect-based sentiment analysis. In Proceedings of the 34th AAAI Con-ference on Artificial Intelligence (AAAI 2020) , vol-ume 34, pages 8864–8871, New York, USA. AAAI Press. Maria Pontiki, Dimitris Galanis, John Pavlopoulos, Har-ris Papageorgiou, Ion Androutsopoulos, and Suresh Manandhar. 2014. SemEval-2014 task 4: Aspect based sentiment analysis. In Proceedings of the 8th International Workshop on Semantic Evaluation (Se-mEval 2014) , pages 27–35, Dublin, Ireland. Associa-tion for Computational Linguistics. Kevin Scaria, Himanshu Gupta, Siddharth Goyal, Saurabh Sawant, Swaroop Mishra, and Chitta Baral. 2024. InstructABSA: Instruction learning for aspect based sentiment analysis. In Proceedings of the 2024 Conference of the North American Chapter of the Association for Computational Linguistics: Human Language Technologies (Volume 2: Short Papers) ,pages 720–736, Mexico City, Mexico. Association for Computational Linguistics. Tong Sun, Mingyang Ma, and Cheng Yu. 2026. E-ABSA20k: A dataset and propose-and-verify for aspect-based sentiment analysis in long e-commerce reviews. In The 64th Annual Meeting of the Associa-tion for Computational Linguistics .Yanshan Wang, Sunyang Fu, Chen Sun, Ying Li, Changlin Gong, Xun Chen, Liwei Wang, Fengjun Li, and Sunghwan Sohn. 2023. Is ChatGPT a good sentiment reasoner? a preliminary study. Preprint ,arXiv:2304.09582. Shicheng Xu, Liang Pang, Yunchang Zhu, Jia Gu, Zihao Wei, Jingcheng Deng, Feiyang Pan, Huawei Shen, and Xueqi Cheng. 2026. Rlkd: Distilling llms’ rea-soning via reinforcement learning. In AAAI , pages 34151–34159. Wenkai Yang, Weijie Liu, Ruobing Xie, Kai Yang, Saiy-ong Yang, and Yankai Lin. 2026. Learning beyond teacher: Generalized on-policy distillation with re-ward extrapolation. CoRR , abs/2602.12125. Wenxuan Zhang, Xin Li, Yang Deng, Lidong Bing, and Wai Lam. 2021. Towards generative aspect-based sentiment analysis. In Proceedings of the 59th An-nual Meeting of the Association for Computational Linguistics and the 11th International Joint Confer-ence on Natural Language Processing (ACL-IJCNLP 2021) , pages 504–510, Online. Association for Com-putational Linguistics. 
+
+A Task and Dataset Details 
+
+A.1 Full Task Definition 
+
+Given a review text x, the goal of ABSA quadruple extraction is to predict a set of sentiment quadru-ples 
+
+Q(x) = {qi}Ki=1 , qi = ( ti, a i, o i, s i),
+
+where each quadruple consists of a target ti, an aspect ai, an opinion span oi, and a sentiment label 
+
+si.The target field follows a structured hierarchy: 
+
+ti ∈ { PRODUCT , PRODUCT: xx ,
+
+PRODUCT PART: xx }. (11) where the entity xx must appear verbatim in the review text. The aspect field ai ∈ C is se-lected from a closed domain taxonomy with up to 
+
+|C| =42 fine-grained categories depending on the domain. The opinion field oi is a minimal con-tiguous span in the input, and the sentiment field 
+
+si ∈ { pos , neu , neg }.Compared with simpler ABSA formulations, quadruple extraction is structurally more challeng-ing because each review may contain multiple quadruples and each quadruple combines several heterogeneous prediction subproblems, including entity identification for targets, taxonomy classi-fication for aspects, span extraction for opinions, and polarity classification for sentiment. In par-ticular, the target–aspect interface forms the key structural bottleneck linking target grounding to downstream sentiment and opinion interpretation, making quadruple extraction especially vulnerable to structural error propagation. 
+
+A.2 Dataset Statistics 
+
+We conduct experiments on E-ABSA20K (Sun et al., 2026), a 20K-review benchmark spanning four e-commerce domains, and on SemEval-2014 (Pontiki et al., 2014) for cross-domain validation. The E-ABSA20K benchmark is substantially more challenging than earlier ABSA datasets because reviews are longer and contain multiple senti-ment quadruples. On average, each review in E-ABSA20K contains 6.0 quadruples, creating sub-stantially more opportunities for target confusion, aspect ambiguity, and structural binding errors than shorter benchmark settings. We additionally construct E-ABSA20K-Hard for fine-grained diagnosis. This subset contains re-views exhibiting at least one structurally difficult phenomenon, including product-part mentions, sar-casm cases, contrastive sentences, implicit opinion expressions. These phenomena are particularly use-ful for analyzing the failure modes of distilled mod-els because they amplify aspect ambiguity, target– aspect binding difficulty, and target hallucination. 
+
+A.3 Construction of E-ABSA20K-Hard 
+
+We define E-ABSA20K-Hard as the subset of re-views that contain at least one challenging phe-nomenon known to increase structural ambiguity in quadruple extraction. The subset includes the following categories: • Product-part mentions : reviews containing fine-grained product-part targets, which require the model to preserve target identity at a more spe-cific level than the generic product tag. • Colloquial sarcasm : reviews whose sentiment is expressed indirectly or ironically, often weak-ening the reliability of surface lexical cues. • Contrastive sentences : reviews containing dis-course structures such as but , where sentiment orientation may reverse across clauses and must be resolved in an aspect-sensitive way. • Implicit opinion expressions : reviews in which polarity must be inferred without explicit senti-ment words, increasing reliance on aspect seman-tics and context. These categories are used only for diagnostic evaluation and hard-case analysis. They are not required by the proposed method, but help reveal where structured aspect cascade is most severe. Be-cause these subsets are smaller and partially over-lapping, we treat the corresponding results as diag-nostic rather than as the primary basis for signifi-cance claims. 
+
+B Evaluation Details 
+
+B.1 Field-Level Matching Metrics 
+
+To analyze structural errors at different levels of completeness, we report four cumulative match-ing metrics: target-only F1 (T-F1), target–aspect F1 (TA-F1), target–aspect–sentiment F1 (TAS-F1), and quadruple F1 (Quad-F1). Let Q∗ = {q∗ 
+
+> i
+
+}K∗ 
+
+> i=1
+
+denote the gold quadruples and ˆQ = {ˆqj } ˆKj=1 denote the predicted quadruples, where each quadruple has the form q = ( t, a, o, s ).
+
+T-F1. A prediction is counted as correct under T-F1 if its target field matches a gold target after one-to-one alignment between predicted and gold quadruples. This metric measures target identifica-tion in isolation. 
+
+TA-F1. A prediction is counted as correct under TA-F1 if both the target and aspect fields match after alignment. This metric directly reflects the quality of target–aspect binding and is therefore central to diagnosing the bottleneck at the target– aspect interface. 
+
+TAS-F1. A prediction is counted as correct under TAS-F1 if the target, aspect, and sentiment fields all match after alignment. This metric captures structural correctness after downstream sentiment resolution. 
+
+Quad-F1. A prediction is counted as correct under Quad-F1 if the target, aspect, sentiment, and opinion fields all match after alignment, where opinion matching is evaluated with a fuzzy character-level criterion described below. This is the primary evaluation metric used in the main ex-periments. All F1 scores are reported as micro-averaged set-level F1 across the evaluation corpus. 
+
+B.2 Hungarian Matching for Set Prediction 
+
+Because each review may contain multiple pre-dicted and gold quadruples, evaluation is per-formed with one-to-one bipartite matching rather than by comparing outputs in generation order. We compute an optimal alignment between gold and predicted quadruples using the Hungarian algo-rithm. For a gold quadruple q∗ 
+
+> i
+
+and a predicted quadru-ple ˆqj , we define the structural similarity 
+
+Sij = 13
+
+
+
+1[t∗ 
+
+> i
+
+= ˆ tj ] + 1[a∗ 
+
+> i
+
+= ˆ aj ] + 1[s∗ 
+
+> i
+
+= ˆ sj ]
+
+
+
+,
+
+(12) and obtain an optimal one-to-one matching M ⊆ Q∗ × ˆQ that maximizes total similarity. After matching, precision, recall, and F1 are computed under the relevant correctness criterion: target-only matching for T-F1, joint target–aspect matching for TA-F1, joint target–aspect–sentiment matching for TAS-F1, and full quadruple matching for Quad-F1. We intentionally exclude opinion spans from the matching score used by the Hungarian algo-rithm. Because opinion extraction is evaluated with a fuzzy character-level criterion, incorporating it directly into the alignment objective may introduce unstable matches under minor boundary variation. Using target, aspect, and sentiment for alignment yields a more stable structural correspondence be-tween predicted and gold quadruples, while opin-ion correctness is still enforced afterward in Quad-F1 through the CharF1 threshold. Thus, opinion is excluded from alignment but not from final quadru-ple evaluation. 
+
+B.3 Opinion Matching 
+
+Opinion spans are evaluated with character-level F1 (CharF1), which is more robust than exact span matching to minor boundary deviations. For a gold opinion span o∗ 
+
+> i
+
+and a predicted opinion span ˆoj ,we compute 
+
+CharF1( o∗ 
+
+> i
+
+, ˆoj ),
+
+the character-level F1 score between the two spans after normalization. An aligned prediction is counted as opinion-correct if its opinion CharF1 exceeds a fixed thresh-old τ . Accordingly, a matched pair (q∗ 
+
+> i
+
+, ˆqj ) is counted as correct under Quad-F1 if 
+
+t∗ 
+
+> i
+
+= ˆ tj , a∗ 
+
+> i
+
+= ˆ aj , s∗ 
+
+> i
+
+= ˆ sj ,
+
+and 
+
+CharF1( o∗ 
+
+> i
+
+, ˆoj ) ≥ τ. 
+
+Unless otherwise specified, we use τ = 0 .5 in all experiments. 
+
+B.4 Target Hallucination Rate (T-Hall) 
+
+Target hallucination rate (T-Hall) measures the proportion of predicted quadruples whose non-
+
+PRODUCT target entity does not appear in the input review text. This metric is designed to capture a structurally severe failure mode in distilled quadru-ple extraction, where the model fabricates a target that cannot be grounded in the source review. Formally, let ˆQ = {ˆqj } ˆKj=1 be the predicted quadruples for input x, and let ˆtj denote the target field of ˆqj . We define an indicator 
+
+Hall t(ˆ qj , x) = 
+
+
+
+1, ˆtj̸ = PRODUCT 
+
+∧ ent(ˆ tj ) /∈ text( x),
+
+0, otherwise. where ent(ˆ tj ) extracts the entity span from the predicted target and text( x) denotes the normal-ized review text. The target hallucination rate is then 
+
+T-Hall( x) = |{ ˆqj : Hall t(ˆ qj , x) = 1 }| | ˆQ| + ε , (13) where ε is a small constant to avoid division by zero. Corpus-level T-Hall is obtained by averaging over the evaluation set. For targets of the form PRODUCT: xx or 
+
+PRODUCT PART: xx , the entity span xx is extracted and checked against the review text using exact substring matching after lowercasing and whites-pace normalization. A lower T-Hall indicates that predicted targets are better grounded in the review text. 
+
+C Additional Analysis of Structural Failure Modes 
+
+We observe that structured aspect cascade in dis-tilled quadruple extraction is centered on the target– aspect interface and manifests primarily in two ways: broken target–aspect bindings and halluci-nated targets. 
+
+Broken target–aspect bindings and downstream corruption. Because the fields in a quadruple are structurally interdependent, an incorrect aspect as-signment changes how the target is interpreted and can degrade downstream sentiment and opinion pre-diction. This explains why the largest performance drop occurs at the transition from target-only to target–aspect matching, and why additional degra-dation remains at the TAS-F1 and Quad-F1 levels even after partial structural correctness is achieved. 
+
+Hallucinated targets. In addition to misclassi-fying existing targets, small distilled models may fabricate non-PRODUCT entities that do not appear in the review text, especially at the product-part level. Such hallucinations are structurally severe: once the target itself is invalid, the entire quadruple becomes spurious and no downstream field can be correct. In the SeqKD baseline, the target halluci-nation rate reaches 9.75%, compared with 6.67% for the teacher (see Appendix B for the formal defi-nition of T-Hall). Taken together, these observations show that distilled quadruple extraction fails in a distinctly structured way. The main issue is not generic se-quence noise, but student errors that create invalid structural states at the target–aspect interface and thereby corrupt downstream tuple interpretation. 
+
+D Teacher Preparation and Quality Control 
+
+D.1 CoT Teacher Fine-Tuning 
+
+We use a Qwen3-32B model as the teacher. To im-prove the reliability of pseudo-label generation, we fine-tune the teacher with chain-of-thought (CoT) supervision so that it explicitly reasons over target identification, aspect assignment, opinion extrac-tion, and sentiment resolution before producing the final quadruples. Only the final quadruple out-puts are used as task targets for distillation; teacher reasoning traces are not distilled. Teacher distribu-tions may still be queried during training for reward computation (e.g., aspect-category support). The teacher is trained only on manually anno-tated training data. Development annotations are used for model selection, while test annotations are never used for teacher adaptation, pseudo-label generation, reward tuning, or student training. The resulting model is referred to as Teacher in the main paper. 
+
+D.2 Agreement with Expert Annotations 
+
+To ensure that the teacher provides reliable super-vision, we compare teacher predictions against human expert annotations on a held-out subset of E-ABSA20K-Hard. The subset was indepen-dently annotated by two domain annotators who were blind to model outputs. We report teacher– human agreement against the adjudicated labels. Human–human agreement on the same subset was 
+
+κ = 0 .89 , and disagreements were resolved by discussion with a third annotator. Table 4 reports agreement at the field level as well as overall Cohen’s κ. The Teacher achieves substantially higher agreement than a smaller direct model and reaches κ = 0 .92 , which we treat as sufficient quality for pseudo-label generation. These results support the use of the CoT teacher as the source of pseudo-label supervision in STAR-OPD.                
+
+> Table 4: Teacher quality against human expert annota-tions. κdenotes Cohen’s Kappa.
+> Field 32B CoT 4B Direct
+> Target agreement 97.5% 94.2% Aspect agreement 93.8% 81.6% Opinion agreement 94.1% 88.3% Sentiment agreement 95.3% 86.7% Overall κ0.92 0.81
+
+D.3 Pseudo-Label Generation and Filtering 
+
+Using the validated teacher, we generate pseudo-labels for the student training split. Because teacher outputs may still contain occasional formatting er-rors or structurally invalid extractions, we apply lightweight filtering before distillation. We retain only instances satisfying the following constraints: • Well-formed quadruples: each prediction must follow the required output schema and contain all four fields. • Valid aspect labels: the predicted aspect must belong to the domain-specific taxonomy C.• Valid sentiment labels: the predicted sentiment must be one of {pos , neu , neg }.• Grounded non-PRODUCT targets: when the pre-dicted target is not PRODUCT , the corresponding entity span must appear in the review text. • Duplicate removal: repeated identical quadru-ples for the same review are collapsed into a single instance. This filtering step is intended only to remove structurally invalid supervision. The correction of student-induced structural errors is still handled during on-policy training with cascade-aware re-wards. After filtering, we retain 70% of teacher-generated training instances overall. The domain-wise retention rates are broadly similar, remaining within 66%–73% across the four domains rather than concentrating on a single domain or review type. Pseudo-labels are generated only for the stu-dent training split. No evaluation annotations from the validation or test sets are used in pseudo-label generation or filtering. The E-ABSA20K-Hard sub-sets are used only for diagnostic evaluation and never for teacher or student training. 
+
+E Training Details 
+
+E.1 Reward Weights and Input-Adaptive Weighting 
+
+The total reward is defined as 
+
+R(x, ˆy) = X
+
+> k
+
+λk(x)Rk(x, ˆy),
+
+where the component rewards include base match-ing, target–aspect binding, hallucination suppres-sion, category supervision, and format validity. In practice, we assign larger relative weight to the binding reward and the hallucination penalty, since these two terms directly target the dominant structural failures identified in Section 3. The cate-gory reward is given moderate weight to preserve fine-grained aspect supervision, while the format reward receives only a small weight as a stabilizing term. All reward weights are selected on a held-out validation set. We selected these weights on the validation set by first fixing a stable default configuration and then varying each coefficient within a narrow range while monitoring Quad-F1, TA-F1, and T-Hall. We found the method to be relatively stable under mod-erate ( ±0.05 ) perturbations around the final values. We use the same default reward weights across Table 5: Reward weights used in STAR-OPD. Default weights are used unless the input is identified as a likely               
+
+> PRODUCT PART case based on teacher pseudo-labels.
+> Reward term Default PRODUCT PART case
+> λbase 0.20 0.15
+> λbind 0.30 0.35
+> λhall 0.25 0.30
+> λcat 0.20 0.15
+> λfmt 0.05 0.05
+
+all domains rather than tuning them separately per domain. To avoid over-tuning a five-way reward decom-position, we used a constrained local grid around a stable default configuration rather than an exhaus-tive combinatorial search. Specifically, we first fixed a default profile consistent with the structural diagnosis in Section 3, then varied one coefficient at a time while monitoring Quad-F1, TA-F1, and T-Hall on the validation set. This narrow search strategy was chosen to reduce the risk of overfit-ting to a particular validation distribution. In prac-tice, we did not observe severe instability from interactions among reward terms; the main trade-off was between stronger hard-constraint rewards (Rbind , R hall ) and softer category supervision ( Rcat ). We intentionally kept the final weights simple and low-dimensional so that the method remains inter-pretable and easy to reproduce. We further use lightweight input-adaptive weighting. For reviews identified as likely product-part cases based on teacher pseudo-labels, we in-crease the relative emphasis on binding consistency and hallucination suppression, since these cases are especially prone to target–aspect binding failures and fabricated part-level targets. 
+
+E.2 Collapsed Scalar Reward Variant 
+
+To test whether explicit reward decomposition is necessary, we additionally consider a collapsed scalar reward variant that merges the main struc-tural reward components into a single outcome-level score without component-specific weighting. We use a simple uniform average so that the com-parison isolates the value of explicit reward decom-position and component-specific weighting. Specifically, we replace the decomposed reward in Eq. (10) with 
+
+Rcollapsed (x, ˆy) = 14
+
+
+
+Rbase (x, ˆy) + Rbind (x, ˆy)+ Rhall (x, ˆy) + Rcat (x, ˆy)
+
+
+
+.
+
+(14) In this variant, we remove component-specific weighting and input-adaptive weighting, while keeping the rest of the on-policy optimization setup unchanged, including student rollouts, reverse-KL distillation, reference regularization, reward nor-malization, and the reward-to-weight transforma-tion w(·). The format-validity reward is omitted from this collapsed variant so that the comparison focuses on whether decomposing the main struc-tural signals for binding, grounding, and category supervision provides better credit assignment than a single undifferentiated reward. This variant preserves access to the same under-lying structural information as STAR-OPD, but discards the explicit decomposition used to bias updates toward specific failure modes. As reported in Table 2, the weaker performance of this vari-ant suggests that separating binding consistency, hallucination suppression, and category support yields more effective structural credit assignment than collapsing them into a single scalar outcome reward. 
+
+E.3 Reward-to-Weight Transformation 
+
+For each student rollout, STAR-OPD first com-putes the raw cascade-aware reward. For brevity, 
+
+Ri = R(xi, ˆyi) denotes the raw reward of the i-th rollout in the current batch. Because the absolute reward scale may vary across batches, we normal-ize rewards within each batch before converting them into rollout weights. Specifically, let μR and σR denote the mean and standard deviation of raw rewards in the current batch. We compute the normalized reward 
+
+˜Ri = Ri − μR
+
+σR + ϵ , (15) where ϵ is a small constant for numerical stability. The rollout weight is then defined as 
+
+αi = w(Ri) = clip 
+
+
+
+exp( ˜Ri/τ w), α min , α max 
+
+
+
+,
+
+(16) where τw is a temperature parameter controlling the sharpness of reward weighting, and αmin , α max 
+
+bound the rollout weight to avoid overly small or overly dominant updates. Figure 5: Training dynamics of the main reward com-ponents and corresponding validation structural metrics during STAR-OPD optimization. Left: Rbind and vali-dation TA-F1. Right: Rhall and validation T-Hall. The reward curves and validation metrics move in directions consistent with improved structural behavior and do not show obvious pathological late-stage divergence. 
+
+Unless otherwise specified, we use τw = 2 .0,
+
+αmin = 0 .2, αmax = 3 .0, and ϵ = 10 −6 in all ex-periments. This transformation preserves the order-ing of rollout quality, gives higher weight to better-structured student outputs, and improves training stability compared with using raw rewards directly. 
+
+E.4 Training Dynamics of Reward Components 
+
+To examine whether the rule-based rewards remain aligned with the intended structural objectives dur-ing training, we track the dynamics of the two main reward components together with their correspond-ing validation metrics. Figure 5 plots Rbind along-side validation TA-F1, and Rhall alongside valida-tion T-Hall. The increase in Rbind is accompanied by im-proved validation TA-F1, which is consistent with better target–aspect structural consistency. Simi-larly, Rhall rises sharply early in training and later fluctuates within a stable high-reward range, while validation T-Hall continues to decrease, indicating improved suppression of non-grounded target pre-dictions. We do not observe obvious late-stage reward inflation or instability together with metric degra-dation. Although this analysis does not formally exclude shortcut optimization, it provides evidence that the reward terms remain broadly aligned with the structural behaviors they are intended to encour-age. This interpretation is also consistent with the strongest gains of STAR-OPD on product-part and other structurally difficult subsets in Table 3. 
+
+E.5 Difficulty-Aware Sampling and Replay 
+
+To improve hard-case coverage under on-policy training, we use a lightweight difficulty-aware sam-pling strategy. Each training instance is assigned a difficulty score 
+
+d(x) = 1[PP ]+ 1[Sarc ]+ 1[Cont ]+ 1[Impl ], (17) where each indicator is derived from teacher pseudo-labels and lightweight heuristic signals cor-responding to the four hard phenomena; no diag-nostic evaluation labels are used for training. Sam-pling probability is then defined as 
+
+p(x) ∝ 1 + γ · d(x), (18) with γ = 0 .5 by default. Harder instances are sampled more frequently than easy ones. We maintain a replay buffer of low-reward stu-dent rollouts to revisit unresolved structural failures. A rollout (xi, ˆyi) is added to the buffer if its nor-malized reward ˜Ri < −0.5. The buffer stores up to 4,096 rollouts in a FIFO manner. During training, 20% of each batch is drawn from the replay buffer when available, and the remaining 80% is sampled from the training set. These replayed rollouts typically correspond to unresolved structural failures, such as incorrect target–aspect bindings or hallucinated targets, and help focus updates on the student states where structure-aware feedback is most needed. 
+
+E.6 Curriculum 
+
+To stabilize optimization, we use a simple curricu-lum on hard-sample exposure. During the first 30% of training steps, the probability of sampling from the difficulty-aware distribution is increased lin-early from 0.3 to 0.7; afterward, it is fixed at 0.7 for the remainder of training. This curriculum reduces early optimization noise while ensuring that the model eventually receives sufficient coverage of structurally difficult cases. 
+
+E.7 Optimization Hyperparameters 
+
+Unless otherwise specified, all student methods use Qwen3-4B as the default student and Qwen3-1.7B for scale analysis. On-policy distillation is run for 2K update iterations. Unless otherwise specified, each input con-tributes one student rollout per update step. We use a per-device training batch size of 4 with gradient accumulation over 2 steps on 4 GPUs, resulting in an effective batch size of 32 training instances per parameter update. The maximum generation length for student rollouts is set to 1024 new tokens. We use AdamW with a peak learning rate of 
+
+1 × 10 −5, weight decay of 0.01, and a cosine decay schedule with 5% warmup. The reference-policy regularization coefficient in Eq. (1) is set to β =0.1.For rollout generation, we use temperature 0.8 and top-p sampling with p = 0 .95 . Unless oth-erwise noted, all experiments use seed 42. For 
+
+Rcat , teacher scoring is performed only at the as-pect prediction step for the sampled student rollout, rather than over the full decoded sequence, to limit additional training overhead. 
+
+E.8 Hardware and Runtime 
+
+Teacher fine-tuning is conducted on 4 ×A100 80G GPUs for approximately 14 hours. On-policy stu-dent distillation is conducted on 4 ×A100 80G GPUs for about 24 hours, with teacher inference served by vLLM (Kwon et al., 2023). These numbers are reported to provide an approximate training-cost reference for STAR-OPD; inference-time efficiency comparisons are given separately in Appendix E.9. For evaluation, all reported numbers are aver-aged over three runs when applicable, and statis-tical significance is tested with paired bootstrap resampling at p < 0.05 .
+
+E.9 Inference Efficiency 
+
+To quantify the deployment advantage of distilled students, we measure inference efficiency on E-ABSA20K Test under the same decoding config-uration for teacher and student models. Table 6 reports the average end-to-end latency per review and review throughput on a single A100 80G GPU. The Qwen3-4B student distilled with STAR-OPD processes reviews 2.18 × faster than the Qwen3-32B teacher, while substantially narrow-ing the performance gap. The smaller 1.7B stu-dent is even faster, confirming the practical quality– efficiency advantage of distilled models for large-scale deployment. 
+
+F Training Algorithm G Additional Qualitative Cases 
+
+We provide additional qualitative examples to com-plement the hard-case results in the main text. The cases below cover all four hard phenomena used in E-ABSA20K-Hard: product-part mentions, col-loquial sarcasm, contrastive sentences, and im-plicit opinion expressions. Targets follow the same 
+
+Table 6: Inference efficiency on E-ABSA20K Test un-der the same decoding configuration. All models are evaluated on a single A100 80G GPU.                
+
+> Model Latency Reviews/s Speedup
+> Teacher †2.119 0.47 1.0 ×
+> STAR-OPD (4B) ‡0.971 1.03 2.18 ×
+> STAR-OPD (1.7B) ‡0.290 3.45 7.31 ×
+> †Qwen3-32B teacher model. ‡Qwen3 student models distilled via STAR-OPD.
+
+Algorithm 1 STAR-OPD : On-Policy Cascade-Aware Distillation                                                              
+
+> Require: Teacher policy πT, initial student policy πS, refer-ence policy πref ←πS, training set D
+> 1: Initialize replay buffer B ← ∅
+> 2: for each training iteration do
+> 3: Sample a batch Sfrom Dwith difficulty-aware sam-pling 4: Optionally mix in low-reward samples from B
+> 5: for each input xi∈ S do
+> 6: Sample a student rollout ˆyi∼πS(· | xi)
+> 7: Compute cascade-aware reward Riusing
+> Rbase , R bind , R hall , R cat , R fmt
+> 8: if Riis low then
+> 9: Add (xi,ˆyi)to B
+> 10: end if
+> 11: end for
+> 12: Normalize rewards within the batch 13: Convert normalized rewards to rollout weights αi=
+> w(Ri)
+> 14: Compute the reward-weighted on-policy objective
+> L=LrKL +βLref
+> 15: Update student parameters 16: end for
+> 17: return πS
+
+normalized schema used throughout the paper: 
+
+PRODUCT denotes an implicit product-level target, 
+
+PRODUCT:xx denotes an explicitly mentioned prod-uct target, and PRODUCT PART:xx denotes an ex-plicitly mentioned product-part. Across these cases, SeqKD typically remains locally plausible but drifts in target–aspect struc-ture once generation departs from teacher states. MiniLLM is more tolerant to local deviations, yet often backs off to coarser target/aspect structures or produces plausible but non-grounded targets. In contrast, STAR-OPD more reliably preserves tar-get grounding, fine-grained aspect bindings, and complete tuple structure. These examples mirror the quantitative hard-case trends in the main text. Product-part cases and contrastive sentences highlight structural target– aspect failures, including binding drift, target col-lapse, and error propagation across tuples. The (a) product-part (womenbags) Review The bag looks elegant, but the zipper got stuck on the second day. 
+
+Gold (PRODUCT:bag , Design Aesthetic , looks elegant , pos ); ( PRODUCT PART:zipper , Hardware Quality , got stuck , neg )
+
+SeqKD (PRODUCT PART:zipper , Ease of Use , got stuck , neg ) [binding drift] 
+
+MiniLLM (PRODUCT PART:handle , Hardware Quality , got stuck , neg ) [hallucinated target] 
+
+STAR-OPD (PRODUCT PART:zipper , Hardware Quality , got stuck , neg ) [correct grounding + binding] 
+
+(b) Contrast (furniture) Review The chair looks modern and fits my desk perfectly, but the seat feels hard and the wheels keep squeaking. 
+
+Gold (PRODUCT:chair , Appearance & Design , looks modern , pos ); ( PRODUCT:chair , Fit & Space Compatibility , fits my desk perfectly ,
+
+pos ); (PRODUCT PART:seat , Comfort , feels hard , neg ); ( PRODUCT PART:wheels , Noise Performance , keep squeaking , neg )
+
+SeqKD (PRODUCT PART:seat , Ergonomics , feels hard , neg ); ( PRODUCT PART:wheels , Ergonomics , keep squeaking , neg ) [error propaga-tion] 
+
+MiniLLM (PRODUCT:chair , Comfort , feels hard , neg ); ( PRODUCT:chair , Noise Performance , keep squeaking , neg ) [target collapse] 
+
+STAR-OPD (PRODUCT PART:seat , Comfort , feels hard , neg ); ( PRODUCT PART:wheels , Noise Performance , keep squeaking , neg ) [full structure preserved] 
+
+Figure 6: Additional qualitative cases: product-part and contrastive reviews. 
+
+(c) Sarcasm (makeup) Review Love how this “long-lasting” lipstick vanishes before I finish my coffee. 
+
+Gold (PRODUCT:lipstick , Longevity , vanishes before I finish my coffee , neg )
+
+SeqKD (PRODUCT:lipstick , Longevity , long-lasting , pos ) [surface cue imitation] 
+
+MiniLLM (PRODUCT:lipstick , Overall , vanishes before I finish my coffee , neg ) [coarse aspect fallback] 
+
+STAR-OPD (PRODUCT:lipstick , Longevity , vanishes before I finish my coffee , neg ) [fine-grained recovery] 
+
+(d) Implicit opinion (dresses) Review It zipped up fine, but I couldn’t sit down in it. 
+
+Gold (PRODUCT , Ease of Use , zipped up fine , pos ); ( PRODUCT , Comfort , couldn’t sit down in it , neg )
+
+SeqKD (PRODUCT , Fit , couldn’t sit down in it , neg ) [neighboring aspect confusion] 
+
+MiniLLM (PRODUCT , Overall Satisfaction , couldn’t sit down in it , neg ) [coarse aspect fallback] 
+
+STAR-OPD (PRODUCT , Comfort , couldn’t sit down in it , neg ) [correct implicit mapping] 
+
+Figure 7: Additional qualitative cases: sarcasm and implicit opinion reviews. 
+
+sarcasm and implicit opinion expressions further show that the gains of STAR-OPD do not come only from better local sentiment prediction, but also from more stable recovery of fine-grained aspect structure under ambiguous evidence. 
+
+H Full Prompt Template 
+
+You are an expert in fine-grained sentiment analysis for e-commerce product reviews. Task: Extract all aspect sentiment quadruples. Format: (target, aspect_category, opinion, sentiment) Target hierarchy: PRODUCT - product in general PRODUCT:XX - specific product type PRODUCT_PART:XX - specific product part !! Do NOT invent targets absent from text. Aspect: one from the predefined list. Opinion: minimal exact phrase from the review. Sentiment: positive | neutral | negative Rules: 1. Extract every applicable (target,aspect) pair. 2. One quadruple per (target,aspect) combination. 3. Keep opinion as shortest faithful text span. 4. Handle negation: do not assign positive sentiment to negated phrases. 5. Handle concession: assign separate quadruples with correct polarity to each clause. 6. Multi-product: assign each opinion to the correct target product. 7. Verify: all targets exist in review text; all aspects from predefined list only. <thinking> Step 1: List all target entities in the review. Step 2: Map each target to aspect categories. Step 3: Locate minimal opinion span for each. Step 4: Resolve sentiment under negation/concession. Step 5: Verify no invented targets; all aspects in predefined list. </thinking> <quadruples> [one quadruple per line] </quadruples> Review: "{{review_text}}" Aspect list: {{category_list}} 
+
+I Aspect Taxonomy Example 
+
+We provide the women’s bags taxonomy as a repre-sentative example of the fine-grained aspect space used in E-ABSA20K. The full flat list is provided to the model without grouping information. Table 7: Aspect taxonomy for women’s bags (34 cate-gories). 
+
+Theme Aspect Categories 
+
+Overall Overall Satisfaction Material Material Type, Material Quality, Material Accuracy, Water Resistance, Odor, Cleaning & Maintenance Appearance Design Aesthetic, Color Accuracy, Color Preference, Appearance Size Size Accuracy, Weight, Capacity, Shape Retention Hardware Hardware Quality, Hardware Design, Security Features Strap Strap Adjustability, Comfort Interior Interior Organization Build Construction Quality, Durability Commerce Price, Value for Money, Customer Service, Shipping Speed, Delivery Experience, Packaging, Return & Refund Policy Context Occasion Suitability, Brand Authenticity, Sizing Guidance Clarity, Accessories Included

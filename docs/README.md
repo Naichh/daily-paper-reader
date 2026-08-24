@@ -6,28 +6,26 @@
 </div>
 
 ## 每次日报
-- 最新运行日期：2026-08-23
-- 运行时间：2026-08-23 19:21:38 UTC
+- 最新运行日期：2026-08-24
+- 运行时间：2026-08-24 20:01:16 UTC
 - 运行状态：成功
-- 本次总论文数：1
+- 本次总论文数：2
 - 精读区：1
-- 速读区：0
+- 速读区：1
 
 ### 今日简报（AI）
-今日精读 1 篇高分解说论文，聚焦视频推理中的轨迹级潜在蒸馏方法。
-
-最值得关注的是《Deep Thought Alignment》提出的思路：在潜在空间对齐推理轨迹，而非仅对齐最终答案。
-
-下一步可顺着“视频推理 + 轨迹蒸馏”方向延伸，对比其与常见思维链蒸馏的差异。
-- 详情：[/202608/23/README](/202608/23/README)
+今日精读1篇、速读1篇，重点聚焦ABS四元组抽取与具身操作两大方向。最值得关注的是《STAR-OPD》，其结构化方面级级联奖励蒸馏方法在ABSA四元组抽取任务上表现突出（9/10）。建议后续可沿该奖励蒸馏思路扩展至更多细粒度情感任务，或对比其与现有端到端模型的效率差异。
+- 详情：[/202608/24/README](/202608/24/README)
 
 ### 精读区论文标签
-1. [Deep Thought Alignment: Trajectory-Level Latent Distillation for Video Reasoning](/202608/23/2608.16316v1-deep-thought-alignment-trajectory-level-latent-distillation-for-video-reasoning)  
-   标签：评分：8.0/10、query:policy-dist
-   evidence：提出Latent-OPD，一种同时约束潜在表示的on-policy蒸馏变体
+1. [STAR-OPD: Structured Aspect-Cascade-Aware On-Policy Reward Distillation for ABSA Quadruple Extraction](/202608/24/2608.20831v1-star-opd-structured-aspect-cascade-aware-on-policy-reward-distillation-for-absa-quadruple-extraction)  
+   标签：评分：9.0/10、query:policy-dist
+   evidence：明确提出在线奖励蒸馏用于小模型后训练
 
 ### 速读区论文标签
-- 本次无速读推荐。
+1. [ForeTime-VLA: Causal Future-Token Distillation from a World Action Model for Conveyor-Belt Manipulation](/202608/24/2608.20735v1-foretime-vla-causal-future-token-distillation-from-a-world-action-model-for-conveyor-belt-manipulation)  
+   标签：评分：7.0/10、query:policy-dist
+   evidence：从世界动作模型向VLA策略进行策略蒸馏
 
 
 <div class="dpr-home-promo-card">
