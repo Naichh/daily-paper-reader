@@ -1,0 +1,776 @@
+Title: From Rollouts to Recipes: Self-Contained Post-Training for LLMs
+
+URL Source: https://arxiv.org/pdf/2609.01422v1
+
+Published Time: Wed, 02 Sep 2026 01:48:54 GMT
+
+Number of Pages: 14
+
+Markdown Content:
+## From Rollouts to Recipes: Self-Contained Post-Training for LLMs 
+
+Yifei Li 1,3,4 Lingling Zhang 1,2,3* Muye Huang 1,3,4 Zihan Ma 1,3
+
+Jiashuai Liu 1,3 Jun Liu 1,2,31School of Computer Science and Technology, Xi’an Jiaotong University, China 
+
+2National Engineering Research Center for Visual Information and Applications 
+
+3Shaanxi Province Key Laboratory of Big Data Knowledge Engineering 
+
+4Zhongguancun Academy, Beijing, China 
+
+yifeilee@stu.xjtu.edu.cn, zhanglling@xjtu.edu.cn 
+
+Abstract 
+
+Post-training large language models usually ap-plies a single training recipe to all samples, even though the model’s own rollouts reveal different sample-level learning states. We pro-pose Self-Routing, a behavior-conditioned post-training framework that uses rollout correct-ness and confidence to decide how each sample should be optimized. Depending on its behav-ior state, a sample is routed to GRPO, on-policy self-distillation, regularization, or skipping, al-lowing training to adapt without external teach-ers, extra annotations, or additional sampling. Experiments on mathematical reasoning across Qwen3 and Qwen3.5 backbones show that Self-Routing consistently improves over uniform GRPO, uniform OPSD, fixed mixtures, and simpler routing baselines. Further analyses show that the routing distribution changes over training and reduces unnecessary updates on low-signal or already stable samples. 
+
+1 Introduction 
+
+Post-training is central to improving the reason-ing ability of large language models (LLMs) on verifiable tasks such as mathematical reasoning, code generation, and program repair. In these set-tings, verifier-based reinforcement learning can use outcome rewards, such as answer correctness, test pass rates, or patch validity, without relying on large-scale chain-of-thought (CoT) annotations or human process supervision (Uesato et al., 2022; Le et al., 2022; Liu et al., 2023; Gehring et al., 2024; Wei et al., 2025). This makes naive RL / RLVR attractive when CoT data are scarce, noisy, or mis-matched with the target model (DeepSeek-AI et al., 2025; Yu et al., 2026). Prior work has improved verifier-based post-training through reward design, advantage estimation, regularization, sampling, dis-tillation, and hybrid objectives (Schulman et al., 2017; Shao et al., 2024; DeepSeek-AI et al., 2025; 
+
+> *
+
+Corresponding author. Prior Behavior-Aware Post-Training     
+
+> Current-policy rollout behavior is mainly used for selection-centric decisions.
+> Current-policy rollouts (on-policy) ✓×?...
+> rollout filtering:
+> keep / drop filter out unhelpful samples
+> curriculum:
+> easy → hard train on easier samples first
+> fixed mixtures:
+> same recipe proportions use fixed ratios of different strategies
+> inference-time selection:
+> choose best answer vote or rerank to pick the best response
+> behavior signals
+> decide which samples or answers
+> Selection-centric decisions
+> sample weight keep-or-drop ...
+
+? But should rollout behavior only decide whether to use a sample or an answer? 
+
+> Or should it decide how the sample is optimized?
+
+Figure 1: Prior behavior-aware post-training mainly uses rollout signals for selection, such as filtering sam-ples, scheduling curricula, mixing fixed recipes, or choosing inference-time answers. 
+
+Yu et al., 2026). Yet most methods still follow a global training recipe: they apply the same opti-mization mechanism, or a fixed objective mixture, to all samples in the dataset. This global view overlooks the fact that rollouts already contain sample-level behavioral signals. Existing methods partially exploit this informa-tion: all-correct / all-wrong filtering skips sam-ples whose rollouts provide no relative advantage signal (Yu et al., 2026; Shao et al., 2024), while entropy-, confidence-, or consistency-based vot-ing and reranking can improve final answer quality without updating model parameters (Wang et al., 2022; Weng et al., 2022). These observations sug-gest that rollout behavior reflects the current learn-ing state of each sample. Importantly, such sig-nals are available during rollout generation itself, without extra annotation, external evaluators, or redundant inference. A sample’s training value is therefore not a static arXiv:2609.01422v1 [cs.CL] 1 Sep 2026 property such as quality or difficulty. It depends on the model’s current rollout behavior and on the op-timization signal applied to that sample. A sample with uniformly failed rollouts may provide little gradient for verifier-based RL, while on-policy dis-tillation can still offer dense guidance on states visited by the current model. A sample with mixed correct and incorrect rollouts may be informative for RL, while a reliably solved sample may be bet-ter treated with a conservative objective. Samples that repeatedly fail with high confidence may be better skipped temporarily. We therefore view post-training as a process from rollouts to recipes: roll-outs expose local learning states, and these states can be converted into sample-level training recipes that decide both whether and how each sample should be optimized. Based on this view, we propose self-contained behavior-conditioned routing. Unlike global recipes that fix an optimization mechanism and apply it uniformly, our approach assigns training actions according to each sample’s rollout behav-ior under the current model. Unlike distillation from external teachers, offline CoT traces, or fixed reference trajectories, our signals come from the model’s own on-policy rollouts, reducing the risk of mode-distribution mismatch between the imitated trajectories and the states actually visited by the cur-rent policy (Agarwal et al., 2023; Zhao et al., 2026). This forms a self-contained loop: the model reveals its learning states through rollouts, and training uses those states to decide subsequent updates. In summary, our contributions are as follows: • We identify a structural limitation of verifier-based post-training: global recipes cannot adapt to heterogeneous sample-level learning states revealed by current-policy rollouts. • We propose self-contained behavior-conditioned routing, which turns rollout signals naturally produced during training into sample-level recipes without extra annotation, external evaluators, or additional sampling. • We empirically show that different rollout behavior states benefit from different op-timization mechanisms, and that behavior-conditioned routing improves over uniform GRPO, uniform OPSD, fixed objective mix-tures, and filtering- or curriculum-based base-lines. 
+
+2 Related Work 
+
+Verifier-Based Post-Training. Verifier-based post-training has been widely studied for verifi-able tasks such as mathematical reasoning, code generation, and program repair, where final an-swers, unit tests, or execution feedback can pro-vide outcome rewards (Kimi Team, 2025; Hu et al., 2025; Zhao et al., 2025a). Existing work mainly improves the reinforcement learning procedure it-self, including PPO/GRPO/DAPO-style objectives, reward shaping, advantage estimation, KL regu-larization, length control, sampling strategies, and training stabilization (Hu et al., 2025; Kimi Team, 2025; Wang et al., 2025a; Xu et al., 2025). Other methods combine verifier rewards with distillation or supervised signals to mitigate the sparsity of outcome rewards (Zelikman et al., 2022; Zhang et al., 2025a; Hübotter et al., 2026). Relatedly, self-specialized teacher distillation addresses the loss of general capabilities during target-only post-training without requiring a representative replay corpus (Li et al., 2026b). Beyond mathematical reasoning, re-lated studies have also examined learning and eval-uation in more complex agent settings, including long-horizon memory, cross-platform action trans-fer, and risk under task complexity (Li et al., 2026a; Yan et al., 2026a; Ma et al., 2025). Our work shares the same broad goal of improving model behav-ior through interaction and feedback, but focuses specifically on verifier-based post-training: rather than designing another global RL objective, we study how rollout states can route samples among different training actions. 
+
+Data Selection and Curriculum Learning. 
+
+Data selection and curriculum learning adjust the training distribution according to sample quality, difficulty, loss, uncertainty, reward, or training stage (Wang et al., 2025b; Jiang et al., 2025; Zhao et al., 2025a). In RLVR, all-correct / all-wrong filtering is a common example: when all rollouts in a group are correct or all are incorrect, the sam-ple provides little relative advantage signal and is skipped or down-weighted (Xu et al., 2025; Jiang et al., 2025). These methods mainly address which samples should be trained, or in what order and fre-quency they should appear. In contrast, our work asks a complementary question: given a sampled prompt and its rollouts, what optimization signal should be applied to it? Rollout Uncertainty and On-Policy Signals. 
+
+Rollout distributions and model-internal uncer-tainty signals have been used extensively to adapt inference-time reasoning. Self-consistency, major-ity voting, confidence-based selection, and entropy-aware reranking use such signals for answer se-lection (Chen et al., 2023; Yao et al., 2023; Jiang et al., 2023; Zuo et al., 2025), while recent work further uses uncertainty and consistency to dynam-ically allocate reasoning computation (Yan et al., 2026b; Xu et al., 2026). On-policy learning and on-policy distillation reduce distribution mismatch by supervising states visited by the current pol-icy rather than relying only on offline trajecto-ries or fixed references (Tan et al., 2023). On-policy self-distillation goes one step further: its teacher signal comes from the model itself or its de-layed/historical versions, which better matches the model’s reasoning style, length bias, and generation distribution than an external teacher (Hübotter et al., 2026; Zhang et al., 2025b). This is especially rele-vant for reasoning models, where different teachers may solve the same problem through substantially different intermediate patterns. We therefore use OPSD as a self-contained primitive for providing dense guidance under sparse rewards, and extend the use of rollout behavior from inference-time adaptation to training-time recipe routing. 
+
+3 Method 
+
+3.1 Overview 
+
+We study verifier-guided post-training on a fixed training set 
+
+D = {xj }Nj=1 ,
+
+where each x denotes a prompt, problem, or in-struction input. Starting from an initial policy πθ0 ,the goal is to update the policy on D and evaluate it on held-out or related task distributions. GRPO, OPSD, and our method share the same data, rollout budget, and verifier feedback; they differ in how they use these signals to construct training updates. Figure 2 illustrates our framework. At each train-ing iteration, the current policy first generates on-policy rollouts for each sample. We then estimate two behavior signals: rollout correctness and model confidence. These signals define a behavior state, which is passed to a recipe router. The router as-signs each sample to one of four disjoint queues: GRPO, OPSD, REG, or SKIP. Finally, the active losses are aggregated to update the policy. 
+
+3.2 Rollout Collection 
+
+Given a sample x ∈ D , the current policy πθ gen-erates G responses: 
+
+oi ∼ πθ(·| x), i = 1 , . . . , G. 
+
+An outcome-level verifier evaluates each response: 
+
+R(oi, x ) ∈ { 0, 1},
+
+where R(oi, x ) = 1 indicates that response oi
+
+solves the task correctly. The empirical rollout accuracy of sample x is 
+
+ax = 1
+
+G
+
+> G
+
+X
+
+> i=1
+
+R(oi, x ).
+
+This quantity measures how often the current policy solves x under repeated sampling. Since rollouts are collected from the current policy, ax changes as training proceeds. 
+
+3.3 Behavior Signals 
+
+We use two lightweight signals to describe the learning state of each sample: accuracy decom-position and confidence calibration. The resulting behavior state is 
+
+bx = ( ω(ax), φ (cx)) .
+
+Accuracy decomposition. The scalar accuracy 
+
+ax is informative but coarse. A hard partition of 
+
+ax into low-, medium-, and high-accuracy regions would make routing unstable, especially when G
+
+is small and a single rollout can move a sample across a threshold. We therefore map ax into three smooth membership scores: 
+
+lx = exp 
+
+
+
+− (ax − 0) 2
+
+2σ2
+
+> l
+
+
+
+,mx = exp 
+
+
+
+− (ax − 0.5) 2
+
+2σ2
+
+> m
+
+
+
+,hx = exp 
+
+
+
+− (ax − 1) 2
+
+2σ2
+
+> h
+
+
+
+.
+
+After normalization, 
+
+ω(ax) = [ l, m, h ] = [lx, m x, h x]
+
+lx + mx + hx
+
+.
+
+Here l, m, and h correspond to low-accuracy, uncer-tain, and high-accuracy components. The centers 
+
+0, 0.5, and 1 match the natural interpretation of samples that the model mostly fails, solves incon-sistently, or solves reliably. In our implementation, we fix 
+
+σl = σh = 0 .18 , σm = 0 .16 ,
+
+and do not tune them per dataset. 1.Rollout Collection (on-policy) 2.Behavior Signals (learning state estimation) 3.Recipe Router (sample routing) 4.Recipe Assignment (batch partition) 
+
+Prompt 𝑥 ：
+
+Sample 𝐺 responses from current policy 𝜋 ! evaluate with verifier 𝑅 
+
+Rollouts 𝑜 ! !"# $
+
+Compute two lightweight signals from rollouts Map behavior state to the most suitable recipe Assign each sample to one recipe and create disjoint training queues 
+
+Accuracy Decomposition  
+
+> 𝑎 != 1𝐺 &
+> "#$ %
+> 𝑅 𝑜 ", 𝑥
+> Decompose accuracy into three weights
+
+Confidence Calibration   
+
+> 𝑐 != 1𝐺 &
+> "#$ %
+> 𝑐𝑜𝑛𝑓 𝑜 ", 𝑥 Percentile rank within-batch
+
+Rounter 𝒓 𝝓 𝒃 𝒙  
+
+> Behavior State
+
+𝒃 𝒙 = 𝝎(𝒂 𝒙 ), 𝝋(𝒄 𝒙 )
+
+## …̇𝑂 $ : 45 mph conf: 0.92         
+
+> Solve: A car travels 180 miles in 3 hours. What is its average speed? ̇O&: 90 mph conf: 0.87̇ 𝑂 ': 60 mph conf: 0.56̇ 𝑂 (: 45 mph conf: 0.78̇ 𝑂 %: 60 mph conf: 0.31
+
+Rollout Collection   
+
+> (current policy 𝜋 ))
+
+Behavior Signal    
+
+> 𝑏 != (𝑎 !, 𝑐 !)
+
+Recipe Router Verifier 𝑅 𝑜 !, 𝑥        
+
+> Outcome-level reward (correctness)
+> 𝑅 𝑜 ", 𝑥 ∈0,1
+> 𝑝 !=𝑝 *+,-, 𝑝 -,./ , 𝑝 01% , 𝑝 2+-,
+
+Recipe Assignment Update 𝝅 𝜽         
+
+> (disjoint queues) (loss aggregate)
+> Batch mean
+> 𝑐 3
+> ∆𝑐 != 𝑐 !− 𝑐 3
+> ∆𝑐 !4= 𝑐 !4− 𝑐 3
+> ∆𝑐 !5= 𝑐 !5− 𝑐 3
+> Relative confidence
+> 𝜑(𝑐 !)
+> Assign each sample to a recipe
+
+𝒕 𝒙 ~ Multinomial(p)    
+
+> GRPO OPSD REG SKIP
+> Uncertain but solvable Failed but recoverable Stable and confident Unstable or low-signal
+> GRPO OPSD REG SKIP
+
+ℒ = 𝑛 ?ℒ$@AB + 𝑛 CℒBADE + 𝑛 Fℒ@G$ 
+
+𝑛 ? + 𝑛 C + 𝑛 F       
+
+> 𝑝 !=𝑝 *+,-, 𝑝 -,./ , 𝑝 +6* , 𝑝 .7",
+> & 𝑝 !,7 = 1, 𝑝 !,7 ≥ 0
+> Example: [0.60,0.20,0.15,0.05]
+
+Current Batch (Size B) 
+
+……
+
+> Exploration update
+
+…
+
+> Self-guided learning
+
+𝑛 ?
+
+𝑛 C
+
+…
+
+> Stability preservation
+
+𝑛 F
+
+…
+
+> Ignore noisy samples
+
+𝑛 H
+
+Dataset 𝓓 
+
+Example: 𝑡 := GRPO (sample routed) (one recipe per sample) 
+
+> low → uncertain → high
+> Low-acc weights High-acc weights Uncertainty weights
+> 𝑎 !
+> 𝜔(𝑎 !)
+
+Figure 2: Overview of our behavior-aware recipe routing framework. For each training sample, the current policy collects on-policy rollouts, estimates behavior signals from verifier correctness and model confidence, routes the sample to one training recipe, and updates the policy using the aggregated losses from disjoint recipe queues. 
+
+Confidence calibration. For each response oi =(yi, 1, . . . , y i,T i ), we estimate the model’s internal confidence from token-level predictive entropy. At position t, let 
+
+pθ,t (·) = πθ(·| x, y i,<t )
+
+be the next-token distribution. The token entropy is 
+
+Hi,t = − X
+
+v∈V 
+
+pθ,t (v) log pθ,t (v).
+
+The sequence-level uncertainty is 
+
+¯H(oi, x ) = 1
+
+TiTiX
+
+t=1 
+
+Hi,t .
+
+We convert uncertainty into confidence using batch-level normalization: 
+
+conf( oi, x ) = 1 − Norm B( ¯H(oi, x )) ,
+
+where Norm B maps entropy values from rollouts in the current batch to [0 , 1] . The sample-level confidence is 
+
+cx = 1
+
+G
+
+GX
+
+i=1 
+
+conf( oi, x ).
+
+Since raw confidence can vary with prompt length, task type, and batch composition, we cali-brate it within the current batch. Let 
+
+¯cB = 1
+
+|B| 
+
+X
+
+x′∈B 
+
+cx′ .
+
+The relative confidence is 
+
+∆cx = cx − ¯cB .
+
+We normalize the confidence-related quantities and write 
+
+φ(cx) = ( ec, ec+, ec−, f∆c),
+
+where ec is normalized confidence, ec+ and ec− in-dicate high- and low-confidence tendencies, and 
+
+f∆c denotes the calibrated deviation from the batch mean. 
+
+3.4 Recipe Router 
+
+The router maps the behavior state bx to a recipe distribution 
+
+px = [ pGRPO , p OPSD , p REG , p SKIP ],
+
+with X
+
+k
+
+px,k = 1 , px,k ≥ 0.
+
+To keep the router interpretable, we first compute four routing scores. Given 
+
+ω(ax) = [ l, m, h ],
+
+we define 
+
+sGRPO = m + h(1 − f∆c) + l(1 − ec−) · ec, sOPSD = l(1 − ec−),sREG = h · f∆c · ec+,sSKIP = l · ec− · ec. 
+
+These assignments are motivated by preliminary diagnostics on Qwen3-4B. Mixed-correctness sam-ples benefit more from GRPO, while low-accuracy, low-confidence samples favor OPSD. Stable solved samples show limited benefit from aggressive opti-mization, whereas confident failures benefit from neither active recipe. These observations motivate routing the corresponding states to GRPO, OPSD, REG, and SKIP, respectively. Full diagnostics are reported in Appendix H. The scores are normalized into probabilities: 
+
+px,k = sk
+
+sGRPO + sOPSD + sREG + sSKIP + ϵ .
+
+Then each sample is assigned to one recipe: 
+
+tx ∼ Categorical( px).
+
+Thus, each sample contributes to at most one train-ing objective in a given iteration. 
+
+3.5 Recipe Assignment and Policy Update 
+
+According to tx, the current batch is partitioned into four disjoint queues: 
+
+Bg, Bo, Br, Bs,
+
+corresponding to GRPO, OPSD, REG, and SKIP. Let their sizes be 
+
+ng = |B g|, no = |B o|, nr = |B r|, ns = |B s|.
+
+GRPO. For samples in Bg, we use the standard GRPO objective. For a rollout oi, let 
+
+ri = R(oi, x ).
+
+We compute the group mean and standard deviation as 
+
+μx = 1
+
+G
+
+> G
+
+X
+
+> i=1
+
+ri,σx =
+
+"
+
+1
+
+G
+
+> G
+
+X
+
+> i=1
+
+(ri − μx)2
+
+#1/2
+
+.
+
+The group-relative advantage is 
+
+Ai = ri − μx
+
+σx + ϵ .
+
+The policy ratio is 
+
+ρi = πθ(oi|x)
+
+πθold (oi|x) .
+
+We use the clipped ratio 
+
+¯ρi = clip( ρi, 1 − ϵ, 1 + ϵ).
+
+The GRPO loss is 
+
+LGRPO = −E [min( ρiAi, ¯ρiAi)] ,
+
+where the expectation is taken over x ∈ B g and rollout index i.
+
+OPSD. For samples in Bo, we use OPSD as a corrective learning recipe. The policy model acts as the student, while the same model conditioned on answer information acts as the teacher. Given the input x, the student’s current output, and the answer signal, the teacher produces a token-level target sequence 
+
+yTx = ( yTx, 1, . . . , y Tx,T x ).
+
+The student learns this target by token-level imita-tion: 
+
+LOPSD = − 1
+
+|B o|
+
+X
+
+> x∈B o
+> Tx
+
+X
+
+> t=1
+
+log πθ
+
+ yTx,t | x, y Tx,<t 
+
+ .
+
+The teacher trajectory is generated once during of-fline preprocessing by prompting the same base model with the problem and its ground-truth an-swer, and is reused during training. Thus, OPSD requires no external teacher or additional CoT an-notation, but assumes access to target answers in the verifiable post-training setting. 
+
+REG. For samples in Br, we use a regularization objective. Since these samples already show reli-able behavior, we constrain the updated policy to stay close to a reference policy: 
+
+LREG = 1
+
+|B r|
+
+X
+
+> x∈B r
+
+DKL (πθ(·| x)∥πref (·| x)) .
+
+Here πref can be the initial model, a pre-update checkpoint, or the old policy in the current itera-tion. 
+
+SKIP. Samples in Bs are ignored in the current update: 
+
+LSKIP = 0 .
+
+The final training loss aggregates only active queues: 
+
+L = ngLGRPO + noLOPSD + nrLREG 
+
+ng + no + nr
+
+.
+
+SKIP samples do not contribute gradients and are excluded from the denominator. Table 1: Main results on ID mathematical reasoning and OOD general reasoning benchmarks. We report results across different Qwen3 and Qwen3.5 model scales. The best result in each column within the same model group is shown in bold , and the second-best result is underlined.                                                                                                                                                                                  
+
+> Model Method ID Math Reasoning OOD General Reasoning Avg. GSM8K MATH-500 AIME24 AIME25 MMLU-Pro GPQA-diamond Qwen3-0.6B Base 65.8 35.7 11.6 8.7 23.4 20.6 27.6 Naive-GRPO 70.4 42.8 13.9 10.5 20.9 22.1 30.1 Naive-OPSD 71.6 44.1 13.5 11.4 21.5 21.7 30.6 Self-Routing 73.2 45.8 15.6 13.0 22.6 23.8 32.3
+> Qwen3-1.7B Base 77.1 44.3 33.7 24.2 51.4 34.2 44.1 Naive-GRPO 81.6 50.4 39.6 29.8 47.9 37.8 47.9 Naive-OPSD 83.4 52.1 42.7 32.4 49.3 39.1 49.8 Self-Routing 86.8 55.9 46.3 36.7 50.6 42.5 53.1
+> Qwen3-4B Base 82.3 54.4 66.9 54.1 59.2 49.3 61.0 Naive-GRPO 89.6 62.8 74.3 65.4 54.6 53.8 66.8 Naive-OPSD 93.5 66.1 79.4 70.2 56.4 56.7 70.4 Self-Routing 95.2 69.8 83.6 74.9 58.1 60.4 73.7
+> Qwen3.5-0.8B Base 32.9 18.3 4.9 3.1 37.1 8.8 17.5 Naive-GRPO 38.6 22.7 6.8 4.7 33.8 11.3 19.6 Naive-OPSD 39.8 24.1 6.4 5.5 34.7 10.9 20.2 Self-Routing 43.1 26.8 8.6 7.3 36.0 13.6 22.6
+> Qwen3.5-2B Base 69.1 44.2 24.1 17.3 57.4 31.5 40.6 Naive-GRPO 77.9 50.7 36.8 28.1 53.8 36.9 47.4 Naive-OPSD 80.8 54.3 42.5 32.6 55.1 39.7 50.8 Self-Routing 84.6 58.2 48.4 38.5 56.7 44.3 55.1
+> Qwen3.5-4B Base 87.4 77.2 78.9 76.8 71.6 69.1 76.8 Naive-GRPO 91.3 81.7 84.2 82.5 66.8 72.3 79.8 Naive-OPSD 93.4 84.8 88.6 86.7 68.7 75.9 83.0 Self-Routing 96.1 88.3 93.2 91.4 70.9 79.6 86.6
+
+4 Experiments 
+
+We evaluate whether behavior-conditioned self-routing improves post-training over global recipes that apply the same objective to all samples. Our experiments answer four questions: • Q1: Final performance. Does behavior-conditioned routing improve reasoning perfor-mance compared with uniform post-training recipes and fixed recipe mixtures? • Q2: Efficiency. Does routing reduce wasted updates by assigning expensive or unstable recipes only to samples where they are useful? • Q3: Routing strategy. Is the proposed behavior-conditioned routing better than sim-pler alternatives, such as random routing, fixed-proportion routing, or hard threshold-based routing? • Q4: Training dynamics. How does the recipe distribution change during training, and does it track the model’s changing sample-level learning states? 
+
+4.1 Experimental Setup Datasets. We use DAPO-Math-17K (Yu et al., 2026) as the training set for all post-training meth-ods. For evaluation, we use four in-domain math-ematical reasoning benchmarks and two out-of-domain general reasoning benchmarks. The in-domain benchmarks are GSM8K (Cobbe et al., 2021), MATH-500 (Hendrycks et al., 2021), AIME24 (Mathematical Association of America, 2024), and AIME25 (Mathematical Association of America, 2025), covering grade-school arith-metic, competition-style mathematics, and recent exam-level problems. For out-of-domain evalua-tion, we use GPQA (Rein et al., 2023) and MMLU-Pro (Wang et al., 2024) to test whether math post-training transfers to broader reasoning tasks. We report the macro-average over all six evaluation benchmarks. 
+
+Models. We conduct experiments on Qwen3 (Yang et al., 2025) and Qwen3.5 (Team, 2026) models across small and medium scales. Specifically, we evaluate Qwen3-0.6B, Qwen3-1.7B, Qwen3-4B, Qwen3.5-0.8B, Qwen3.5-2B, and Qwen3.5-4B. This setting tests whether self-routing works across different model generations and base-model capabilities. 
+
+Baselines. For the main comparison, we include the base model without post-training, Naive-GRPO, and Naive-OPSD. Naive-GRPO applies GRPO uni-formly to all training samples, while Naive-OPSD applies OPSD uniformly to all samples. These baselines test whether routing samples to differ-ent recipes improves over using a single global post-training recipe. Routing-specific baselines are discussed separately in Section 4.4, where all vari-ants use the same recipe set and differ only in the routing rule. We additionally compare with DAPO-style RL and PODS (Xu et al., 2025), representing stabilized RL training and rollout selection, respec-tively; these results are reported in Appendix J. 
+
+4.2 Main Results 
+
+Table 1 reports the main results on ID mathematical reasoning and OOD general reasoning benchmarks. Self-Routing achieves the highest average score across all evaluated backbones. The gains are most clear on ID math tasks, where Self-Routing consis-tently outperforms both Naive-GRPO and Naive-OPSD. For example, on Qwen3-4B, Self-Routing improves the average score from 61.0 to 73.7, ex-ceeding Naive-GRPO and Naive-OPSD by 6.9 and 3.3 points, respectively. On Qwen3.5-4B, Self-Routing reaches 86.6 average score, compared with 79.8 for Naive-GRPO and 83.0 for Naive-OPSD. The advantage of Self-Routing becomes larger as model capacity increases. On the smallest models, Naive-GRPO and Naive-OPSD still show mixed results on some individual benchmarks, such as AIME24 and GPQA-diamond, suggesting that weak models may not provide stable enough self-generated signals for OPSD to dominate in every case. For stronger backbones, OPSD becomes con-sistently better than GRPO, and Self-Routing fur-ther widens the margin. This trend supports our motivation that stronger models can benefit more from self-distillation and routing-based training. For OOD general reasoning, we observe dif-ferent behaviors on GPQA-diamond and MMLU-Pro. GPQA-diamond usually improves after math-oriented post-training, while MMLU-Pro drops compared with the base model. Although preserv-ing MMLU-Pro performance is not the direct target of our method, Self-Routing shows the smallest degradation among all post-training methods and remains the second-best method after Base on every backbone. We conjecture that this smaller degra-dation may come from the conditional nature of Self-Routing: instead of applying a uniform math-oriented update to all training instances, it selects different self-improvement paths according to the model’s own outputs. This may reduce the influ-ence of noisy or overly specialized training signals, leading to less drift from the base model’s origi-nal general-purpose behavior while still improving mathematical reasoning. 
+
+Stronger baselines and OOD transfer. On Qwen3-4B, Self-Routing also outperforms DAPO-style RL and PODS, achieving 80.9/71.1/59.3 on ID math, OOD verifiable reasoning, and gen-eral evaluation. On SATBench, AutoLogi, and LiveCodeBench-v5, Self-Routing further obtains the best average score of 71.1. Full results are provided in Appendix J. 
+
+4.3 Efficiency Analysis 
+
+We provide a coarse-grained FLOPs estimate to analyze the training cost of different post-training recipes. Following the standard scaling-law ap-proximation for Transformer language models, a forward pass costs approximately 2N FLOPs per token, while a training pass with forward and back-ward computation costs approximately 6N FLOPs per token (Kaplan et al., 2020; Hoffmann et al., 2022). Let N denote the number of model pa-rameters, T the number of training steps, B the batch size, G the number of rollouts per sample, and L the average sequence length. We normalize all costs by N T BL and ignore sequence-length variation and implementation overhead. The Self-Routing branch ratios are obtained by integrating the routing curves in Figure 4, giving 30 .8% GRPO, 
+
+30 .4% OPSD, 25 .5% REG, and 13 .3% SKIP. As shown in Table 2, Self-Routing is not in-tended as a wall-clock acceleration method un-der the current implementation. It is more ex-pensive than Naive-OPSD because it retains multi-rollout behavior estimation and additionally applies GRPO-style updates to routed samples. However, it is less expensive than applying GRPO to all roll-out groups. When G = 8 , the normalized costs are 64 .0 for Naive-GRPO, 24 .0 for Naive-OPSD, and 34 .7 for Self-Routing. The main efficiency benefit is therefore selective allocation: expensive optimization recipes are applied only to the subset of samples whose rollout behavior suggests that the Method Normalized FLOPs                      
+
+> Naive-GRPO
+> Rollout 2G
+> GRPO update 6G
+> Total 8G
+> Naive-OPSD
+> Rollout 2G
+> Teacher generation 2
+> SFT update 6
+> Total 2G+ 8
+> Self-Routing
+> Rollout 2G
+> GRPO update 0.308 ×6G
+> OPSD update 0.304 ×(2 + 6)
+> REG update 0.255 ×6
+> SKIP update 0
+> Total 3.848 G+ 3 .962
+
+Table 2: Coarse-grained training FLOPs estimation nor-malized by N T BL . We approximate inference as 2N
+
+FLOPs per token and training as 6N FLOPs per token. The Self-Routing ratios are obtained by integrating the routing curves in Figure 4. GSM8K MATH500 AIME24 AIME25 MMLU-Pro GPQA 
+
+> 50 60 70 80 90
+> Accuracy
+> Random Fixed-Ratio Threshold Self-Routing
+
+Figure 3: Ablation on routing strategies using Qwen3-4B. We compare Self-Routing with three simpler routing baselines across ID mathematical reasoning and OOD general reasoning benchmarks. 
+
+corresponding training signal is useful. 
+
+4.4 Ablation on Routing Strategies 
+
+To verify the effectiveness of Self-Routing, we compare it with three simpler routing strategies on Qwen3-4B. Round-wise Random randomly se-lects one recipe for each training round and ap-plies it to all samples in that round. Fixed-Ratio Random assigns samples within each round ac-cording to a fixed Reg:GRPO:OPSD:Skip ratio of 3:3:3:1. Accuracy-Based Routing first sorts sam-ples by their current accuracy, then routes the low-est 30% to Reg, the next 30% to GRPO, the next 30% to OPSD, and the highest 10% to Skip. These baselines form a progression from recipe-level ran-domness, to fixed recipe mixing, and then to a simple sample-level routing rule. As shown in Figure 3, the two random rout-0 1050 2100 3150 4200    
+
+> Training Step
+> 0.0 0.2 0.4 0.6 0.8 1.0
+> Rounting ratio  GRPO Reg OPSD Skip
+
+Figure 4: Routing ratios of different training recipes during Self-Routing training. 
+
+ing baselines perform poorly, suggesting that sim-ply alternating or mixing recipes is not enough. Accuracy-Based Routing gives a much stronger result and even outperforms Naive-OPSD in the main table, which shows that sample-level routing signals are important. However, it still falls slightly behind Self-Routing across most benchmarks. This gap indicates that accuracy alone is not sufficient for recipe assignment: samples with the same cor-rectness can differ in reasoning quality, confidence, stability, and optimization risk. By using richer behavior-conditioned signals, Self-Routing makes finer routing decisions and achieves the best final performance. More targeted ablations further show that ac-curacy is the primary routing signal, while con-fidence calibration and the behavior-conditioned assignment provide complementary gains; see Ap-pendix I. 
+
+4.5 Training Dynamics 
+
+Figure 4 illustrates the routing dynamics of Self-Routing on Qwen3-4B during training. In practice, we sample the routing decisions every ten training steps and aggregate them to obtain the counting ratio of each branch, which smooths out short-term fluctuations while preserving the overall trend. The figure shows that the routing distribution changes substantially as training proceeds, rather than stay-ing fixed around a preset ratio. At the early stage, OPSD accounts for the largest proportion, with a counting ratio above 0.5, while GRPO and Reg remain relatively low. As train-ing continues, OPSD gradually decreases, while GRPO increases and reaches its peak in the mid-dle stage, suggesting that more samples become suitable for reward-driven optimization after the model has acquired stronger reasoning behavior. In the later stage, Reg rises quickly and becomes the dominant branch, while both OPSD and GRPO decline; this may help constrain further policy drift after sufficient reasoning improvement has been obtained. The Skip branch remains relatively low throughout training and further decreases near the end, indicating that most samples can still provide useful training signals through one of the active branches. 
+
+5 Conclusion 
+
+We presented Self-Routing, a self-contained post-training framework that turns the model’s own roll-out behavior into sample-level training recipes. In-stead of applying one objective to all data, Self-Routing uses rollout correctness and confidence to route each sample to GRPO, on-policy self-distillation, regularization, or skipping. Exper-iments on mathematical reasoning show consis-tent gains over uniform GRPO, uniform OPSD, fixed mixtures, and simpler routing baselines across Qwen3 and Qwen3.5 backbones. The routing dy-namics further show that different recipes become useful at different training stages. These results suggest that rollout behavior should guide not only which samples are used, but also how they are opti-mized. 
+
+Limitations 
+
+Although our method demonstrates promising em-pirical improvements, several limitations remain. Our current study mainly focuses on the intuition that heterogeneous rollout states may benefit from different post-training strategies, and we validate this idea through empirical performance gains and behavioral observations. However, the work does not yet provide a sufficiently deep mechanistic or theoretical explanation for why certain rollout pat-terns align better with specific optimization sig-nals. At present, the routing behavior is primarily supported by intuition and experimental evidence rather than a rigorous understanding of the under-lying optimization dynamics, which remains an important direction for future research. In addition, our training experiments are cen-tered on mathematical reasoning. Although we observe transfer to SATBench, AutoLogi, and LiveCodeBench-v5, these benchmarks still primar-ily cover related verifiable reasoning tasks. It re-mains unclear whether the same routing paradigm generalizes to substantially different settings such as agent planning or open-ended instruction follow-ing. Finally, it is important to note that our work is centered on the routing perspective itself rather than the optimization of individual training algo-rithms. We do not attempt to improve the internal designs of specific methods, such as reward engi-neering for GRPO-style reinforcement learning or trajectory/path refinement strategies for OPSD-like approaches. These algorithmic improvements are largely orthogonal to our objective. Instead, our fo-cus is on exploring whether different optimization mechanisms should be assigned adaptively accord-ing to rollout states under a unified post-training framework. 
+
+Ethical Considerations 
+
+In this work, we use AI-assisted tools to polish the writing and improve code quality. We plan to release our code and data to facilitate future research and reproducibility. For all environments, datasets, models, and external resources used in this work, we strictly follow their original usage terms and licensing agreements, and confirm that all artifacts are used solely for academic research purposes. In addition, several icons used in our figures are obtained from the FLATICON website. 
+
+Acknowledgments 
+
+This work was supported by Fundamental and Interdisciplinary Disciplines Breakthrough Plan of the Ministry of Education of China (JYB2025XDXM116), National Natural Science Foundation of China (No. 62137002, 62293550, 62293553, 62293554, 62437002, 62477036, 62477037, 62192781), the Shaanxi Provincial So-cial Science Foundation Project (No. 2024P041), the Youth Innovation Team of Shaanxi Universities "Multi-modal Data Mining and Fusion", and Xi’an Jiaotong University City College Research Project (No. 2024Y01), and the Zhongguancun Academy (Grant No. 20240103). 
+
+References  
+
+> Rishabh Agarwal, Nino Vieillard, Yongchao Zhou, Pi-otr Stanczyk, Sabela Ramos, Matthieu Geist, and Olivier Bachem. 2023. On-policy distillation of lan-guage models: Learning from self-generated mis-takes. arXiv preprint arXiv:2306.13649 .Xinyun Chen, Renat Aksitov, Uri Alon, Jie Ren, Kefan Xiao, Pengcheng Yin, Sushant Prakash, Charles Sut-ton, Xuezhi Wang, and Denny Zhou. 2023. Universal self-consistency for large language model generation.
+> arXiv preprint arXiv:2311.17311 .
+
+Karl Cobbe, Vineet Kosaraju, Mohammad Bavarian, Mark Chen, Heewoo Jun, Lukasz Kaiser, Matthias Plappert, Jerry Tworek, Jacob Hilton, Reiichiro Nakano, Christopher Hesse, and John Schulman. 2021. Training verifiers to solve math word prob-lems. arXiv preprint arXiv:2110.14168 .DeepSeek-AI, Daya Guo, Dejian Yang, Haowei Zhang, Junxiao Song, Peiyi Wang, Qihao Zhu, Runxin Xu, Ruoyu Zhang, Shirong Ma, et al. 2025. DeepSeek-R1: Incentivizing reasoning capability in LLMs via reinforcement learning. arXiv preprint arXiv:2501.12948 .Jonas Gehring, Kunhao Zheng, Jade Copet, Vegard Mella, Quentin Carbonneaux, Taco Cohen, and Gabriel Synnaeve. 2024. RLEF: Grounding code LLMs in execution feedback with reinforcement learning. arXiv preprint arXiv:2410.02089 .Dan Hendrycks, Collin Burns, Saurav Kadavath, Akul Arora, Steven Basart, Eric Tang, Dawn Song, and Ja-cob Steinhardt. 2021. Measuring mathematical prob-lem solving with the MATH dataset. arXiv preprint arXiv:2103.03874 .Jordan Hoffmann, Sebastian Borgeaud, Arthur Men-sch, Elena Buchatskaya, Trevor Cai, Eliza Ruther-ford, DDL Casas, Lisa Anne Hendricks, Johannes Welbl, Aidan Clark, et al. 2022. Training compute-optimal large language models. arXiv preprint arXiv:2203.15556 , 10. Jingcheng Hu, Yinmin Zhang, Qi Han, Daxin Jiang, Xi-angyu Zhang, and Heung-Yeung Shum. 2025. Open-reasoner-zero: An open source approach to scaling up reinforcement learning on the base model. arXiv preprint arXiv:2503.24290 .Jonas Hübotter, Frederike Lübeck, Lejs Behric, An-ton Baumann, Marco Bagatella, Daniel Marta, Ido Hakimi, Idan Shenfeld, Thomas Kleine Buening, Car-los Guestrin, and Andreas Krause. 2026. Reinforce-ment learning via self-distillation. arXiv preprint arXiv:2601.20802 .Dongfu Jiang, Xiang Ren, and Bill Yuchen Lin. 2023. LLM-Blender: Ensembling large language models with pairwise ranking and generative fusion. In Pro-ceedings of the 61st Annual Meeting of the Associa-tion for Computational Linguistics .Guochao Jiang, Wenfeng Feng, Guofeng Quan, Chuzhan Hao, Yuewei Zhang, Guohua Liu, and Hao Wang. 2025. VCRL: Variance-based curriculum rein-forcement learning for large language models. arXiv preprint arXiv:2509.19803 .Jared Kaplan, Sam McCandlish, Tom Henighan, Tom B Brown, Benjamin Chess, Rewon Child, Scott Gray, Alec Radford, Jeffrey Wu, and Dario Amodei. 2020. Scaling laws for neural language models. arXiv preprint arXiv:2001.08361 .Kimi Team. 2025. Kimi k1.5: Scaling rein-forcement learning with LLMs. arXiv preprint arXiv:2501.12599 .Hung Le, Yue Wang, Akhilesh Deepak Gotmare, Sil-vio Savarese, and Steven C. H. Hoi. 2022. CodeRL: Mastering code generation through pretrained mod-els and deep reinforcement learning. arXiv preprint arXiv:2207.01780 .Yifei Li, Weidong Guo, Lingling Zhang, Rongman Xu, Muye Huang, Hui Liu, Lijiao Xu, Yu Xu, and Jun Liu. 2026a. Locomo-plus: Beyond-factual cognitive memory evaluation framework for llm agents. In 
+
+Proceedings of the 64th Annual Meeting of the As-sociation for Computational Linguistics (Volume 1: Long Papers) , pages 25085–25100. Yifei Li, Rongman Xu, Lingling Zhang, Muye Huang, Zihan Ma, Jiashuai Liu, Hang Yan, and Heng Wang. 2026b. Self-specialized teachers for domain post-training. Preprint , arXiv:2608.28647. Jiate Liu, Yiqin Zhu, Kaiwen Xiao, Qiang Fu, Xiao Han, Wei Yang, and Deheng Ye. 2023. RLTF: Reinforce-ment learning from unit test feedback. arXiv preprint arXiv:2307.04349 .Zihan Ma, Dongsheng Zhu, Shudong Liu, Taolin Zhang, Junnan Liu, Qingqiu Li, Minnan Luo, Songyang Zhang, and Kai Chen. 2025. How brittle is agent safety? rethinking agent risk under intent con-cealment and task complexity. arXiv preprint arXiv:2511.08487 .Mathematical Association of America. 2024. 2024 american invitational mathematics examination. American Mathematics Competitions. Mathematical Association of America. 2025. 2025 american invitational mathematics examination. American Mathematics Competitions. Adam Paszke, Sam Gross, Francisco Massa, Adam Lerer, James Bradbury, Gregory Chanan, Trevor Killeen, Zeming Lin, Natalia Gimelshein, Luca Antiga, et al. 2019. Pytorch: An imperative style, high-performance deep learning library. Advances in neural information processing systems , 32. David Rein, Betty Li Hou, Asa Cooper Stickland, Jack-son Petty, Richard Yuanzhe Pang, Julien Dirani, Ju-lian Michael, and Samuel R Bowman. 2023. Gpqa: A graduate-level google-proof q&a benchmark. arXiv preprint arXiv:2311.12022 .John Schulman, Filip Wolski, Prafulla Dhariwal, Alec Radford, and Oleg Klimov. 2017. Proxi-mal policy optimization algorithms. arXiv preprint arXiv:1707.06347 .Zhihong Shao, Peiyi Wang, Qihao Zhu, Runxin Xu, Junxiao Song, Xiao Bi, Haowei Zhang, Mingchuan Zhang, YK Li, Yang Wu, et al. 2024. Deepseekmath: Pushing the limits of mathematical reasoning in open language models. arXiv preprint arXiv:2402.03300 .Shicheng Tan, Weng Lam Tam, Yuanchun Wang, Wen-wen Gong, Shu Zhao, Peng Zhang, and Jie Tang. 2023. Gkd: A general knowledge distillation frame-work for large-scale pre-trained language model. In 
+
+Proceedings of the 61st Annual Meeting of the As-sociation for Computational Linguistics (Volume 5: Industry Track) , pages 134–148. Qwen Team. 2026. Qwen3.5-omni technical report. 
+
+arXiv preprint arXiv:2604.15804 .Jonathan Uesato, Nate Kushman, Ramana Kumar, Fran-cis Song, Noah Siegel, Lisa Wang, Antonia Creswell, Geoffrey Irving, and Irina Higgins. 2022. Solving math word problems with process- and outcome-based feedback. arXiv preprint arXiv:2211.14275 .Shenzhi Wang, Le Yu, Chang Gao, Chujie Zheng, Shix-uan Liu, Rui Lu, Kai Dang, Xionghui Chen, Jianxin Yang, Zhenru Zhang, Yuqiong Liu, An Yang, An-drew Zhao, Yang Yue, Shiji Song, Bowen Yu, Gao Huang, and Junyang Lin. 2025a. Beyond the 80/20 rule: High-entropy minority tokens drive effective reinforcement learning for LLM reasoning. arXiv preprint arXiv:2506.01939 .Xuezhi Wang, Jason Wei, Dale Schuurmans, Quoc Le, Ed Chi, Sharan Narang, Aakanksha Chowdhery, and Denny Zhou. 2022. Self-consistency improves chain of thought reasoning in language models. arXiv preprint arXiv:2203.11171 .Yiping Wang, Qing Yang, Zhiyuan Zeng, Liliang Ren, Lucas Liu, Baolin Peng, Hao Cheng, Xuehai He, Kuan Wang, Jianfeng Gao, Weizhu Chen, Shuohang Wang, Simon Shaolei Du, and Yelong Shen. 2025b. Reinforcement learning for reasoning in large lan-guage models with one training example. arXiv preprint arXiv:2504.20571 .Yubo Wang, Xueguang Ma, Ge Zhang, Yuansheng Ni, Abhranil Chandra, Shiguang Guo, Weiming Ren, Aaran Arulraj, Xuan He, Ziyan Jiang, et al. 2024. Mmlu-pro: A more robust and challenging multi-task language understanding benchmark. Advances in Neural Information Processing Systems , 37:95266– 95290. Yuxiang Wei, Olivier Duchenne, Jade Copet, Quentin Carbonneaux, Lingming Zhang, Daniel Fried, Gabriel Synnaeve, Rishabh Singh, and Sida I. Wang. 2025. SWE-RL: Advancing LLM reasoning via reinforcement learning on open software evolution. 
+
+arXiv preprint arXiv:2502.18449 .Yixuan Weng, Minjun Zhu, Fei Xia, Bin Li, Shizhu He, Shengping Liu, Bin Sun, Kang Liu, and Jun Zhao. 2022. Large language models are better reasoners with self-verification. arXiv preprint arXiv:2212.09561 .Rongman Xu, Yifei Li, Tianzhe Zhao, Yanrui Wu, Bo Li, and Hang Yan. 2026. Dual-dimensional consistency: Balancing budget and quality in adaptive inference-time scaling. arXiv preprint arXiv:2605.15100 .Yixuan Even Xu, Yash Savani, Fei Fang, and J. Zico Kolter. 2025. Not all rollouts are useful: Down-sampling rollouts in LLM reinforcement learning. 
+
+arXiv preprint arXiv:2504.13818 .Hang Yan, Zhangxuan Gu, Beitong Zhou, Jiaxuan Chen, Runze Li, Yusong Hu, Shuheng Shen, and Changhua Meng. 2026a. Maga: Multi-platform self-fusion of gui agents via structured action distillation. arXiv preprint arXiv:2607.29320 .Hang Yan, Fangzhi Xu, Rongman Xu, Yifei Li, Jian Zhang, Haoran Luo, Xiaobao Wu, Luu Anh Tuan, Haiteng Zhao, Qika Lin, et al. 2026b. Mur: Momen-tum uncertainty guided reasoning for large language models. In Proceedings of the 64th Annual Meet-ing of the Association for Computational Linguistics (Volume 1: Long Papers) , pages 23078–23103. An Yang, Anfeng Li, Baosong Yang, Beichen Zhang, Binyuan Hui, Bo Zheng, Bowen Yu, Chang Gao, Chengen Huang, Chenxu Lv, et al. 2025. Qwen3 technical report. arXiv preprint arXiv:2505.09388 .Shunyu Yao, Dian Yu, Jeffrey Zhao, Izhak Shafran, Thomas L. Griffiths, Yuan Cao, and Karthik Narasimhan. 2023. Tree of thoughts: Deliberate problem solving with large language models. arXiv preprint arXiv:2305.10601 .Qiying Yu, Zheng Zhang, Ruofei Zhu, Yufeng Yuan, Xiaochen Zuo, Yu Yue, Weinan Dai, Tiantian Fan, Gaohong Liu, Lingjun Liu, et al. 2026. Dapo: An open-source llm reinforcement learning system at scale. Advances in Neural Information Processing Systems , 38:113222–113244. Eric Zelikman, Yuhuai Wu, Jesse Mu, and Noah D. Goodman. 2022. STaR: Bootstrapping reasoning with reasoning. arXiv preprint arXiv:2203.14465 .Xuechen Zhang, Zijian Huang, Yingcong Li, Chen-shun Ni, Jiasi Chen, and Samet Oymak. 2025a. BREAD: Branched rollouts from expert anchors bridge SFT and RL for reasoning. arXiv preprint arXiv:2506.17211 .Zizhuo Zhang, Jianing Zhu, Xinmu Ge, Zihua Zhao, Zhanke Zhou, Xuan Li, Xiao Feng, Jiangchao Yao, and Bo Han. 2025b. Co-rewarding: Stable self-supervised reinforcement learning for eliciting rea-soning in large language models. arXiv preprint arXiv:2508.00410 .Andrew Zhao, Yiran Wu, Yang Yue, Tong Wu, Quentin Xu, Yang Yue, Matthieu Lin, Shenzhi Wang, Qingyun Wu, Zilong Zheng, and Gao Huang. 2025a. Absolute zero: Reinforced self-play reasoning with zero data. arXiv preprint arXiv:2505.03335 .Siyan Zhao, Zhihui Xie, Mengchen Liu, Jing Huang, Guan Pang, Feiyu Chen, and Aditya Grover. 2026. Self-distilled reasoner: On-policy self-distillation for large language models. arXiv preprint arXiv:2601.18734 .Yuze Zhao, Jintao Huang, Jinghan Hu, Xingjun Wang, Yunlin Mao, Daoze Zhang, Zeyinzi Jiang, Zhikai Wu, Baole Ai, Ang Wang, et al. 2025b. Swift: a scalable lightweight infrastructure for fine-tuning. In  
+
+> Proceedings of the AAAI Conference on Artificial Intelligence , volume 39, pages 29733–29735. Yuxin Zuo, Kaiyan Zhang, Li Sheng, Shang Qu, Ganqu Cui, Xuekai Zhu, Haozhan Li, Yuchen Zhang, Xin-wei Long, Ermo Hua, Biqing Qi, Youbang Sun, Zhiyuan Ma, Lifan Yuan, Ning Ding, and Bowen Zhou. 2025. TTRL: Test-time reinforcement learn-ing. arXiv preprint arXiv:2504.16084 .
+
+A Self-Routing Algorithm 
+
+Algorithm 1 gives the full training procedure. All recipes share the same sampled batch and the same on-policy rollouts. The router only changes how each sample contributes to the update. 
+
+B Implementation Details 
+
+We implement the training pipeline with 
+
+ms-swift (Zhao et al., 2025b). The framework handles model loading, distributed training, rollout generation, and optimizer execution. We add the routing module as a lightweight layer between rollout collection and loss construction. This keeps the baseline recipes and Self-Routing under the same training backend: the same data loader, rollout interface, verifier calls, tokenizer, and checkpointing code are used across Naive-GRPO, Naive-OPSD, and Self-Routing. For each sampled prompt, the current policy first generates G responses. The verifier returns a binary outcome reward for each response. The routing module then computes two signals: empirical roll-out accuracy and entropy-based confidence. The router does not call an external teacher model, re-ward model, or data filter. OPSD targets are gen-erated once during offline preprocessing by condi-tioning the same base model on the ground-truth answer, and are reused throughout training. GRPO and REG use the on-policy rollouts and reference policy already available in the training job. 
+
+Backend and execution. All experiments use 
+
+ms-swift as the post-training launcher. The rout-ing code is implemented as a recipe assignment module that writes four disjoint queues in each batch: GRPO, OPSD, REG, and SKIP. The update step reads these queues and applies the correspond-ing loss. This design also makes the ablation base-lines easy to run, since random routing, fixed-ratio routing, and accuracy-only routing only replace the assignment rule. 
+
+Algorithm 1 Self-Routing Post-Training 
+
+Require: Training set D, policy πθ, verifier R,rollout count G, reference policy πref  
+
+> 1:
+
+for training step t = 1 , . . . , T do  
+
+> 2:
+
+Sample a mini-batch B ⊂ D  
+
+> 3:
+
+for each sample x ∈ B do  
+
+> 4:
+
+Generate on-policy rollouts {oi}Gi=1 
+
+from πθ(·| x) 
+
+> 5:
+
+Evaluate each rollout with the verifier: 
+
+ri = R(oi, x ) 
+
+> 6:
+
+Compute rollout accuracy ax =
+
+> 1
+> G
+
+PGi=1 ri 
+
+> 7:
+
+Estimate sample confidence cx from token-level predictive entropy  
+
+> 8:
+
+Build behavior state bx =(ω(ax), ϕ (cx))  
+
+> 9:
+
+Compute routing scores 
+
+sGRPO , s OPSD , s REG , s SKIP  
+
+> 10:
+
+Normalize scores into px =[pGRPO , p OPSD , p REG , p SKIP ] 
+
+> 11:
+
+Assign recipe zx ∼ Categorical( px) 
+
+> 12:
+
+end for  
+
+> 13:
+
+Partition B into Bg, B o, B r, B s according to recipe assignments  
+
+> 14:
+
+Compute LGRPO on Bg 
+
+> 15:
+
+Compute LOPSD on Bo 
+
+> 16:
+
+Compute LREG on Br 
+
+> 17:
+
+Skip samples in Bs 
+
+> 18:
+
+Update πθ with 
+
+L = |Bg|L GRPO + |Bo|L OPSD + |Br|L REG 
+
+|Bg| + |Bo| + |Br| . 
+
+> 19:
+
+end for Runtime environment. Training is conducted on a single node with 8 NVIDIA A100 GPUs. The codebase is built on PyTorch (Paszke et al., 2019) and uses the standard Hugging Face model/tokenizer interface through ms-swift .Multi-GPU execution, mixed-precision training, checkpoint saving, and distributed data loading are handled by the training backend. We keep the same runtime stack for all compared methods, so dif-ferences in the reported results do not come from different launchers or inference engines. 
+
+Reference policy. For the REG branch, we use a fixed reference policy during each update. In prac-tice, this can be the initial model, the old policy before the current update, or a checkpoint selected by the training script. In our runs, the reference is passed through the same ms-swift model inter-face as the policy model, so no separate inference service is needed. 
+
+Verifier. For mathematical reasoning tasks, the verifier extracts the final answer and compares it with the ground-truth answer. We use the same verifier for rollout scoring, GRPO rewards, and evaluation-time correctness. This avoids giving Self-Routing a stronger correctness signal than the baselines. 
+
+C Routing Hyperparameters 
+
+We keep the routing-related hyperparameters fixed across datasets and model scales. Each prompt uses G = 8 on-policy rollouts. The verifier re-ward is binary correctness, R(o, x ) ∈ { 0, 1}. The accuracy membership centers are 0, 0.5, and 1, cor-responding to low-accuracy, uncertain, and high-accuracy behavior states. We set σl = σh = 0 .18 
+
+and σm = 0 .16 .The confidence signal is the mean token-level predictive entropy of the generated response, nor-malized within the current training batch. The ac-tive recipe set contains GRPO, OPSD, and REG, while SKIP contributes no gradient in the current update. Recipe assignment uses categorical sam-pling from the normalized routing scores. 
+
+D Training and Evaluation Configuration 
+
+We use DAPO-Math-17K as the training set and evaluate on GSM8K, MATH-500, AIME24, AIME25, MMLU-Pro, and GPQA-diamond. The reported average is the macro-average over these six benchmarks. The main baselines are Base, Naive-GRPO, and Naive-OPSD. The routing base-lines are round-wise random routing, fixed-ratio random routing, and accuracy-based routing. All training runs use the same ms-swift post-training framework. Experiments are conducted on a single node with 8 NVIDIA A100 GPUs. The implementation is based on PyTorch and uses Hug-ging Face Transformers-compatible model and to-kenizer APIs through ms-swift . The same run-time stack is used for Naive-GRPO, Naive-OPSD, routing baselines, and Self-Routing. No external reward model or extra annotation is used. 
+
+E Recipe Assignment Rules 
+
+Each sample is then assigned to one recipe by cate-gorical sampling. We use sampling rather than an argmax rule because the behavior estimates come from a finite rollout group. Sampling also prevents a large number of borderline samples from collaps-ing into the same branch early in training. The branch meanings are as follows. GRPO handles samples whose rollouts contain enough variation to produce a useful relative reward sig-nal. OPSD handles failed but recoverable samples, where dense imitation can give a stronger update than sparse outcome reward. REG handles samples that the model already solves with high confidence. SKIP removes samples whose current behavior pro-vides little training signal for the active recipes. 
+
+F FLOPs Estimate 
+
+We use the standard Transformer cost approxima-tion: a forward pass costs about 2N FLOPs per token and a training pass with forward and back-ward computation costs about 6N FLOPs per to-ken, where N is the parameter count. Let T denote training steps, B batch size, G rollouts per sample, and L average sequence length. After normalizing by N T BL , the main costs are: 
+
+Naive -GRPO = 2 G + 6 G = 8 G, 
+
+Naive -OPSD = 2 G + 2 + 6 = 2 G + 8 .
+
+For Self-Routing, the measured average branch ra-tios are 30 .8% GRPO, 30 .4% OPSD, 25 .5% REG, and 13 .3% SKIP. Its normalized cost is therefore 
+
+2G + 0 .308 · 6G + 0 .304 · (2 + 6) + 0 .255 · 6= 3 .848 G + 3 .962 .
+
+With G = 8 , the normalized costs are 64 .0 for Naive-GRPO, 24 .0 for Naive-OPSD, and 34 .7 for Self-Routing. Self-Routing is not meant to be the cheapest recipe in this implementation. Its benefit is that expensive update types are assigned to a smaller subset of samples instead of every rollout group. 
+
+G Additional Notes on Confidence Diagnostics 
+
+The confidence signal used by the router is com-puted from token-level entropy and normalized within the batch. We also ran auxiliary GSM8K diagnostics to check whether confidence and en-tropy behave differently on correct and incorrect re-sponses. These diagnostics are not used for model selection. They serve as sanity checks for the rout-ing signal. Across the analyzed runs, correct responses of-ten show slightly higher confidence and lower en-tropy than incorrect responses, though the gap varies by model family and scale. This supports us-ing confidence as a secondary signal rather than as the only routing criterion. Accuracy alone captures whether the current policy can solve the sample; confidence adds information about how stable the model appears when producing those answers. 
+
+H Router Motivation and Ablations 
+
+We conduct a preliminary diagnostic on Qwen3-4B to examine which optimization recipes are suitable for different rollout states. For each DAPO-Math-17K prompt, we sample eight rollouts and compute rollout accuracy a and normalized confidence c.We construct behavior-specific 50% training sub-sets and separately apply GRPO and OPSD. 
+
+Table 3: Diagnostic experiments motivating the behavior-to-recipe mapping. Results are ID Math / Gen-eral.                           
+
+> Subset Score GRPO OPSD Random random 70.9 / 53.8 74.8 / 55.6 Recoverable-low (1 −a)(1 −c)71.8 / 53.7 76.9 / 56.1
+> Mixed-correctness a(1 −a)76.2 / 55.8 75.5 / 55.5 Stable-solved ac 70.6 / 52.7 72.4 / 53.4 Overconfident-failure (1 −a)c69.4 / 52.5 72.7 / 54.0
+
+Mixed-correctness samples favor GRPO, con-sistent with the availability of reward contrast within the rollout group, whereas recoverable low-confidence failures favor OPSD. Stable solved sam-ples show little benefit from aggressive optimiza-tion, while confident failures perform poorly under both active recipes. These observations motivate the four routing branches. We therefore view the router as an interpretable empirical design rather than a theoretically optimal assignment rule. 
+
+I Additional Router Ablations 
+
+Accuracy provides the strongest routing signal, as accuracy-only routing remains relatively close to Self-Routing while confidence-only routing degrades substantially. Confidence nevertheless provides complementary information, and re-moving either confidence calibration, behavior-conditioned assignment, or the conservative REG/SKIP branches consistently reduces perfor-mance. 
+
+Table 4: Ablations of the Self-Routing design on Qwen3-4B.                      
+
+> Variant ID Math OOD-V General Self-Routing 80.9 71.1 59.3
+> Accuracy-only 79.6 70.4 58.1 Confidence-only 74.2 67.6 54.8 w/o conf. calibration 79.0 70.0 57.2 w/o behavior assignment 77.8 69.0 56.4 w/o REG/SKIP 79.1 70.3 56.9
+
+J Additional Baselines and OOD Evaluation 
+
+Table 5: Additional evaluation on Qwen3-4B. OOD-V is the average over SATBench, AutoLogi, and LiveCodeBench-v5.

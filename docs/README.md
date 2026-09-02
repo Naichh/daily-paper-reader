@@ -6,38 +6,24 @@
 </div>
 
 ## 每次日报
-- 最新运行日期：2026-09-01
-- 运行时间：2026-09-01 21:50:59 UTC
+- 最新运行日期：2026-09-02
+- 运行时间：2026-09-02 22:54:29 UTC
 - 运行状态：成功
-- 本次总论文数：6
-- 精读区：6
+- 本次总论文数：2
+- 精读区：2
 - 速读区：0
 
 ### 今日简报（AI）
-今日精读6篇，聚焦采样token的on-policy蒸馏与教师噪声问题。
-最值得关注：Influence-Directed蒸馏破解多样性瓶颈，同时揭示从噪声教师走向自我改进的关键路径。
-建议下一步重点读这两篇精读论文，理解其方法差异，并尝试在小规模任务上复现对比。
-- 详情：[/202609/01/README](/202609/01/README)
+今日精读2篇LLM前沿论文，涵盖后训练新范式与智能体策略学习。最值得关注的是9分《From Rollouts to Recipes》，提出无需人工反馈的自包含后训练方法；8分关于用熵引导自主策略的论文也值得一瞥。若时间有限，建议优先精读第一篇，理解其核心公式与实验对比即可抓住要点。
+- 详情：[/202609/02/README](/202609/02/README)
 
 ### 精读区论文标签
-1. [Influence-Directed Distillation: Solving the Diversity Bottleneck in Sampled-Token On-Policy Distillation](/202609/01/2608.29846v1-influence-directed-distillation-solving-the-diversity-bottleneck-in-sampled-token-on-policy-distillation)  
-   标签：评分：10.0/10、query:policy-dist
-   evidence：提出影响力导向自适应在线策略蒸馏解决多样性瓶颈
-2. [Does On-Policy Distillation Really Distill? From Noisy Teacher to Self-Improvement](/202609/01/2608.31046v1-does-on-policy-distillation-really-distill-from-noisy-teacher-to-self-improvement)  
+1. [From Rollouts to Recipes: Self-Contained Post-Training for LLMs](/202609/02/2609.01422v1-from-rollouts-to-recipes-self-contained-post-training-for-llms)  
    标签：评分：9.0/10、query:policy-dist
-   evidence：对在线蒸馏的实证分析：教师噪声与自我改进
-3. [Self-OPD: On-Policy Distillation for Flow Matching Models without Teacher](/202609/01/2608.26872v2-self-opd-on-policy-distillation-for-flow-matching-models-without-teacher)  
+   evidence：面向LLM后训练的行为条件路由框架，其中包含在线策略自蒸馏路径
+2. [Selective Agent Guidance via Entropy: Learning Autonomous Policies from Imperfect VLM Teachers](/202609/02/2609.01567v1-selective-agent-guidance-via-entropy-learning-autonomous-policies-from-imperfect-vlm-teachers)  
    标签：评分：8.0/10、query:policy-dist
-   evidence：提出无教师的在线策略蒸馏（OPD）框架，核心与策略蒸馏方法需求直接相关
-4. [Call Neighbours Yourself: Graph Walks with Destination-Conditioned On-Policy Self-Distillation](/202609/01/2608.29588v1-call-neighbours-yourself-graph-walks-with-destination-conditioned-on-policy-self-distillation)  
-   标签：评分：8.0/10、query:policy-dist
-   evidence：提出目的地条件化的在线策略自蒸馏，训练LLM主动探索图邻域，属于策略蒸馏方法
-5. [SymVD: Symmetric Vision Language Action Distillation for Robot Manipulation](/202609/01/2608.29828v1-symvd-symmetric-vision-language-action-distillation-for-robot-manipulation)  
-   标签：评分：8.0/10、query:policy-dist
-   evidence：提出利用几何对称性将大型VLA教师知识蒸馏到紧凑学生策略的策略蒸馏框架
-6. [Reconciling Process Supervision with Outcome-Based Credit in Agentic Policy Optimization](/202609/01/2608.31077v1-reconciling-process-supervision-with-outcome-based-credit-in-agentic-policy-optimization)  
-   标签：评分：8.0/10、query:policy-dist
-   evidence：智能体策略优化中的在线策略自蒸馏与特权信息
+   evidence：通过选择性动作监督将VLM教师建议蒸馏进RL策略
 
 ### 速读区论文标签
 - 本次无速读推荐。
