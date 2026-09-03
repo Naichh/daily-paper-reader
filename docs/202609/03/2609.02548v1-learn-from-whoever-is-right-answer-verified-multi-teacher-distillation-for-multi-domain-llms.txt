@@ -1,0 +1,938 @@
+Title: Learn from Whoever Is Right: Answer-Verified Multi-Teacher Distillation for Multi-Domain LLMs
+
+URL Source: https://arxiv.org/pdf/2609.02548v1
+
+Published Time: Thu, 03 Sep 2026 01:20:02 GMT
+
+Number of Pages: 17
+
+Markdown Content:
+# Learn from Whoever Is Right: Answer-Verified Multi-Teacher Distillation for Multi-Domain LLMs 
+
+## Xixiang He 1, Xingming Li 1, Baiqi Wu 2, Qiyao Sun 1, Xuanyu Ji 1, Ao Cheng 1, Qingyong Hu 3∗
+
+> 1
+
+National University of Defense Technology 
+
+> 2
+
+Zhejiang University 
+
+> 3
+
+Intelligent Game and Decision Lab {hexixiang, lixingming, sunqiyao18, jixuanyu18, chengao18}@nudt.edu.cn, wubaiqi@zju.edu.cn, huqingyong15@outlook.com 
+
+Abstract 
+
+Modern large language models (LLMs) rely on reinforce-ment learning to build strong capabilities in individual do-mains, but integrating those capabilities into a single deploy-able model remains challenging. By routing each sample to the teacher whose domain matches it, existing approaches let a domain label decide which teacher provides supervi-sion. However, domain expertise holds only on average: the matched teacher is not always correct on a given sample, while a teacher from another domain sometimes is. The re-liable teacher therefore has to be identified per sample, not per domain. In this paper, we introduce Multi-Teacher Self-
+
+Distillation Policy Optimization (MT-SDPO), an on-policy distillation method that unifies several frozen teachers into one student model. MT-SDPO consists of three components: (1) self-anchors , where a rollout is supervised by a correct roll-out from its own group; (2) answer-verified eligibility , where a teacher may supervise a sample only if its own answer passes a verifier; and (3) privileged distillation , which merges the anchor and all verified feedback into one context that an ex-ponential moving average self-teacher reads and the student does not, thereby keeping one policy at deployment. Across five students from three model families, MT-SDPO lifts the weakest domain of Qwen3-8B by 14.79 points and narrows its domain gap by 74.7%, a better balance than serving one matched teacher per domain. Verified reliability, not domain membership, should decide who teaches. Code is available at https://github.com/hexixiang/MT-SDPO. 
+
+## 1 Introduction 
+
+“When three walk together, there is always a teacher among them: I choose what is good and follow it; what is not good, I correct.” — Confucius, The Analects Post-training a modern large language model (LLM) is organized by domain: verifiable-answer reinforcement learning (RL) for mathematical reasoning (Shao et al. 2024; Guo et al. 2025), software-evolution rewards (Wei et al. 2025) and executable SWE environments (Jain et al. 2025), human-preference rewards for instruction follow-ing (Ouyang et al. 2022), and interactive environments for search agents (Nakano et al. 2021; Jin et al. 2025). Each 
+
+> ∗
+
+Corresponding author. Matched-domain only: 52.9% correct answers      
+
+> Match “Materials” Label, because of the domain
+> Private Answer
+> Student is misled.
+> Wrong Feedback Match “Materials” Label, because of the domain
+> Correctness:
+> Materials Physics Chemistry
+> √ Right ×Wrong √ Right Question: “What is water?” (Domain: Materials)
+> Verification Verified correct Verified correct Multiple Correct Feedbacks. Student learns the right thing.
+> (b) MT-SDPO (Ours) (a) Domain Routing
+> Any verified teacher: 65.7% correct answers
+
+Figure 1: Sample-Level Teacher Reliability Gap. A domain label can select a teacher wrong on the sample; MT-SDPO verifies private answers and uses all eligible feedback. recipe needs its own data and rollout protocol, so a sepa-rate domain teacher is trained for each domain. A deployed system, however, answers every request with one policy: a teacher pool adds overhead and requests cross domain bound-aries. Multi-domain post-training therefore ends by asking how to fold the teachers back into one deployable model. Among the routes to this problem, we study on-policy integration, which keeps the teachers frozen and lets one student learn on its own rollouts, so what remains open is which teacher supervises which rollout. Multi-Teacher On-Policy Distillation (MOPD) (Ma et al. 2026) develops do-main teachers independently, then routes each rollout to the teacher whose domain matches the prompt, assuming that teacher is right for every sample in its domain. Domain expertise, however, is an average-case property: domain boundaries overlap, teachers trained from a shared source repeat the same errors, and a teacher from another domain sometimes succeeds anyway. Figure 1 quantifies this arXiv:2609.02548v1 [cs.LG] 2 Sep 2026 gap on our training set: the matched teacher is correct on only 52.9% of samples, while per-sample selection raises the share with at least one correct teacher to 65.7%. The reliable teacher therefore varies per sample, not per domain: whom should the student trust? 
+
+We answer with an allocation rule that drops the domain label: on each sample, any source whose answer is verified correct is a legitimate teacher, and no unverified source is. The student counts as one such source: its own correct roll-out is the cheapest verified teacher, so frozen teachers are consulted only where it fails. Supervision then flows exactly where someone is known to be right. We instantiate the rule as Multi-Teacher Self-Distillation Policy Optimization (MT-SDPO) on top of Self-Distillation Policy Optimization (SDPO) (Hübotter et al. 2026), which turns textual feedback into a dense token-level signal through a privileged self-teacher. Three technical questions remain, and one component answers each: anchoring where the stu-dent is already right, coverage where it is not and the anchor is missing, and merging where anchor and feedback must become one signal. Figure 2 traces one training step through the three components. Self-anchors let a correct rollout su-pervise the incorrect peers of its own group. Answer-verified eligibility admits a teacher’s feedback only when its private answer passes a verifier that no model sees, and takes ev-ery teacher that qualifies. Privileged distillation merges the anchor and all verified feedback into one context that only an exponential moving average (EMA) self-teacher reads, and distills that self-teacher into the student token by token. Training updates only the student model, which is also all that deployment keeps. Built on per-sample answer verification and privileged self-distillation, MT-SDPO not only redistributes capabil-ity toward the weakest domain, but can also outperform a three-model reference that serves one matched teacher per domain. We evaluate on the chemistry, materials science, and physics domains of the Science Q&A subset in SciKnowE-val L3 (Feng et al. 2024) with five student models from three families, each under its own multi-domain initialization. On Qwen3-8B (Yang et al. 2025), MT-SDPO gains 4.64 points in Macro accuracy and 14.79 in worst-domain accuracy, and cuts the domain gap from 20.96 to 5.30. The gains are not tied to one model: every Qwen3 scale becomes more balanced, though the aggregate improves only at 8B, and all three met-rics improve together on OLMo-3-7B-Instruct (Team Olmo et al. 2025), a second family with a different teacher gen-erator. On Llama-3.1-8B-Instruct (Grattafiori et al. 2024), whose initialization is already balanced and leaves little head-room, no online method pays off, a negative result. Our con-tributions are as follows: 
+
+• Sample-level diagnosis. We quantify the reliability gap between domain-matched and per-sample teacher selec-tion, separating matched coverage, cross-domain rescue, and failure across all teachers. 
+
+• MT-SDPO. Answer-verified multi-teacher self-distillation that grants eligibility per sample and consolidates all eligible teachers with the student’s self-anchor into one privileged self-teacher. 
+
+• Controlled evidence. Same-initialization ablations iso-lating answer verification, per-sample selection, and multi-teacher aggregation. 
+
+## 2 Related Work 
+
+Turning separately trained domain teachers into one deploy-able policy raises three questions that organize prior work: how the teachers are consolidated into one model, how a stu-dent learns on-policy from a teacher, and how supervision is allocated across teachers on a shared sample. 
+
+(1) Capability Consolidation for Multi-Domain LLMs. 
+
+Prior routes build or consolidate multi-domain capabilities by 1) joint or cascaded multi-domain RL (Yang et al. 2025; Wang et al. 2025), 2) off-policy finetuning on teacher com-pletions (DeepSeek-AI et al. 2025), 3) weight-space merg-ing (Wortsman et al. 2022; Ilharco et al. 2023), or 4) mixed-domain training with negative-transfer control (Yu et al. 2020; Cai et al. 2026; Yang et al. 2026a; Ye et al. 2025). Closest to us is MOPD (Ma et al. 2026), which routes the student’s own rollouts to the domain-matched frozen teacher; we implement this rule as our Domain Routing baseline. It assumes the matched teacher is the right supervisor for every sample from its domain, whereas MT-SDPO keeps MOPD’s two-stage split but selects the supervisor per sample by veri-fication. 
+
+(2) On-Policy and Self-Distillation. Classical distilla-tion matches a teacher on a fixed corpus and is off-policy, so the student can drift at inference (Hinton, Vinyals, and Dean 2015; Kim and Rush 2016). Adaptive off-policy dis-tillation instead reuses student-generated outputs (Ko et al. 2024), while on-policy distillation scores the student’s cur-rent rollouts with a separate teacher (Gu et al. 2024; Agarwal et al. 2024). Self- and context-distillation let a model learn from signals produced by itself or by a context-privileged copy (Hübotter et al. 2026; Zhao et al. 2026; Kim et al. 2026; Song et al. 2026; Ye et al. 2026). Our baseline SDPO (Hübot-ter et al. 2026) anchors this self-teacher on the student’s own correct rollout, and gives no signal where that rollout is missing. MT-SDPO keeps the self-anchor but adds verified external teachers, so those unanchored samples can still be supervised by whichever teacher is right. 
+
+(3) Multi-Teacher Distillation and Supervision Relia-bility. Distilling several teachers into one student (You et al. 2017) appears in recent LLMs as output mixing or per-sample routing (Team et al. 2026; Yang et al. 2026b), sometimes with adaptive per-instance teacher weights (Liu, Zhang, and Wang 2020; Yuan et al. 2021). Separately, verifiable-reward RL and generative verifiers turn correctness into a training signal that scores the student’s own output (Lambert et al. 2024; Guo et al. 2025; Zhang et al. 2025); MT-SDPO draws on the same signal but spends it on deciding whom the stu-dent should trust. However, the multi-teacher aggregation and routing methods cited above do not use the correctness of each teacher’s private answer to gate supervision; an in-correct teacher can therefore be weighted or routed like a correct one. MT-SDPO closes this gap and differs in three ways: 1) a teacher may supervise a sample only if its own private answer passes a verifier, so eligibility reflects cor-Any signal ? 
+
+④ EMA-Guided Distillation 
+
+> correct rollouts
+
+Offline Expert  
+
+> Training question
+> Which material has the highest melting point?
+> A. NaCl B. Au C. Ice D. �2�
+> Chemistry Expert Physics Expert Materials Expert
+> Eligible expert set
+> Whoever is right becomes a teacher for this sample
+> Answer keys are available only to verifiers and never exposed to models.
+
+Online Training Step Deployment 
+
+> One Unified Policy for All Domains Unified Student Policy : (Interdisciplinary expert) No Auxiliary Inference Components
+> No need identify the domain.
+> No more experts at inference. No more extra information. No verifier, no extra models.
+
+① Group Rollouts + verify 
+
+② Self-Anchor + Answer-Verified Teachers 
+
+�1
+
+�2
+
+�3
+
+�4
+
+... ... ... ...         
+
+> Correct rollouts → Self-Anchor
+> Reuse as self-anchor For �3��3= � 1
+> For ��2= � 1�2
+> For �3��3= � 1
+> Incorrect rollouts → Answer-Verified
+> Eligible expert
+> A1 、A2
+> Filtration: A1, A2 Passed
+
+×
+
+③ Privileged Context 
+
+> Teacher
+> Student Question + Privileged + prefix Question + prefix
+
+�� 
+
+> Input → Student
+> Rollout = training unit � = 8
+> Verifier (Program Checker)
+> rollouts
+> verify rollouts Self-Anchor
+
+... ... 
+
+> Filter feedback:
+
+A1, and A2 
+
+> On Policy sampling Privileged context
+> Train Skip
+> Chemistry Expert Materials Expert
+
+Figure 2: Overview of MT-SDPO. Offline answer verification builds a sample-level eligible teacher set. Online, self-anchors and sanitized teacher feedback condition an EMA self-teacher that distills into the student model, all that deployment retains. rectness rather than a domain label or learned weight; 2) eligibility is decided per sample, so a cross-domain teacher helps whenever it is right; 3) all verified teachers combine with the student’s self-anchor into a single self-teacher. 
+
+## 3 Preliminaries 
+
+Self-Distillation Policy Optimization. Given a prompt 
+
+x ∼ D , SDPO (Hübotter et al. 2026) samples an on-policy rollout y = ( y1, . . . , y T ) ∼ πθ (· | x) and re-evaluates it with a self-teacher that additionally observes privileged informa-tion c. Write pθ,t = πθ (· | x, y <t ) for the student distribution and q¯θ,t = sg[ π¯θ (· | x, c, y <t )] for the self-teacher distribu-tion, where ¯θ is a slowly updated copy of θ. The rollout-level objective is 
+
+LSDPO (x, y, c ) = 1
+
+T
+
+> T
+
+X
+
+> t=1
+
+D pθ,t q¯θ,t 
+
+ , (1) where D is a token-level divergence and sg blocks self-teacher gradients. The context c can contain environment feedback or another verified successful rollout; it changes the self-teacher distribution without changing the rollout on which the student is trained. 
+
+Multi-Teacher Setting. Each training instance consists of a prompt xi, a verifiable reference answer a∗ 
+
+> i
+
+, and a do-main label di. We train one student model πθ with feedback from K frozen domain teachers {Ek}Kk=1 , each queried ei-ther for a private answer, written Eans  
+
+> k
+
+, or for a critique of a given rollout, written Efb  
+
+> k
+
+. A programmatic verifier Verify (·, a ∗ 
+
+> i
+
+) ∈ { 0, 1} extracts the answer from a comple-tion and compares it with a∗ 
+
+> i
+
+; the reference answer reaches this verifier and the sanitizer only, and never enters a student or teacher prompt at any stage of MT-SDPO. Our problem is to decide, for each student rollout, which teachers may contribute to c and then consolidate their supervision into the single policy πθ that training retains. 
+
+## 4 Method 
+
+We propose MT-SDPO, an answer-verified multi-teacher dis-tillation framework that consolidates K frozen domain teach-ers into one deployable policy. A single allocation rule gov-erns it: a teacher may supervise a sample only if its own pri-vate answer is verified correct. MT-SDPO therefore pairs a supervision source the student produces itself with a sample-level eligible teacher set that replaces domain routing. 
+
+4.1 Framework Overview 
+
+Verification runs once, before training. As illustrated in Figure 2, MT-SDPO trains a single student model πθ with three auxiliary parts that all disappear at inference: K frozen domain teachers, a programmatic verifier, and an EMA copy 
+
+π¯θ of the student that serves as the self-teacher. Every teacher first answers each question privately, and the verifier caches the correct ones as that sample’s eligible set, so training pays no recurring answering cost. 
+
+Each online step aligns supervision to individual rollouts. 
+
+The student samples a group of rollouts per prompt and the verifier labels them. A correct rollout supervises the remain-ing rollouts of its group as their self-anchor, whereas an incorrect one is sent to the eligible teachers, whose sanitized feedback joins the anchor in a privileged context that only the self-teacher reads. Distilling the self-teacher into the student is the only parameter update. 
+
+4.2 Rollout-Specific Self-Anchors 
+
+The first source of privileged information is the student it-self (Hübotter et al. 2026): a rollout group usually mixes correct and incorrect rollouts, and a correct one is a solution the current policy has already shown it can produce. 
+
+A programmatic check splits each rollout group. For prompt xi, the student samples G rollouts {y1 
+
+> i
+
+, . . . , y Gi } ∼ 
+
+πθ (· | xi), and 
+
+Si =
+
+n
+
+j : Verify (yji , a ∗ 
+
+> i
+
+) = 1 
+
+o
+
+(2) indexes the correct ones. 
+
+Each rollout takes its self-anchor from a correct peer. 
+
+The self-anchor of rollout j is 
+
+sji =
+
+(
+
+Trunc 
+
+
+
+yj⋆
+
+> i
+
+
+
+, Si \ { j}̸ = ∅,
+
+∅, otherwise , (3) where j⋆ = min( Si \ { j}) is the earliest correct rollout of the same group other than j, and Trunc keeps that rollout’s solution segment within the anchor token budget. 
+
+Excluding the rollout itself prevents sequence leakage. 
+
+If j were its own anchor, the self-teacher would observe a complete copy of the sequence whose prefixes it scores, and the supervision would degenerate into copying. An incorrect rollout can still reuse a correct peer, whereas a prompt that the student never solves has no self-anchor at all. 
+
+4.3 Answer-Verified Teacher Eligibility 
+
+Domain match indicates which teacher is stronger on aver-age, not which is correct on a given question (Ma et al. 2026). MT-SDPO replaces this proxy with a per-sample check, and spends the resulting teacher queries only on rollouts the ver-ifier marked incorrect, which is also where the self-anchor may be missing. 
+
+A private answer decides eligibility before training starts. 
+
+Teacher k independently produces a private completion 
+
+ˆyi,k = Eans  
+
+> k
+
+(xi) from the question and its choice list, and the verifier keeps the teachers that are correct: 
+
+Vi = {k : Verify (ˆ yi,k , a ∗ 
+
+> i
+
+) = 1 } . (4) The eligible set is sample-specific and ignores the domain label di: a teacher from another domain enters Vi whenever it answers correctly, and the nominal-domain teacher drops out whenever it does not. 
+
+Every eligible teacher is queried independently. Each 
+
+k ∈ V i receives the question, the full choice list, and the incorrect rollout, but neither a∗ 
+
+> i
+
+nor ˆyi,k . Only the messages that survive sanitization reach the context, concatenated in a fixed teacher order: 
+
+F ji =
+
+(
+
+Concat k∈V i
+
+h
+
+Γ
+
+
+
+Efb  
+
+> k
+
+(xi, y ji )
+
+i 
+
+, j / ∈ S i,
+
+∅, otherwise , (5) where the sanitizer Γ screens a message against xi and a∗ 
+
+> i
+
+and returns either the accepted feedback or ∅, so that an empty 
+
+Vi also leaves F ji empty. Eligibility fixes who is asked rather than who contributes: |V i| eligible teachers supply at most 
+
+|V i| messages. Unlike conventional multi-teacher aggrega-tion (You et al. 2017), MT-SDPO applies neither a majority vote nor domain-based weighting over those messages. 
+
+The sanitizer bounds label leakage and topical drift. 
+
+Γ rejects an entire message that reveals the correct label, whether as a structured answer pattern, a targeted label ex-pression, or the full text of the correct option. It also requires a short concept anchor occurring verbatim in the question, so that the critique addresses the specific error. Both gates are lexical: they bound leakage and drift, but neither catch every paraphrase of the label nor certify that the retained feedback is semantically valid. 
+
+Verification is an allocation rule, not a correctness proof. 
+
+Equation (4) tests one cached completion under a fixed prompt and decoding configuration; it neither tests the cri-tique that the teacher writes later nor establishes general competence on the question. We therefore justify it by its downstream effect, which Section 5.5 measures against do-main routing and against unverified aggregation. 
+
+4.4 Privileged Distillation and Student Update 
+
+MT-SDPO merges the two sources into one training signal: it conditions the EMA self-teacher on both and transfers the resulting token distribution to the student, which observes neither. 
+
+The privileged context combines the two sources under one mask. For each rollout, MT-SDPO forms the context 
+
+cji = [ sji ; F ji ], which the self-teacher reads after the original question under natural-language section headers, together with the eligibility mask 
+
+mji = ⊮
+
+h
+
+cji̸ = ∅
+
+i
+
+= ⊮
+
+h
+
+sji̸ = ∅ ∨ F ji̸ = ∅
+
+i
+
+. (6) The context has four cases: full conditioning when both sources exist, a fallback to self-anchor SDPO (Hübotter et al. 2026) when only sji exists, and teacher-only SDPO when only 
+
+F ji exists. The mask collapses the fourth, in which both are empty because the group holds no other correct rollout and no message survived, so that such a rollout contributes no distillation loss instead of an uninformative one. An empty source deletes its own block rather than leaving a place-holder, so the context stays a single natural-language prompt throughout. Appendix E reproduces the template. The objective is a masked, importance-weighted token-level divergence. At token t of rollout yji , the student scores the sampled prefix from the question alone, pjθ,i,t = πθ (· | 
+
+xi, y ji,<t ), while the self-teacher scores the same prefix with the context attached, qj
+
+¯θ,i,t = sg[ π¯θ (· | xi, c ji , y ji,<t )] . The teacher branch carries the EMA parameters ¯θ rather than the current θ, and sg only keeps the update out of that branch. Teacher forcing on a shared prefix keeps the two branches token-aligned. Extending Eq. (1) from one rollout to a masked, importance-weighted batch objective and in-stantiating D as the symmetric Jensen–Shannon divergence gives 
+
+LMT -SDPO = 1
+
+Z
+
+X
+
+i,j,t 
+
+mji M ji,t wji,t DJSD 
+
+
+
+pjθ,i,t qj
+
+¯θ,i,t 
+
+
+
+,
+
+(7) where M ji,t masks response tokens, wji,t is a detached and clipped importance weight (Schulman et al. 2017) that cor-rects policy drift on the sampled token, and Z counts the unmasked tokens. We adopt the symmetric divergence and the EMA self-teacher because both stabilize on-policy dis-tillation (Agarwal et al. 2024; Hübotter et al. 2026). Since 
+
+π¯θ is both an EMA copy and the only branch that reads 
+
+cji , the divergence transfers a context-conditioned and tem-porally smoothed shift rather than the isolated contribution of cji . Appendix B gives the truncated support of the diver-gence, the two ratios behind wji,t , and the per-micro-batch normalization that replaces Z.
+
+Only the student model is updated and deployed. Gradi-ents reach θ alone: every Ek stays frozen, and the EMA copy runs without gradients and follows ¯θ ← (1 − τ )¯θ + τ θ with EMA rate τ = 0 .05 once per collected rollout batch. A step samples rollouts from πθ , computes every target in Eq. (7) from one fixed ¯θ, takes the mini-batch updates on θ, and refreshes ¯θ last. Although the trainer reuses Group Relative Policy Optimization (GRPO) (Shao et al. 2024) infrastruc-ture to collect rollouts, no scalar advantage enters Eq. (7): the binary check only marks success, builds self-anchors, and gates teacher queries. Algorithm 1 in Appendix B states one full training step. Once training finishes, MT-SDPO discards the EMA state and the teacher pool. 
+
+## 5 Experiments 
+
+We ask three questions. Q1: Supervision allocation. Does a prompt’s domain identify a teacher correct on it? Q2: Capa-bility integration. Can MT-SDPO produce one policy strong in aggregate and its weakest domain? Q3: Component ef-fects. How much do answer verification, cross-domain reas-signment, and aggregation each contribute? 
+
+5.1 Experimental Setup 
+
+Datasets and Models. We use the Science Q&A subset of the L3 split of SciKnowEval (Feng et al. 2024), restricted to its chemistry, materials science, and physics domains, whose multiple-choice questions carry the single reference Chem. Mater. Physics 
+
+Question Domain   
+
+> 025 50 75 100
+> Training questions (%)
+> 47.2
+> +11.4
+> 41.5 65.0
+> +8.1
+> 26.9 46.7
+> +18.7
+> 34.6
+> Matched Rescue None
+
+(a) Teacher Coverage 0 1 2 3
+
+Correct Teachers, |i|   
+
+> 0500 1000 1500 2000
+> Teacher answers
+> 2,010 323 646 572 286 2,022
+> n=670
+> n=323 n=286
+> n=674
+> Correct Wrong
+
+(b) Answer Composition 
+
+Figure 3: Teacher-Pool Diagnosis on the Training Set. (a) Coverage from matched teachers, cross-domain rescue, and none correct. (b) Correct and wrong teacher answers per correct-teacher bin; labels give sample counts. 58 60 62 64 66 68 
+
+> Macro Accuracy (%)
+> 47.5 50.0 52.5 55.0 57.5 60.0 62.5 65.0
+> Worst-Domain Accuracy (%)
+> Multi-Domain PT SDPO All-unverified Domain routing Verified routing Single eligible MT-SDPO
+> Multi-Domain PT [62.47, 49.29] SDPO [58.89, 52.85] All-unverified [60.55, 55.14] Domain routing [64.21, 62.03] Verified routing [65.08, 61.79] Single eligible [66.11, 62.26]
+> MT-SDPO [67.11, 64.08]
+
+(a) Absolute Accuracy −5 0 5 10 15  
+
+> Macro Gain over Multi-Domain PT (pp)
+> 0246810 12 14 16
+> Worst-Domain Gain over Multi-Domain PT (pp)
+> Multi-Domain PT SDPO All-unverified Domain routing Verified routing Single eligible MT-SDPO
+> Multi-Domain PT [0.00, 0.00] SDPO [-3.58, 3.56] All-unverified [-1.92, 5.85] Domain routing [1.74, 12.74] Verified routing [2.61, 12.50] Single eligible [3.64, 12.97]
+> MT-SDPO [4.64, 14.79]
+
+(b) Accuracy Gain 
+
+Figure 4: Step-100 Capability Integration on Qwen3-8B. (a) Macro against Worst-domain accuracy. (b) Gains over Multi-Domain Post-Training. Dashed diagonals mark parity. option that the verifier checks. We balance the three do-mains and construct an approximately 9:1 train–test split. The students are Qwen3-1.7B, Qwen3-4B, Qwen3-8B (Yang et al. 2025), Llama-3.1-8B-Instruct (Grattafiori et al. 2024), and OLMo-3-7B-Instruct (Team Olmo et al. 2025), each su-pervised on the same prompts by a family-matched gener-ator: Qwen3-32B, Llama-3.1-70B-Instruct, or OLMo-3.1-32B-Instruct. Domain-specific post-training gives every stu-dent three frozen teachers; multi-domain post-training on the union of the three training sets gives the shared initialization of all controlled online methods. 
+
+Protocol and Metrics. Every controlled online method starts from that initialization and trains for 100 steps with 8 on-policy rollouts per prompt on 8 H100 80GB GPUs. Eval-uation draws 16 responses for each of the 79 held-out sam-ples per domain and reports avg@16 domain accuracy Ad,from which Macro, Worst, and Gap are the mean, minimum, and range over the three domains. We compare all methods at step 100 and measure every point difference against the same-student Multi-Domain Post-Training policy. 
+
+Main Baselines. SDPO (Hübotter et al. 2026) spends the same verifier entirely on the student’s own rollouts, pro-moting successful ones to privileged self-supervision, so it is the teacher-free control for what external feedback adds. 
+
+Domain Routing implements MOPD’s domain-assignment Model Method Chemistry Materials Physics Macro ↑ (∆) Worst ↑ (∆) Gap ↓ (∆)Qwen3-1.7B Base 37.10 41.14 46.52 41.59 37.10 9.41 Matched Teachers (3) 45.33 65.59 50.24 53.72 45.33 20.25 Multi-Domain PT 42.33 63.05 51.66 52.35 42.33 20.73 SDPO 40.74 55.93 50.40 49.02 (−3.33) 40.74 (−1.59) 15.19 (−5.54)                                                                                                                                                                                                       
+
+> Domain Routing 45.33 55.46 44.78 48.52 (−3.83) 44.78 (+2 .45) 10.68 (−10 .05)
+> MT-SDPO 46.52 56.65 46.20 49.79 (−2.56) 46.20 (+3 .87) 10.44 (−10 .29)
+> Qwen3-4B Base 41.69 58.94 59.65 53.43 41.69 17.96 Matched Teachers (3) 51.27 69.38 66.06 62.24 51.27 18.12 Multi-Domain PT 48.66 71.36 68.67 62.90 48.66 22.71 SDPO 51.98 70.17 64.40 62.18 (−0.72) 51.98 (+3 .32) 18.20 (−4.51)
+> Domain Routing 47.78 63.77 65.27 58.94 (−3.96) 47.78 (−0.88) 17.48 (−5.23)
+> MT-SDPO 50.63 62.26 63.92 58.94 (−3.96) 50.63 (+1 .97) 13.29 (−9.42)
+> Qwen3-8B Base 44.38 58.47 66.22 56.36 44.38 21.84 Matched Teachers (3) 52.93 68.04 68.99 63.32 52.93 16.06 Multi-Domain PT 49.29 70.25 67.88 62.47 49.29 20.96 SDPO 54.11 69.70 52.85 58.89 (−3.58) 52.85 (+3 .56) 16.85 (−4.11)
+> Domain Routing 62.03 67.33 63.29 64.21 (+1 .74) 62.03 (+12 .74) 5.30 (−15 .66)
+> MT-SDPO 67.88 69.38 64.08 67.11 (+4 .64) 64.08 (+14 .79) 5.30 (−15 .66)
+> Llama-3.1 8B-Instruct Base 30.38 43.04 41.53 38.32 30.38 12.66 Matched Teachers (3) 62.03 63.69 56.57 60.76 56.57 7.12 Multi-Domain PT 56.33 59.57 51.42 55.78 51.42 8.15 SDPO 58.62 58.86 39.24 52.24 (−3.54) 39.24 (−12 .18) 19.62 (+11 .47)
+> Domain Routing 57.20 53.96 43.43 51.53 (−4.25) 43.43 (−7.99) 13.77 (+5 .62)
+> MT-SDPO 59.57 53.48 44.62 52.56 (−3.22) 44.62 (−6.80) 14.95 (+6 .80)
+> OLMo-3 7B-Instruct Base 36.16 57.83 62.82 52.27 36.16 26.66 Matched Teachers (3) 48.02 61.55 53.24 54.27 48.02 13.53 Multi-Domain PT 48.42 63.21 57.67 56.43 48.42 14.79 SDPO 45.41 62.66 54.91 54.33 (−2.10) 45.41 (−3.01) 17.25 (+2 .46)
+> Domain Routing 51.90 64.56 63.29 59.92 (+3 .49) 51.90 (+3 .48) 12.66 (−2.13)
+> MT-SDPO 55.69 65.82 64.55 62.02 (+5 .59) 55.69 (+7 .27) 10.13 (−4.66)
+
+Table 1: Capability Integration Across Five Student Models. Per-domain columns are avg@16 accuracy (%) at step 100. Matched Teachers (3) is a per-domain frozen-teacher reference, not a deployable policy; Multi-Domain PT initializes the three online rows below it. ∆ is each online row minus its same-model initialization, and bold marks the best aggregate per block. rule (Ma et al. 2026), sending every failed rollout to its nominal-domain teacher without checking whether it can solve the sample. It inherits the self-anchor, sanitizer, and privileged self-teacher, so only the routing rule differs. 
+
+5.2 Domain Match Misses Correct Teachers 
+
+Domain match holds on average, not per sample. Before training, we record the eligible set Vi of Eq. (4) on every training sample. Each teacher does improve its own held-out domain over the shared base, by 8.55, 9.57, and 2.77 points. Per sample they are far less separable: the matched teacher is correct on only 52.94% of samples, and on physics samples the chemistry teacher is the more accurate of the two. Teachers sharing one base model and one data pipeline overlap in competence more than their labels suggest. 
+
+Per-sample selection turns that overlap into coverage. 
+
+Admitting any teacher whose private answer is verified cor-rect raises coverage to 65.69% and recovers 27.09% of what the matched teacher misses. Figure 3(a) breaks this rescue down by domain: largest in physics, at 18.74 points, where domain match is weakest. Figure 3(b) regroups the sam-ples by number of correct teachers: roughly half admit two or three, making aggregation possible, while 34.31% admit none and bound any method built on this pool. That group is why MT-SDPO pairs verified feedback with self-anchors. 
+
+5.3 Main Capability-Integration Results 
+
+MT-SDPO recovers the weakest domain of Qwen3-8B. 
+
+Table 1 and Figure 4 report every method at step 100. On Qwen3-8B, MT-SDPO improves Macro and Worst-domain accuracy by 4.64 and 14.79 points over Multi-Domain Post-Training, and narrows the gap from 20.96 to 5.30. Chemistry, the weakest domain, rises 18.59 points, while materials and physics together give back under five. MT-SDPO integrates capability instead of improving every domain, which is what one deployed policy needs. 
+
+On Qwen3-8B, one integrated policy is more balanced than one matched teacher per domain. MT-SDPO im-SDPO Verified routing Domain Routing MT-SDPO 0 20 40 60 80 100                        
+
+> Training Step
+> 58 62 66
+> Δ@100=+8.22 (a) Macro Accuracy ↑020 40 60 80 100
+> Training Step
+> 48 56 64
+> Δ@100=+11.23 (b) Worst-Domain Accuracy ↑020 40 60 80 100
+> Training Step
+> 0816 24 Δ@100=-11.55
+> (c) Domain Gap ↓020 40 60 80 100
+> Training Step
+> 0.3 0.4 0.5 0.6 0.7 0.8 0.9 Δ@100=+0.004 (d) Rollout Accuracy ↑
+
+Figure 5: Held-Out Dynamics and Rollout Accuracy. Panels (a)–(c) are held-out metrics; (d) is the verifier pass rate on training rollouts. Shading is the signed MT-SDPO–SDPO difference, not a confidence interval, and Domain Routing appears only at step 100 in (a)–(c). proves on the three-model matched-teacher reference by 3.79 Macro and 11.15 Worst-domain points with a single model at inference. Domain Routing reaches the same 5.30 gap but stays 2.90 and 2.05 points lower on the two accuracy met-rics: routing alone recovers the balance, and verification and aggregation supply the accuracy. 
+
+Spending the verifier on allocation is what redistributes capability. Spent as a scalar reward instead, the signal varies the objective, not the allocation rule. On Qwen3-8B that GRPO reference widens the gap from 20.96 to 21.76, whereas MT-SDPO brings the same start to 5.30 and stands 9.17 points higher in its weakest domain. Appendix D.3 gives its setup and per-domain scores. 
+
+A flatter profile arises through two different mechanisms. 
+
+All three Qwen3 scales cut the domain gap, by 49.6% at 1.7B, 41.5% at 4B, and 74.7% at 8B, but Macro improves at 8B alone. At 1.7B and 4B the flattening comes mostly from the strong domains falling: the weakest domain gains 4.19 and 1.97 points while the other two give back 11.86 and 13.85. At 8B and on OLMo-3-7B-Instruct, the weakest domain instead rises by 18.59 and 7.27 points and carries Macro with it, and OLMo gives the best Macro, Worst, and Gap of its block. Verified feedback therefore levels the profile wherever headroom remains, but yields an aggregate gain only where the weakest domain itself improves. 
+
+Headroom in the weakest domain decides whether the on-line phase pays off. Multi-domain post-training alone lifts Llama-3.1-8B-Instruct by 21.04 Worst-domain points and                     
+
+> Method Macro ↑(∆)Worst ↑(∆)Gap ↓(∆)w/o Cross-Domain 65.08 (+2 .61) 61.79 (+12 .50) 5.14 (−15 .82)
+> w/o Aggregation 66.11 (+3 .64) 62.26 (+12 .97) 7.99 (−12 .97)
+> w/o Verification 60.55 (−1.92) 55.14 (+5 .85) 10.92 (−10 .04)
+> MT-SDPO 67.11 (+4 .64) 64.08 (+14 .79) 5.30 (−15 .66)
+
+Table 2: Ablation of Supervision Allocation on Qwen3-8B. 
+
+∆ is method minus the shared Multi-Domain PT initial-ization; bold and underline mark the best and second-best step-100 values per column. leaves it the flattest initialization of the five, so the weakest-domain room that MT-SDPO exploits elsewhere is spent before the online phase begins and no controlled method im-proves on it. The bound is the remaining headroom, not an ordering among methods. 
+
+5.4 Training Dynamics 
+
+Non-monotonic trajectories motivate the fixed step-100 comparison. Figure 5 places the held-out integration met-rics and the training-time rollout accuracy in one view. SDPO peaks at step 50 and loses more than seven Macro points by step 100, whereas MT-SDPO peaks at step 70 and holds most of that peak to the end. Because no method improves monotonically, we compare at step 100 rather than at each method’s best intermediate checkpoint. 
+
+5.5 Ablation Studies 
+
+Cross-domain reassignment and aggregation play com-plementary roles. Table 2 expresses each variant as a re-moval from full MT-SDPO, with the self-anchor, sanitizer, EMA self-teacher, initialization, and update budget fixed. Restricting feedback to the verified domain-matched teacher (w/o Cross-Domain) starts the ladder; admitting one sample-eligible teacher instead (w/o Aggregation) adds 1.03 Macro and 0.47 Worst-domain points but widens the gap from 5.14 to 7.99; aggregating every eligible teacher in full MT-SDPO adds 1.00 and 1.82 points more and brings the gap to 5.30, recovering the balance. 
+
+Verification makes the larger teacher pool useful. Re-placing the eligible set with all three unverified teachers (w/o Verification) loses 6.56 Macro and 8.94 Worst-domain points against full MT-SDPO, and falls 1.92 Macro points below the shared initialization. The offline manifest shows why: the unverified rule draws on an incorrect answer in 50.21% of teacher–sample pairs, against 47.06% under domain routing. 
+
+## 6 Conclusion 
+
+We showed that a teacher pool is better allocated per sam-ple than per domain. Sample-level verification recovers a quarter of the samples domain routing misses; cross-domain reassignment then buys accuracy at the cost of balance, and aggregating every eligible teacher wins both back. Two lim-its remain: a third of samples admit no correct teacher, and balanced initializations leave little headroom. Extending MT-SDPO beyond exact-answer settings will require a reliable, task-appropriate alternative to exact-match eligibility. References 
+
+Agarwal, R.; Vieillard, N.; Zhou, Y.; Stanczyk, P.; Ramos, S.; Geist, M.; and Bachem, O. 2024. On-Policy Distillation of Language Models: Learning from Self-Generated Mis-takes. In The Twelfth International Conference on Learning Representations .Cai, M.; Liang, Y.; Wang, L.; Wang, Y.; Zhang, Y.; Xia, L.; Sun, Z.; Ye, X.; and Shi, D. 2026. Advancing General-Purpose Reasoning Models with Modular Gradient Surgery. arXiv:2602.02301. DeepSeek-AI; Liu, A.; Mei, A.; Lin, B.; Xue, B.; Wang, B.; Xu, B.; Wu, B.; Zhang, B.; Lin, C.; Dong, C.; et al. 2025. DeepSeek-V3.2: Pushing the Frontier of Open Large Language Models. arXiv:2512.02556. Feng, K.; Shen, X.; Wang, W.; Zhuang, X.; Tang, Y.; Zhang, Q.; and Ding, K. 2024. SciKnowEval: Evaluating Multi-Level Scientific Knowledge of Large Language Models. arXiv:2406.09098. Grattafiori, A.; Dubey, A.; Jauhri, A.; Pandey, A.; Kadian, A.; Al-Dahle, A.; Letman, A.; Mathur, A.; Schelten, A.; Vaughan, A.; et al. 2024. The Llama 3 Herd of Models. arXiv:2407.21783. Gu, Y.; Dong, L.; Wei, F.; and Huang, M. 2024. MiniLLM: Knowledge Distillation of Large Language Models. In The Twelfth International Conference on Learning Representa-tions .Guo, D.; Yang, D.; Zhang, H.; Song, J.; Wang, P.; Zhu, Q.; Xu, R.; Zhang, R.; Ma, S.; Bi, X.; et al. 2025. DeepSeek-R1 incentivizes reasoning in LLMs through reinforcement learning. Nature , 645(8081): 633–638. Hinton, G.; Vinyals, O.; and Dean, J. 2015. Distilling the Knowledge in a Neural Network. arXiv:1503.02531. Hübotter, J.; Lübeck, F.; Behric, L.; Baumann, A.; Bagatella, M.; Marta, D.; Hakimi, I.; Shenfeld, I.; Kleine Buening, T.; Guestrin, C.; and Krause, A. 2026. Reinforcement Learning via Self-Distillation. arXiv:2601.20802. Ilharco, G.; Ribeiro, M. T.; Wortsman, M.; Gururangan, S.; Schmidt, L.; Hajishirzi, H.; and Farhadi, A. 2023. Editing Models with Task Arithmetic. In The Eleventh International Conference on Learning Representations .Jain, N.; Singh, J.; Shetty, M.; Zheng, L.; Sen, K.; and Stoica, I. 2025. R2E-Gym: Procedural Environments and Hybrid Verifiers for Scaling Open-Weights SWE Agents. In Second Conference on Language Modeling .Jin, B.; Zeng, H.; Yue, Z.; Yoon, J.; Arik, S.; Wang, D.; Zamani, H.; and Han, J. 2025. Search-R1: Training LLMs to Reason and Leverage Search Engines with Reinforcement Learning. arXiv:2503.09516. Kim, J.; Jeon, J.; Li, D.; and Yang, Y. 2026. Rebellious Stu-dent: Reversing Teacher Signals for Reasoning Exploration with Self-Distilled RLVR. arXiv:2605.10781. Kim, Y.; and Rush, A. M. 2016. Sequence-Level Knowl-edge Distillation. In Proceedings of the 2016 Conference on Empirical Methods in Natural Language Processing , 1317– 1327. Austin, Texas: Association for Computational Linguis-tics. Ko, J.; Kim, S.; Chen, T.; and Yun, S.-Y. 2024. DistiLLM: Towards Streamlined Distillation for Large Language Mod-els. In Proceedings of the 41st International Conference on Machine Learning , volume 235 of Proceedings of Machine Learning Research , 24872–24895. PMLR. Lambert, N.; Morrison, J.; Pyatkin, V.; Huang, S.; Ivison, H.; Brahman, F.; Miranda, L. J. V.; Liu, A.; Dziri, N.; Lyu, S.; Gu, Y.; Malik, S.; Graf, V.; Hwang, J. D.; Yang, J.; Bras, R. L.; Tafjord, O.; Wilhelm, C.; Soldaini, L.; Smith, N. A.; Wang, Y.; Dasigi, P.; and Hajishirzi, H. 2024. Tulu 3: Pushing Frontiers in Open Language Model Post-Training. arXiv:2411.15124. Liu, Y.; Zhang, W.; and Wang, J. 2020. Adaptive Multi-Teacher Multi-Level Knowledge Distillation. Neurocomput-ing , 415: 106–113. Ma, W.; Wei, J.; Zhao, L.; Zhang, H.; Xiao, B.; Li, L.; Yang, Q.; Gao, B.; Wang, Y.; Li, R.; Dong, J.; Sui, Z.; and Luo, F. 2026. MOPD: Multi-Teacher On-Policy Dis-tillation for Capability Integration in LLM Post-Training. arXiv:2606.30406. Nakano, R.; Hilton, J.; Balaji, S.; Wu, J.; Ouyang, L.; Kim, C.; Hesse, C.; Jain, S.; Kosaraju, V.; Saunders, W.; Jiang, X.; Cobbe, K.; Eloundou, T.; Krueger, G.; Button, K.; Knight, M.; Chess, B.; and Schulman, J. 2021. WebGPT: Browser-assisted question-answering with human feedback. arXiv:2112.09332. Ouyang, L.; Wu, J.; Jiang, X.; Almeida, D.; Wainwright, C.; Mishkin, P.; Zhang, C.; Agarwal, S.; Slama, K.; Ray, A.; Schulman, J.; Hilton, J.; Kelton, F.; Miller, L.; Simens, M.; Askell, A.; Welinder, P.; Christiano, P. F.; Leike, J.; and Lowe, R. 2022. Training language models to follow instructions with human feedback. In Advances in Neural Information Processing Systems , volume 35, 27730–27744. Curran Associates, Inc. Schulman, J.; Wolski, F.; Dhariwal, P.; Radford, A.; and Klimov, O. 2017. Proximal Policy Optimization Algorithms. arXiv:1707.06347. Shao, Z.; Wang, P.; Zhu, Q.; Xu, R.; Song, J.; Bi, X.; Zhang, H.; Zhang, M.; Li, Y. K.; Wu, Y.; and Guo, D. 2024. DeepSeekMath: Pushing the Limits of Mathematical Rea-soning in Open Language Models. arXiv:2402.03300. Song, Y.; Chen, L.; Tajwar, F.; Munos, R.; Pathak, D.; Bag-nell, J. A.; Singh, A.; and Zanette, A. 2026. Expanding the Capabilities of Reinforcement Learning via Text Feedback. arXiv:2602.02482. Team, C.; Xiao, B.; Xia, B.; Yang, B.; Gao, B.; Shen, B.; Zhang, C.; He, C.; Lou, C.; Luo, F.; et al. 2026. MiMo-V2-Flash Technical Report. arXiv:2601.02780. Team Olmo; Ettinger, A.; Bertsch, A.; Kuehl, B.; Graham, D.; et al. 2025. Olmo 3. arXiv:2512.13961. Wang, B.; Lee, C.; Lee, N.; Lin, S.-C.; Dai, W.; Chen, Y.; Chen, Y.; Yang, Z.; Liu, Z.; Shoeybi, M.; Catanzaro, B.; and Ping, W. 2025. Nemotron-Cascade: Scaling Cascaded Rein-forcement Learning for General-Purpose Reasoning Models. arXiv:2512.13607. Wei, Y.; Duchenne, O.; Copet, J.; Carbonneaux, Q.; Zhang, L.; Fried, D.; Synnaeve, G.; Singh, R.; and Wang, S. I. 2025. SWE-RL: Advancing LLM Reasoning via Reinforcement Learning on Open Software Evolution. In Advances in Neural Information Processing Systems , volume 38, 78500–78525. Curran Associates, Inc. Wortsman, M.; Ilharco, G.; Gadre, S. Y.; Roelofs, R.; Gontijo-Lopes, R.; Morcos, A. S.; Namkoong, H.; Farhadi, A.; Carmon, Y.; Kornblith, S.; and Schmidt, L. 2022. Model soups: averaging weights of multiple fine-tuned models im-proves accuracy without increasing inference time. In Pro-ceedings of the 39th International Conference on Machine Learning , volume 162 of Proceedings of Machine Learning Research , 23965–23998. PMLR. Yang, A.; Li, A.; Yang, B.; Zhang, B.; Hui, B.; Zheng, B.; Yu, B.; Gao, C.; Huang, C.; Lv, C.; et al. 2025. Qwen3 Technical Report. arXiv:2505.09388. Yang, Z.; Chen, G.; Yang, Y.; Zeng, A.; and Yang, X. 2026a. Disentangling Task Conflicts in Multi-Task LoRA via Or-thogonal Gradient Projection. arXiv:2601.09684. Yang, Z.; Liu, Z.; Chen, Y.; Dai, W.; Wang, B.; Lin, S.-C.; Lee, C.; Chen, Y.; Jiang, D.; He, J.; Pi, R.; Lam, G.; Lee, N.; Bukharin, A.; Shoeybi, M.; Catanzaro, B.; and Ping, W. 2026b. Nemotron-Cascade 2: Post-Training LLMs with Cascade RL and Multi-Domain On-Policy Distillation. arXiv:2603.19220. Ye, H.; Chen, S.; Zhang, H.; Luo, W.; Li, Y.; and Zhang, X. 2025. Synergy over Discrepancy: A Partition-Based Ap-proach to Multi-Domain LLM Fine-Tuning. In Advances in Neural Information Processing Systems , volume 38, 18893– 18923. Curran Associates, Inc. Ye, T.; Dong, L.; Wu, X.; Huang, S.; and Wei, F. 2026. On-policy context distillation for language models. arXiv:2602.12275. You, S.; Xu, C.; Xu, C.; and Tao, D. 2017. Learning from Multiple Teacher Networks. In Proceedings of the 23rd ACM SIGKDD International Conference on Knowledge Discovery and Data Mining , KDD ’17, 1285–1294. ACM. Yu, T.; Kumar, S.; Gupta, A.; Levine, S.; Hausman, K.; and Finn, C. 2020. Gradient Surgery for Multi-Task Learning. In Advances in Neural Information Processing Systems , vol-ume 33, 5824–5836. Curran Associates, Inc. Yuan, F.; Shou, L.; Pei, J.; Lin, W.; Gong, M.; Fu, Y.; and Jiang, D. 2021. Reinforced Multi-Teacher Selection for Knowledge Distillation. Proceedings of the AAAI Conference on Artificial Intelligence , 35(16): 14284–14291. Zhang, L.; Hosseini, A.; Bansal, H.; Kazemi, M.; Kumar, A.; and Agarwal, R. 2025. Generative Verifiers: Reward Model-ing as Next-Token Prediction. In The Thirteenth International Conference on Learning Representations .Zhao, S.; Xie, Z.; Liu, M.; Huang, J.; Pang, G.; Chen, F.; and Grover, A. 2026. Self-Distilled Reasoner: On-Policy Self-Distillation for Large Language Models. arXiv:2601.18734. Appendix 
+
+This appendix provides the training, evaluation, and prompt details behind the main text, together with additional results. It is organized as follows. 
+
+A Post-Training and Initialization . . . . . . . . . . . . . . . . . . . . . . . 10 B Online Optimization and Teacher Feedback . . . . . . . . . . . . 10 
+
+B.1 Implemented Form of the Distillation Objective . . . . . . . . . 10 B.2 Private-Answer Manifest. . . . . . . . . . . . . . . . . . . . . . . . . . . . . .11 B.3 Rollout-Specific Feedback . . . . . . . . . . . . . . . . . . . . . . . . . . . . 11 
+
+C Evaluation Protocol . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 11 
+
+C.1 Guarded Parsing Fallback . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 11 
+
+D Additional Results . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 12 
+
+D.1 Cross-Scale Training Dynamics . . . . . . . . . . . . . . . . . . . . . . . 12 D.2 Additional Feedback Diagnostics . . . . . . . . . . . . . . . . . . . . . . 12 D.3 Verifiable-Reward RL Reference . . . . . . . . . . . . . . . . . . . . . . 12 
+
+E Prompt Templates . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 12 
+
+E.1 SFT Data Construction . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 13 E.2 Student SFT and Initial Rollout . . . . . . . . . . . . . . . . . . . . . . . . 15 E.3 Online Self-Teacher Reprompts . . . . . . . . . . . . . . . . . . . . . . . . 15 E.4 Frozen Teacher Diagnostic Prompt . . . . . . . . . . . . . . . . . . . . . 16 E.5 Evaluation Prompts . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 16 
+
+F Feedback Effectiveness . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 17 
+
+## A Post-Training and Initialization 
+
+For five student backbones (Qwen3-1.7B, Qwen3-4B, Qwen3-8B, Llama-3.1-8B-Instruct, and OLMo-3-7B-Instruct), we construct three domain teachers and one Multi-Domain Post-Training policy from the family-matched base model. The teachers use separate domain sets; the Multi-Domain policy uses their balanced union. Post-training, con-trolled online optimization, and evaluation follow the shared recipes in Tables 3–5. Identifiers are family-specific, and family-matched generators and validation/recovery pipelines produce the supervision. The teachers use their final three-epoch weights and remain frozen. Every controlled online method starts from the corresponding epoch-2 Multi-Domain checkpoint; no method-specific initialization is used. 
+
+## B Online Optimization and Teacher Feedback 
+
+Algorithm 1 gives the procedure described in Section 4 of the main text. Table 4 lists the online optimization budget and distillation settings. Each controlled method processes 32 prompts per update, draws eight on-policy responses per prompt, and runs for 100 updates. The methods use the same prompt IDs, rollout-sampling configuration, and student-update budget. Each runs on eight H100 80GB GPUs. SDPO allocates all eight GPUs to the policy; methods with external teachers split four for policy training and four for serving the frozen teachers. 
+
+Parameter Value General 
+
+Model update Full-parameter post-training Optimizer Fused AdamW Learning rate 1 × 10 −5
+
+Schedule Cosine, 5% warmup Training epochs 3
+
+Data 
+
+Global batch size 4Maximum sequence length 8,192 tokens Response handling Response tokens only; no packing 
+
+Training 
+
+Weight decay / gradient clipping 0.1 / 1.0 Numeric precision bfloat16 
+
+Table 3: Post-Training Settings Shared Across All Stu-dent Backbones. Domain-specific and Multi-Domain Post-Training use the same recipe for Qwen3, Llama-3.1, and OLMo-3. 
+
+B.1 Implemented Form of the Distillation Objective 
+
+Equation (7) of the main text states the objective in its masked, importance-weighted form. Three details are fixed by the implementation. First, the Jensen–Shannon diver-gence DJSD (p∥q) = 12 DKL (p∥u) + 12 DKL (q∥u), where 
+
+u = 12 (p + q), is evaluated on a truncated support rather than the full vocabulary. At each position, the operator T ji,t [·]
+
+retains the 100 tokens with the highest student probabil-ity and collects the remaining mass in a tail symbol. The student defines the support, while each branch retains its own tail mass. Second, the weight wji,t = min( wj, prox  
+
+> i,t
+
+, ρ ) ·
+
+min( wj, TIS  
+
+> i,t
+
+, ρ ) combines the PPO proximal ratio wj, prox  
+
+> i,t
+
+=
+
+πθ (yji,t )/π θold (yji,t ) with the truncated-importance-sampling ratio wj, TIS  
+
+> i,t
+
+= πθold (yji,t )/π θrollout (yji,t ). Both ratios are con-ditioned on (xi, y ji,<t ), detached, and clipped only from above at ρ = 2. Third, the normalizer is applied per micro-batch rather than globally. For dynamic micro-batches 
+
+{M b}Bμ
+
+> b=1
+
+, let nb = |M b|, N = P 
+
+> b
+
+nb, and Zb =max {1, P 
+
+> (i,j )∈M b,t
+
+mji M ji,t }. The implemented loss is the sequence-count-weighted average of the micro-batch token means: 
+
+LMT -SDPO =
+
+> Bμ
+
+X
+
+> b=1
+
+nb
+
+N
+
+1
+
+Zb
+
+X
+
+> (i,j )∈M b
+> t
+
+mji M ji,t wji,t 
+
+· DJSD 
+
+
+
+T ji,t 
+
+h
+
+pjθ,i,t 
+
+i
+
+T ji,t 
+
+h
+
+qj
+
+> ¯θ,i,t
+
+i 
+
+.
+
+(8) Algorithm 1 Answer-Verified MT-SDPO 
+
+Input : data D; student πθ ; EMA self-teacher π¯θ ; frozen teachers 
+
+{Ek }Kk=1 ; rollout count G; EMA rate τ
+
+Output : updated student model πθ
+
+1: // Offline: cache sample-level teacher eligibility 
+
+2: Vi ← { k : Verify (Eans  
+
+> k
+
+(xi), a ∗ 
+
+> i
+
+) = 1 }, ∀(xi, a ∗ 
+
+> i
+
+) ∈ D 
+
+3: // Online: align supervision to each rollout 
+
+4: for each online training step do 
+
+5: B ∼ D ; y1: Gi ∼ πθ (· | xi) for each xi ∈ B 
+
+6: Si ← { j : Verify (yji , a ∗ 
+
+> i
+
+) = 1 }
+
+7: for each rollout yji in the batch do 
+
+8: sji ← Trunc( earliest rollout in Si \ { j}), or ∅ ▷
+
+Eq. (3), main text 9: F ji ← ∅
+
+10: if j / ∈ S i then 
+
+11: for each k ∈ V i do 
+
+12: F ji ← Concat F ji , Γ( Efb  
+
+> k
+
+(xi, y ji )) 
+
+13: end for 
+
+14: end if 
+
+15: cji ← [sji ; F ji ]; mji ← ⊮[cji̸ = ∅]
+
+16: Accumulate the (i, j ) terms of LMT -SDPO ▷ Eq. (7), main text 17: end for 
+
+18: Update θ over the collected batch 19: ¯θ ← (1 − τ )¯θ + τ θ 
+
+20: end for 
+
+21: return πθ ; discard π¯θ and all teachers 
+
+B.2 Private-Answer Manifest 
+
+For every student family, each frozen teacher answers each of the 1,953 training questions once before online training. Decoding is deterministic, with temperature 0, top-p = 1 .0,and a maximum of 6,144 tokens. Manifest construction uses the generic SciKnowEval L3 rollout prompt reproduced in Section E.2. This prompt is also used for online training and evaluation. The programmatic answer checker compares the parsed answer with the reference answer and records the sample-level eligible set. Neither the private-answer prompt nor the subsequent teacher-feedback prompt contains the ref-erence answer. MT-SDPO queries every eligible teacher. The w/o Cross-Domain control (verified domain routing) restricts this set to the nominal-domain teacher. Domain Routing and w/o Verification (the unverified all-teacher control) do not use the manifest for eligibility. 
+
+B.3 Rollout-Specific Feedback 
+
+External feedback is requested only when the student rollout is incorrect. Eligible teachers are queried independently in the fixed order of chemistry, materials science, and physics. Decoding uses temperature 0.2, top-p = 0 .95 , and a 256-token output limit. A message is retained only if it has a valid concept anchor under the lexical sanitizer and passes the answer-leakage checks. Failed or rejected messages are dropped. The retained messages are concatenated with the available self-anchor under the token budgets in Table 4. 
+
+Parameter Value Training 
+
+Prompts per update / rollouts per prompt 32 / 8 Number of updates 100 Student learning rate 
+
+1 × 10 −5
+
+Batching / Rollout 
+
+Rollout sampling Temperature 1.0, top-p = 1 .0
+
+Maximum prompt length 2,048 tokens Maximum response length 8,192 tokens Optimization mini-batch 32, dynamic micro-batching Dynamic token cap 18,944 tokens per GPU 
+
+Distillation 
+
+Distillation support Student top-100 tokens plus tail mass JSD mixture coeffi-cient Fixed at 1/2
+
+EMA update rate τ = 0 .05 per rollout batch Importance-ratio upper clip 2.0 for both ratios 
+
+Feedback processing and gating 
+
+Anchor token bud-get 4,096 Feedback token budget 1,024 Maximum privi-leged re-prompt length 10,240 tokens 
+
+Table 4: Online Settings Shared Across Student Families and Controlled Methods. The listed settings are shared; the methods differ in their available privileged context as defined in the main text. 
+
+## C Evaluation Protocol 
+
+All five student backbones and all reported checkpoints use the same frozen evaluation protocol. Each domain contains 79 held-out questions, and each question receives 16 inde-pendently sampled responses. Table 5 records the settings that affect the reported avg@16 results. 
+
+C.1 Guarded Parsing Fallback 
+
+When the primary parser does not establish a correct answer, a fixed Qwen3-8B base model is queried as a deterministic binary judge (temperature 0, top-p = 1 .0). The fallback can-not overturn an explicitly extracted non-gold answer, and a judge parse failure is counted as incorrect. This rule handles ambiguous formatting without allowing the judge to replace the answer key. Parameter Value Sampling        
+
+> Responses per question 16 Sampling Temperature 0.6, top-p= 0 .95 , top-k= 20
+> Maximum new tokens 6,144
+> Evaluation
+> Primary parser Last explicit answer field Missing, in-valid, or trun-cated answer Incorrect Macro aggre-gation Unweighted mean over three domains
+
+Table 5: Frozen Evaluation Settings Shared Across All Stu-dent Backbones 
+
+## D Additional Results 
+
+D.1 Cross-Scale Training Dynamics 
+
+Figure 6 reports the held-out Macro and Worst-domain trajec-tories for every completed Qwen3 student scale. Intermediate checkpoints are diagnostic only: the main comparison con-tinues to use the common, pre-specified step-100 checkpoint for every online method. The trajectories differ across scales. At step 100, Qwen3-1.7B and Qwen3-4B primarily recover weakest-domain ca-pability rather than improving Macro accuracy over their respective initializations. On Qwen3-8B, MT-SDPO finishes above its initialization and SDPO on both Macro and Worst-domain accuracy. The non-monotonic trajectories support the use of a common checkpoint rather than method-specific checkpoint selection. 
+
+D.2 Additional Feedback Diagnostics 
+
+Figure 7 reports realized feedback exposure on Qwen3-8B. These diagnostics are distinct from the offline teacher-pool coverage and the held-out and rollout-accuracy dynamics in the main text. Offline coverage asks whether a correct teacher exists for a training question. Here, feedback use is measured after the student-error condition, each method’s eligibility rule, feedback generation, and sanitization. Panel (a) uses centered Gaussian smoothing ( σ = 2 ) only for visualization. Panels (b) and (c) report empirical distributions over all 100 recorded updates. Across the 100 updates, Domain Routing and w/o Verifica-tion use retained teacher feedback on 23.07% and 27.32% of rollouts on average. The corresponding averages are 10.39% for w/o Cross-Domain, 9.63% for w/o Aggregation, and 5.64% for MT-SDPO. Average teacher-only prompt cover-age follows the same broad ordering. Domain Routing and w/o Verification reach 9.16% and 11.66%, while w/o Cross-Domain, w/o Aggregation, and MT-SDPO reach 2.44%, 1.81%, and 1.12%. This exposure ordering differs from the step-100 performance ordering in the main text. Feedback volume alone therefore does not explain integration qual-ity. In these runs, answer verification is associated with less frequent, more selective external supervision. The teacher-only metric uses all prompts as its denomina-tor. It is the joint frequency of a missing successful student rollout and available retained teacher feedback. It is not the conditional probability of receiving feedback given a missing self-anchor. Neither metric tests whether the retained feed-back is semantically correct or repairs the student’s answer. Performance claims remain anchored to the step-100 check-point and exact held-out trajectories reported in the main text. 
+
+D.3 Verifiable-Reward RL Reference 
+
+The main text’s ablation comparison holds the teacher pool, self-anchor, sanitizer, privileged self-teacher, initialization, and update budget fixed while varying the supervision-allocation rule. GRPO is outside that comparison because it changes the objective and uses no teacher pool. It replaces the token-level distillation objective of Eq. (7) with a policy gradient on a scalar reward. The programmatic verifier used by MT-SDPO as an eligibility gate supplies that reward. Ta-ble 6 reports GRPO only as a separate objective reference under the same update and rollout budget. Each GRPO reference run starts from the corresponding epoch-2 Multi-Domain Post-Training checkpoint used by the controlled methods. It runs for 100 updates with 8 on-policy rollouts per prompt and uses eight H100 80GB GPUs. The verifier and evaluation protocol in Section C remain the same. No teacher, feedback, or self-teacher component is active, and the reward is the binary verifier outcome on the student’s own rollouts. The GRPO results are reported descriptively across all five backbones. Because GRPO changes the training objective, these results are separate from the main text’s controlled supervision-allocation comparison and do not establish a general ordering between the two objectives. 
+
+## E Prompt Templates 
+
+This section reports the exact message text used for SciKnowEval L3 data construction, post-training, online training, and evaluation. The SFT construction prompts in Section E.1 document the Qwen3 pipeline. Llama and OLMo use family-matched generators and their corresponding vali-dation/retry pipelines rather than reusing Qwen3 responses. The student rollout, online self-teacher reprompt, teacher-feedback, and evaluation instructions are shared across families at the natural-language level. Tokenization and chat-template handling remain model-specific. Braced fields denote runtime substitutions rather than literal input. The field {choices_block} renders each option in its orig-inal order as {label}. {text} . The domain-specific field {domain_expert} is chemistry expert ,
+
+materials science expert , or physics expert . The field {expert_domain} is the cor-responding display name. 48 54 60 66 
+
+> Macro accuracy (%)
+> Qwen3-1.7B
+
+(a) 
+
+> Qwen3-4B
+
+(b) 
+
+> Qwen3-8B
+
+(c)      
+
+> 020 40 60 80 100
+> Training step
+> 40 48 56 64
+> Worst-domain accuracy (%)
+
+(d)      
+
+> 020 40 60 80 100
+> Training step
+
+(e)      
+
+> 020 40 60 80 100
+> Training step
+
+(f)    
+
+> Multi-Domain PT init. SDPO MOPD-Routed SDPO MT-SDPO
+
+Figure 6: Cross-Scale Held-Out Dynamics, Evaluated Every 10 Training Steps. Columns are Qwen3-1.7B, Qwen3-4B, and Qwen3-8B, and the two rows report Macro and Worst-domain accuracy. The horizontal reference marks each student’s Multi-Domain Post-Training initialization, and lines connect evaluated checkpoints without smoothing. Domain Routing has a held-out result only at step 100 on Qwen3-8B, so it appears as a single step-100 marker in (c) and (f). The legend label MOPD-Routed SDPO denotes Domain Routing in the main text. 
+
+E.1 SFT Data Construction 
+
+Independent Generator Sampling Two independent can-didates are sampled for each training record. The reference answer is not included in this prompt. 
+
+Independent generator sampling 
+
+System: You are a knowledgeable and rigorous { domain_expert}. User: Solve the following multiple-choice question. Give a concise, self-contained derivation using the relevant scientific principles, equations, calculations, or evidence. Include enough explicit reasoning for a reviewer to check, but avoid unnecessary background, repeated calculations, speculative alternatives, or restating the problem. Do not return only an answer. Question: {question} Choices: {choices_block} End your response with exactly one final line in this format: "answer": "C". Replace C with your selected choice letter. Do not add Markdown styling, a code fence, a heading, or any text after that final line. 
+
+Gold-Conditioned Fallback This fallback is used only if neither independent candidate yields a parseable correct la-bel. Failed independent completions are not inserted into the fallback prompt. 
+
+Gold-conditioned fallback generation 
+
+System: You are a knowledgeable and rigorous { domain_expert}. You may receive a private correctness constraint. Use it only internally, and never mention or allude to its existence in your response. User: Verified routing Domain Routing Single eligible w/o verification MT-SDPO 1 20 40 60 80 100 
+
+> Training update step
+> 0.0 0.1 0.2 0.3
+> Feedback-used fraction
+
+(a) Feedback Use Trend 0.0 0.1 0.2 0.3 0.4  
+
+> Feedback-used fraction
+> 0.00 0.25 0.50 0.75 1.00
+> Empirical CDF
+
+(b) Feedback Use Distribution 0.0 0.1 0.2 0.3  
+
+> Expert-only coverage fraction
+> 0.00 0.25 0.50 0.75 1.00
+> Empirical CDF
+
+(c) Teacher-Only Coverage Figure 7: Realized Teacher-Feedback Exposure on Qwen3-8B over 100 Training Updates. (a) Smoothed fraction of rollouts that use retained teacher feedback. (b) Empirical distribution of the corresponding raw per-update fractions. (c) Empirical distribution of prompts with no successful student rollout but retained teacher feedback. Higher exposure alone implies neither more accurate feedback nor better held-out performance. In the legend, Verified routing, Single eligible, and w/o verification correspond to w/o Cross-Domain, w/o Aggregation, and w/o Verification in the main text, respectively. 
+
+Construct a concise, self-contained solution to the following multiple-choice question. Use the private correctness constraint internally and build ascientifically valid derivation that genuinely supports it. Include enough explicit reasoning for a reviewer to check, but avoid unnecessary background, repeated calculations, speculative alternatives, or restating the problem. Do not return only an answer. Never mention or allude to the private constraint, an answer key, a hint, or any supplied answer. If the constraint cannot be scientifically justified, explain only the scientific inconsistency in the problem without disclosing that aconstraint was supplied. Question: {question} Choices: {choices_block} Private correctness constraint: {answer_key}. {answer_text} End your response with exactly one final line in this format: "answer": "C". Replace C with the constrained choice letter. Do not add Markdown styling, a code fence, a heading, or any text after that final line. 
+
+Self-Verifier 
+
+Self-verifier for generated reasoning 
+
+System: You are a rigorous reviewer of scientific reasoning. User: Review the proposed solution to the following multiple-choice question. Check whether its scientific facts, equations, calculations, units, and logical steps are correct. A correct final choice is not sufficient: reject the solution if it reaches the correct answer through incorrect, unsupported, circular, or fabricated reasoning. Do not rewrite the solution. Briefly explain your judgment and finish with exactly one of the following plain-text lines. Do not apply Markdown styling to the verdict line. Verdict: ACCEPT Verdict: REJECT Verdict: REVIEW Question: {question} Method Chem. Mat. Phys. Macro Worst Gap 
+
+Qwen3-1.7B 
+
+Multi-Domain PT 42.33 63.05 51.66 52.35 42.33 20.73 GRPO 45.73 64.08 54.43 54.75 45.73 18.35 MT-SDPO 46.52 56.65 46.20 49.79 46.20 10.44 
+
+Qwen3-4B 
+
+Multi-Domain PT 48.66 71.36 68.67 62.90 48.66 22.71 GRPO 52.53 74.53 66.22 64.43 52.53 21.99 MT-SDPO 50.63 62.26 63.92 58.94 50.63 13.29 
+
+Qwen3-8B 
+
+Multi-Domain PT 49.29 70.25 67.88 62.47 49.29 20.96 GRPO 54.91 76.66 70.25 67.27 54.91 21.76 MT-SDPO 67.88 69.38 64.08 67.11 64.08 5.30 
+
+Llama-3.1-8B-Instruct 
+
+Multi-Domain PT 56.33 59.57 51.42 55.78 51.42 8.15 GRPO 70.65 66.46 64.16 67.09 64.16 6.49 MT-SDPO 59.57 53.48 44.62 52.56 44.62 14.95 
+
+OLMo-3-7B-Instruct 
+
+Multi-Domain PT 48.42 63.21 57.67 56.43 48.42 14.79 GRPO 47.47 55.85 36.87 46.73 36.87 18.98 MT-SDPO 55.69 65.82 64.55 62.02 55.69 10.13 
+
+Table 6: Verifiable-Reward RL Reference from the Shared Initialization. Columns report step-100 avg@16 accuracy (%) under the evaluation protocol of Section C. Within each block, Multi-Domain Post-Training is the shared initializa-tion for GRPO and MT-SDPO. GRPO changes the training objective and is reported outside the main text’s controlled online-distillation comparison. 
+
+Choices: {choices_block} Reference answer: {answer_key}. {answer_text} Proposed solution: {cot_response} 
+
+For the Qwen3 data, the generator and verifier are both Qwen3-32B, so this stage is self-verification rather than in-dependent verification. The retained completion becomes the SFT assistant target without summarization, rewriting, or an-swer normalization. 
+
+E.2 Student SFT and Initial Rollout 
+
+Student SFT uses a domain-specific system message. On-line rollout, offline private-answer manifest construction, and evaluation instead use the generic system message below. Their user message is identical. 
+
+System messages for SFT and rollout 
+
+Student SFT system: You are a knowledgeable and rigorous { domain_expert}. Online rollout, manifest, and evaluation system: You are a knowledgeable and rigorous scientific reasoning assistant. 
+
+Shared multiple-choice user message 
+
+Solve the following multiple-choice question. Give a concise, self-contained derivation using the relevant scientific principles, equations, calculations, or evidence. Include enough explicit reasoning for a reviewer to check, but avoid unnecessary background, repeated calculations, speculative alternatives, or restating the problem. Do not return only an answer. Question: {question} Choices: {choices_block} Please show your choice in the answer field with only the choice letter, e.g., "answer": "C". 
+
+E.3 Online Self-Teacher Reprompts 
+
+The self-teacher reprompt is assembled from the original rollout prompt and independently available context blocks. An unavailable solution or feedback source contributes an empty string. 
+
+SDPO 
+
+SDPO self-teacher reprompt 
+
+Main template: {prompt}{solution}{feedback} Correctly solve the original question. Successful solution section: Correct solution: {successful_previous_attempt} Environment feedback section: The following is feedback from your unsuccessful earlier attempt: {feedback_raw} 
+
+The formal SDPO baseline sets environment feedback to disabled, so the feedback section above is not inserted. The successful solution section is inserted only when a reward-verified successful attempt is available. 
+
+MT-SDPO and Routed Variants 
+
+MT-SDPO self-teacher reprompt 
+
+Main template: {prompt}{solution}{feedback} Use the available information to reconsider the reasoning and correctly solve the original question. Follow the original response format and end with an answer field containing only the selected choice letter. Successful solution section: A reward-verified successful attempt previously generated by the current target policy is shown below: {successful_previous_attempt} Frozen-expert feedback section: The following diagnostic feedback was produced by frozen domain specialists for the current attempt: {feedback_raw} 
+
+MT-SDPO, Domain Routing, and the w/o Cross-Domain, w/o Aggregation, and w/o Verification variants use the same reprompt text. The three ablations correspond to verified do-main routing, one eligible teacher, and unverified all-teacher feedback, respectively. They differ only in teacher selection and correctness filtering. The anchor, feedback, and total reprompt budgets are 4,096, 1,024, and 10,240 tokens, re-spectively. 
+
+E.4 Frozen Teacher Diagnostic Prompt 
+
+Each selected teacher receives the question, all choices, and the current student response. The concept tag is used for anchor filtering and is removed before retained paragraphs enter the self-teacher’s privileged context. Retained outputs are concatenated in the fixed order of chemistry, materials science, and physics. 
+
+Frozen teacher diagnostic 
+
+System: You are a knowledgeable and rigorous scientific reasoning assistant. User: You are acting as a frozen {expert_domain } specialist. Diagnose one response produced by the target model without revealing the final answer. Complete two steps. Step 1 — Problem anchor: Identify one technical term or short concept, containing 1–3 words, that is central to the question. Copy the wording directly from the question. Output it first inside <concept>...</ concept>. Do not use generic words such as problem, question, answer, value, calculation, formula, model, student, expert, or response. Step 2 — Diagnostic feedback: After the concept tag, write a short paragraph of 3–5 sentences and no more than approximately 80 words. Focus on the aspects relevant to your {expert_domain} expertise when useful. Identify the specific step, assumption, or concept in the target response that is correct, incorrect, or missing, and explain how the reasoning should be reconsidered. Do not solve the entire problem from scratch. Do not reveal the correct choice letter. Do not quote the correct option text. Do not write a final answer. Do not emit an "answer": "X" field. Do not mention that an answer key or verifier exists. Question: {question} Choices: {choices_block} Target response: {response} Output: <concept>...</concept> 
+
+Decoding: temperature = 0.2, top-p = 0.95, and maximum new tokens = 256. 
+
+E.5 Evaluation Prompts 
+
+Candidate generation uses exactly the generic system mes-sage and shared user message in Section E.2. Any operational prefix inserted by a family’s chat template is not part of the natural-language instruction or the generated completion. The fallback judge is called only when the primary regex parser has not established correctness. It cannot overturn an explicitly extracted non-gold answer or accept a truncated response with no answer. Guarded fallback judge                                                             
+
+> System: You are astrict multiple-choice answer verifier. Ignore all reasoning, compare only the candidate’s final selected option with the reference answer, and output only true or false. User: Candidate response: <candidate_response> {candidate_response} </candidate_response> Reference answer: {answer_key}. {answer_text} The reference answer label is ‘{ answer_key}‘. Ignore all reasoning. Output exactly ‘true‘ only if the candidate’s last explicit ‘answer‘ field or ‘Final Answer‘ is also ‘{answer_key}‘. Output exactly ‘false‘ for any other answer or no final answer. Do not output any explanation.
+
+## F Feedback Effectiveness 
+
+We separate feedback exposure from feedback effectiveness. We compare the exposure statistics in Figure 7 with the held-out step-100 results in the main text. Methods using more retained feedback do not necessarily score higher. This de-scriptive mismatch means that feedback volume is not itself evidence of utility. The held-out comparisons in the main text measure the end-to-end outcome of each training method. They do not isolate the causal contribution of an individual feedback message. The fixed held-out protocol supports a method-level com-parison, not a message-level causal repair rate. A direct esti-mate requires post-feedback completions or paired runs with and without feedback on the same erroneous rollouts.

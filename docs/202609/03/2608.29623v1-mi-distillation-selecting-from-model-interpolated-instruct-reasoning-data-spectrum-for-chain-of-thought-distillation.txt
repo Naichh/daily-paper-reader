@@ -1,0 +1,797 @@
+Title: MI-Distillation: Selecting from Model-Interpolated Instruct-Reasoning Data Spectrum for Chain-of-Thought Distillation
+
+URL Source: https://arxiv.org/pdf/2608.29623v1
+
+Published Time: Tue, 01 Sep 2026 01:11:40 GMT
+
+Number of Pages: 21
+
+Markdown Content:
+# MI-Distillation: Selecting from Model-Interpolated Instruct-Reasoning Data Spectrum for Chain-of-Thought Distillation 
+
+Yangsong Lan, Renkai Hu, HongKai Zheng, Bo Zhang, Renzhi Wang, Hongliang Dai, Piji Li ∗
+
+> 1
+
+College of Artificial Intelligence, Nanjing University of Aeronautics and Astronautics, Nanjing, China 
+
+> 2
+
+The Key Laboratory of Brain-Machine Intelligence Technology, Ministry of Education, Nanjing, China 
+
+{lys2962331781, hongldai, pjli}@nuaa.edu.cn 
+
+Abstract 
+
+Recent advances in large reasoning mod-els (LRMs) have shown strong performance on complex problems through long chain-of-thought (Long CoT) reasoning. However, dis-tilling such trajectories into smaller student models remains challenging: direct Long CoT supervision often provides limited gains and can be less effective than concise Short CoT rationales. In this work, we investigate this phenomenon from a gradient-centric perspec-tive. Our analysis shows that Long CoT in-duces larger gradient magnitudes and more concentrated update directions than Short CoT, with this effect becoming more pronounced as student model capacity increases. These findings suggest that effective Long CoT dis-tillation requires balancing the reasoning infor-mation density of reasoning trajectories with their distributional alignment to the student model. Motivated by this insight, we pro-pose Model Interpolation Distillation (MI-Distillation ), a framework that constructs a continuous Instruct-Reasoning data spectrum through model interpolation. To select suit-able trajectories from this spectrum, we fur-ther introduce Seq uential Learnable Surprisal 
+
+Score ( SeqLSS ), which favors reasoning paths that are both informative and learnable for the student. Extensive experiments on reasoning benchmarks show that MI-Distillation consis-tently improves small model CoT distillation over strong Long CoT baselines. 1
+
+1 Introduction 
+
+Recent advances in large reasoning models (LRMs), including DeepSeek-R1 (Guo et al., 2025), Seed1.5-Thinking (Seed et al., 2025), and Kimi K2.5 (Team et al., 2026), have demonstrated strong capabilities across complex problem-solving and code-generation tasks (He et al., 2024; Zhang and Math-AI, 2025; Jain et al., 2025). Trained with 
+
+> *
+
+Corresponding author. 
+
+> 1
+
+Our implementation is available at GitHub. 1.5B 3B 7B           
+
+> Qwen2.5 Student Model Size
+> 020 40 60 80
+> MATH-500 Accuracy (%)
+> 39.8 54.1 75.2 54.8 62.2 71.5
+> CoT Learnability Gap ( −)CoT Learnability Gap ( +)
+> ↓Δ= -15.1 ↓Δ= -8.1 ↑Δ= +3.7
+> Short CoT (Qwen2.5-32B-Instruct) Long CoT (QwQ-32B)
+
+Figure 1: Scaling behavior of Short vs. Long CoT distillation on the MATH-500 benchmark. Accuracy comparison of Qwen2.5 student models fine-tuned un-der Short and Long CoT supervision. Results indicate a scale-dependent effect: Short CoT provides superior supervision for smaller students (1.5B and 3B), whereas Long CoT marginally overtakes it at the 7B scale. 
+
+reinforcement learning from verifiable rewards (RLVR) (Shao et al., 2024), these models exhibit strong test-time reasoning capabilities, and their Long CoT trajectories have further emerged as a valuable source of supervision for supervised fine-tuning (SFT) and cold-start reinforcement learn-ing (Muennighoff et al., 2025; Guo et al., 2025). However, the high computational cost of LRMs limits their deployment in resource-constrained sce-narios (Lan et al., 2026; Feng et al., 2025), making it essential to transfer their reasoning abilities to smaller models. A natural approach is to fine-tune small models directly on Long CoT traces gener-ated by LRMs, with the expectation that richer rea-soning supervision will lead to stronger reasoning performance (Yang et al., 2026; Just et al., 2025). Recent evidence shows that small models often fail to benefit from direct Long CoT supervision and may instead achieve better performance when trained on Short CoT data (Li et al., 2025; Kim et al., 2025), as shown in Figure 1. This highlights the importance of matching reasoning data to the student model in effective distillation. Motivated by these observations, we investigate arXiv:2608.29623v1 [cs.CL] 30 Aug 2026 the gradient signatures induced by Long and Short CoT across student models of varying scales. Our analysis shows that, compared with Short CoT, Long CoT induces gradients with larger magni-tudes and more concentrated directions, and this effect becomes more pronounced as model scale increases. These findings suggest that Long CoT supervision is effective when the student has suffi-cient capacity to translate verbose reasoning trajec-tories into coherent and low-dimensional parameter updates. This highlights a key challenge in reason-ing distillation: the supervision signal must be not only informative, but also compatible with the stu-dent’s intrinsic distribution. Prior work has sought to narrow this gap by mix-ing Long and Short CoT data (Li et al., 2025) or by adopting curriculum distillation strategies (Jiang et al., 2025) that gradually reduce the learning diffi-culty. However, such strategies provide only coarse control over the supervision signal, since the mix-ing ratios or curriculum schedules are usually man-ually designed and the resulting trajectories remain limited in diversity. This raises two central ques-tions: (1) How can we construct more fine-grained reasoning trajectories that better match students of different capacities, and (2) How can we select tra-jectories that are both informative and well aligned with the student model? In this work, we propose MI-Distillation , a CoT distillation framework that constructs a continuous Instruct-Reasoning data spectrum through model interpolation. By interpolating between instruction-oriented and reasoning-oriented models, our frame-work generates reasoning trajectories with vary-ing length, correctness, and reasoning depth. We show that this spectrum changes systematically with the interpolation coefficient λ, revealing con-trollable variations in trajectory quality and rea-soning length. To select suitable supervision from this spectrum, we introduce SeqLSS (Seq uential 
+
+Learnable Surprisal Score), a Long CoT selection criterion that balances reasoning information den-sity with student-induced distributional shift. This allows small student models to learn from trajecto-ries that are both informative and well aligned with their intrinsic capabilities. To summarize, our main contributions are as follows: • We analyze the gradient dynamics of Long and Short CoT distillation, explaining both the diffi-culty of Long CoT distillation for small models and the role of model scale in reasoning transfer. • We propose MI-Distillation , which builds a fine-grained Instruct-Reasoning data spectrum via model interpolation, and introduce SeqLSS for selecting student-aligned reasoning trajectories. • Extensive experiments on challenging reason-ing benchmarks show that MI-Distillation con-sistently improves small model reasoning and surpasses strong CoT distillation baselines. 
+
+2 Related Work 
+
+2.1 Reasoning in Large Language Models 
+
+Chain-of-thought (CoT) reasoning has become a key mechanism for enhancing the reasoning ca-pabilities of large language models (Wang et al.; Jaech et al., 2024). Early distillation paradigms typically rely on Short CoTs, either manually an-notated or generated by instruction-tuned models, to provide concise intermediate reasoning steps. More recently, reinforcement learning with ver-ifiable rewards (RLVR) (Shao et al., 2024; Yu et al., 2025) has enabled language models to pro-duce Long CoTs with detailed reflection, and ver-ification, substantially improving performance on complex mathematical and symbolic reasoning tasks (He et al., 2024; Xu et al., 2024). However, Long CoT trajectories are not univer-sally beneficial as distillation targets. Their rich reasoning patterns may also increase imitation dif-ficulty for smaller students, particularly when the teacher rationale is poorly aligned with the stu-dent’s learning capacity and intrinsic distribution. This motivates reasoning supervision that balances informativeness with student-side learnability. 
+
+2.2 Knowledge Distillation 
+
+Knowledge distillation (Hinton et al., 2015) trans-fers the capabilities of large language models to smaller students by training them on outputs from stronger teachers. However, recent studies suggest that directly distilling Long CoT trajectories into small models does not consistently improve perfor-mance, as small students often benefit more from shorter and more concise rationales (Li et al., 2025; Kim et al., 2025; Jiang et al., 2025). Existing approaches address this challenge by mixing short and long CoT data or introducing curriculum-based distillation, gradually increasing the complexity of the supervision (Jiang et al., 2025; Li et al., 2025). Despite their effective-ness, these methods largely depend on manually designed data mixtures or schedules, and offer lim-Scale Nuclear Norm Effective Rank                                                                                                                                     
+
+> Proj Short Long ∆Proj Short Long ∆Proj Short Long ∆Proj Short Long ∆
+> 1.5B K0.88 0.91 ↑0.04 Q0.89 1.09 ↑0.20 K5.58 5.86 ↑0.28 Q9.84 10.16 ↑0.32
+> V1.60 1.67 ↑0.08 O1.80 2.22 ↑0.42 V8.97 7.00 ↓1.97 O13.03 12.70 ↓0.33
+> 3B K0.84 1.03 ↑0.19 Q0.94 1.32 ↑0.38 K6.60 6.31 ↓0.29 Q10.74 8.42 ↓2.32
+> V1.59 2.07 ↑0.47 O1.79 2.58 ↑0.79 V9.76 5.60 ↓4.17 O14.86 8.78 ↓6.08
+> 7B K1.12 1.76 ↑0.65 Q1.11 2.00 ↑0.88 K9.74 7.76 ↓1.98 Q13.18 10.96 ↓2.22
+> V2.08 3.36 ↑1.28 O2.05 3.68 ↑1.63 V11.09 6.36 ↓4.73 O15.94 10.34 ↓5.60
+
+Table 1: Attention-projection gradient spectra under Short vs. Long CoT distillation. ∆ = Long − Short (denoted by ↑ / ↓); each entry is averaged over 500 MATH-500 examples and all attention layers. Cell shading encodes |∆| in four bins: for nuclear-norm growth and for effective-rank collapse. Long CoT uniformly inflates nuclear norms with gaps widening as the student scales up, while effective-rank reductions become pronounced from 3B onward. 
+
+ited control over which reasoning traces are most suitable for a given student model. Our work in-stead analyzes the scale-dependent effects of short and long CoT distillation, and constructs a contin-uous reasoning-data spectrum via model interpo-lation, enabling more adaptive selection of CoT trajectories for small-model distillation. 
+
+3 Gradient Signatures of Short and Long CoT Distillation 
+
+While recent studies indicate that smaller models benefit more from Short CoT distillation than Long CoT, the optimization behavior underlying this phe-nomenon remains poorly understood. To bridge this gap, we analyze the gradient signatures in-duced by SFT across student model sizes. Adopting the spectral analysis from Li et al. (2024a), we characterize the gradients of the at-tention projection matrices ( Query , Key , Value , and 
+
+Output ) via Singular Value Decomposition (SVD) (Carlini et al., 2024). For a given gradient ma-trix G ∈ Rm×n, we summarize its magnitude and structural concentration using the Nuclear Norm 
+
+(∥G∥∗) and Effective Rank (ERank ): 
+
+∥G∥∗ =
+
+> min( m,n )
+
+X
+
+> k=1
+
+σk, (1) 
+
+ERank( G) = exp 
+
+−
+
+> min( m,n )
+
+X
+
+> k=1
+
+pk log pk
+
+ , (2) where σk represents the k-th singular value of 
+
+G, and pk = σk/∥G∥∗ defines the normalized singular-value distribution. From an optimization perspective, the nuclear norm captures the total spectral energy of the gra-dients; a higher value signifies a more substantial optimization signal imparted by the distillation pro-cess. Conversely, the effective rank acts as a contin-uous measure of dimensionality by computing the Shannon entropy of the gradient spectrum. A lower effective rank indicates that the parameter updates are structurally concentrated along a few dominant principal directions, leading to lower-dimensional optimization trajectories. Detailed layer-wise for-mulations are provided in Appendix B. 
+
+3.1 Results and Analysis 
+
+We generate Short and Long CoT trajectories on MATH-500 using Qwen2.5-32B-Instruct (Yang et al., 2024) and QwQ-32B (Team, 2025), respec-tively, and analyze gradients from Qwen2.5 stu-dents at 1.5B, 3B, and 7B scales. Dataset details are provided in Appendix C.3, with results reported in Table 1. Across all model scales, Long CoT consistently induces larger nuclear norms than Short CoT, in-dicating stronger optimization signals during dis-tillation. This suggests that Long CoT supervision carries richer gradient information, but also im-poses a more demanding learning target for the student. Notably, the nuclear-norm gap becomes more pronounced as the student scale increases, especially for the 3B and 7B models. This trend indicates that larger students are better able to ab-sorb the additional supervision provided by long reasoning trajectories and translate it into stronger spectral gradient updates. Effective rank reveals a complementary trend. From the 3B scale onward, Long CoT produces lower effective rank than Short CoT, showing that its gradients become more con-centrated along dominant spectral directions. Thus, for sufficiently capable students, Long CoT induces updates that are not only larger in magnitude but 01k 2k 3k 4k                                                   
+
+> L1 L2 L3 L4 L5
+> Difficulty level
+> 50 60 70 80 90 100 (a) 14B Model Interpolation Performance
+> L1 L2 L3 L4 L5
+> Difficulty level
+> 65 70 75 80 85 90 95 100 (b) 32B Model Interpolation Performance
+> Accuracy (%) Average CoT Length
+> Accuracy Tokens λ=0.2 λ=0.4 λ=0.6 λ=0.8 Accuracy Tokens λ=0.2 λ=0.4 λ=0.6 λ=0.8
+> 01k 2k 3k 4k 5k 6k 00.2 0.4 0.6 0.8 1
+> Interpolation coefficient λ
+> 40 45 50 55 60 65 70
+> (c) Llama3.2-3B Student
+> +7.2
+> 00.2 0.4 0.6 0.8 1
+> Interpolation coefficient λ
+> (d) Qwen2.5-3B Student
+> +9.4
+> Distilled Accuracy (%)
+> Average CoT Length
+> Distilled Accuracy CoT Length Best (vs. baseline)
+
+Figure 2: Effect of interpolation coefficient λ on teacher performance and CoT distillation on MATH-500 .The left panel evaluates interpolated teachers across difficulty levels, where varying λ smoothly shifts the teacher from reasoning-oriented to instruction-oriented behavior. The right panel reports the final accuracy of Llama3.2-3B and Qwen2.5-3B students distilled from CoT trajectories generated by 32B interpolated teacher. Intermediate teachers achieve a better balance between reasoning depth and student learnability, leading to stronger distillation performance for small models. 
+
+also more structurally coherent. This motivates a central principle of our method: 
+
+Effective Long CoT distillation should balance the information density of teacher reasoning tra-jectories with the distributional and optimiza-tion capacity of the student model .
+
+4 Synthesizing Instruct-Reasoning Spectrum via Model Interpolation 
+
+4.1 Preliminaries 
+
+Motivated by our gradient analysis, we find that small students are often poorly aligned with the complex System2 style trajectories produced by LRMs, whereas System1 style Short CoT offers more learnable but less informative supervision. Existing methods typically rely on discrete mix-tures of Short and Long CoT data, which offer limited granularity in controlling the reasoning sig-nal. Building on recent advances in model merging and interpolation (Wu et al., 2025), we interpolate instruction-oriented and reasoning-oriented teach-ers to construct a family of intermediate models with smoothly varying reasoning depth and reason-ing compactness behavior. The resulting Instruct-Reasoning spectrum provides diverse CoT trajecto-ries between Short and Long reasoning, allowing students to receive supervision that better balances reasoning richness and capacity-aware learnability. Let ΘThi and ΘIns denote the reasoning-oriented and instruction-oriented teachers. We synthesize intermediate teachers through parameter interpola-tion, 
+
+ΘMI 
+
+λ = λ ΘIns + (1 − λ) Θ Thi , λ ∈ [0 , 1] . (3) This operation is independent of the choice of reference model and can be interpreted as a spe-cial case of task arithmetic (Ilharco et al., 2022). For any base model ΘBase , define the task vectors 
+
+τ Thi = Θ Thi − ΘBase and τ Ins = Θ Ins − ΘBase .Substituting these definitions into Eq. (3) yields 
+
+ΘMI 
+
+λ = λ ΘIns + (1 − λ) Θ Thi 
+
+= λ τ Ins + Θ Base  + (1 − λ) τ Thi + Θ Base 
+
+= Θ Base + λ τ Ins + (1 − λ) τ Thi . (4) Therefore, model interpolation can be viewed as task arithmetic over reasoning and instruction task vectors. Varying λ yields a continuous teacher spectrum that smoothly balances reasoning com-pactness behavior and reasoning depth. 
+
+4.2 Evaluating Interpolated Teachers and Distillation Effectiveness 
+
+To further examine the effectiveness of the in-terpolated teachers, we evaluate models obtained by interpolating two model families: the Qwen-14B family, including DeepSeek-R1-Distill-14B and Qwen2.5-14B-Instruct, and the Qwen-32B family, including QwQ-32B (Team, 2025) and Qwen2.5-32B-Instruct (Yang et al., 2024). We first assess these interpolated teachers on MATH-500 (Hendrycks et al., 2021) across different diffi-culty levels, which allows us to characterize how model interpolation modulates reasoning capability and problem-solving behavior. We then assess the downstream utility of this interpolation-induced spectrum by distilling CoT trajectories generated by all 32B interpolated teach-ers into smaller students, including Qwen2.5-3B-Instruct and Llama3.2-3B-Instruct (Grattafiori et al., 2024). Notably, the two 32B endpoint teach-ers are variants within the Qwen2.5-32B family, which largely controls for differences in world knowledge and pretraining background. This set-ting allows us to more directly attribute down-stream distillation effects to interpolation-induced changes in reasoning style, offering a cleaner evalu-ation of the proposed Instruct-Reasoning spectrum. 
+
+Results and Analysis. Figures 2(a) and 2(b) present the evaluation results of interpolated teacher models at the 14B and 32B scales. Con-sistent with our preceding analysis, varying the interpolation coefficient induces a clear trade-off between reasoning correctness and reasoning depth. The resulting teachers form an approximate spec-trum of reasoning behaviors, with CoT length changing smoothly across interpolation settings. This trend indicates that model interpolation suc-cessfully produces diverse reasoning trajectories beyond the two endpoint teachers. Figures 2(c) and 2(d) further present the distilla-tion results on Qwen and Llama student families using CoT data generated by 32B teachers at differ-ent interpolation coefficients. The results provide additional evidence for our hypothesis: the rea-soning length of the distilled students also varies smoothly with the interpolation coefficient, indicat-ing that the Instruct-Reasoning spectrum is effec-tively transferred through distillation. More inter-estingly, the best student performance is typically achieved not at either endpoint, i.e., λ = 0 corre-sponding to the reasoning-oriented teacher or λ = 1 
+
+corresponding to the instruction-oriented teacher, but at an intermediate interpolation point. This observation supports our central claim that effec-tive CoT distillation does not solely depend on the informativeness of reasoning trajectories or their alignment with the student distribution. Instead, the most beneficial supervision often emerges from a balanced trade-off between reasoning information density and student-side learnability. Complete evaluation results of both interpolated teachers and distilled students on additional benchmarks are pro-vided in Appendix D. In addition, Appendix D.2 compares direct parameter interpolation with TIES-Merging (Yadav et al., 2023), showing that the resulting teacher spectrum is robust to the choice of merging strategy. 
+
+5 MI-Distillation: SeqLSS-Guided CoT Selection from Interpolated Teachers 
+
+Building on the interpolated teacher spectrum, we propose Model-Interpolation Distillation (MI-Distillation ), a student-aware framework for small model CoT distillation. MI-Distillation leverages interpolated teachers to construct a fine-grained spectrum of CoT trajectories, rather than rely-ing solely on instruction-oriented or reasoning-oriented endpoints. Since a fixed interpolation coefficient may not suit students with different ca-pacities or model families, we further introduce 
+
+Seq uential Learnable Surprisal Score ( SeqLSS )to select trajectories that balance reasoning infor-mativeness with student learnability. This enables MI-Distillation to provide supervision that is both informative and aligned with the student’s learning capacity, improving the efficiency and effectiveness of CoT distillation for small models. 
+
+5.1 Model Interpolation and Generate Diverse CoTs 
+
+Following the model interpolation defined in Eq. (3), the first stage instantiates a set of in-terpolated teachers from a reasoning-oriented model and an instruction-oriented model. Specif-ically, we vary the interpolation coefficient over 
+
+Λ = {0.2, 0.4, 0.6, 0.8, 1.0}, yielding a fam-ily of teacher models {Mλ}λ∈Λ with parameters 
+
+{Θλ}λ∈Λ. These teachers exhibit different trade-offs between reasoning depth, response compact-ness, and instruction-oriented behavior. Given a training set S = {(qi, a i)}Ni=1 , each interpolated teacher Mλ is prompted to generate a CoT trajectory for question qi:
+
+Ri,λ ∼ Mλ(· | qi), λ ∈ Λ. (5) The generated trajectories naturally differ in cor-rectness, complexity, and reasoning granularity. We collect them into an Instruct-Reasoning spec-trum: 
+
+D = {(qi, a i, λ, Ri,λ ) | (qi, a i) ∈ S , λ ∈ Λ}.
+
+(6) Rather than committing to a single teacher or a fixed Short/Long CoT style, D exposes a struc-tured set of candidate trajectories along the instruct-reasoning spectrum. This design allows MI-Distillation to perform student-aware CoT selection from a richer supervision space, instead of directly distilling from either endpoint teacher. 
+
+5.2 Accuracy and SeqLSS Selection Accuracy Selection. We first filter candidate tra-jectories by answer correctness, since erroneous CoTs can introduce misleading supervision and 1. Model Interpolation and Generate Diverse CoTs 
+
+> Question : Amy works for 36 hours per week for 10 weeks during the summer, making
+> $\\$3000$. If she works for 30 weeks during the school year at the same rate of pay
+> and needs to make another $ \\$3000$, how many hours per week must she work?
+
+Reasoning Model  Instruct Model 
+
+𝝀  = 𝟎. 𝟐  𝝀  = 𝟎. 𝟒  𝝀  = 𝟎. 𝟔  𝝀  = 𝟎. 𝟖 
+
+𝝀  = 𝟎. 𝟎  𝝀  = 𝟏. 𝟎   
+
+> 𝝀 = 𝟎. 𝟎 CoT
+
+: Okay, let me see. Amy works 36 hours a week for 10 weeks in the summer ...     
+
+> 𝝀 = 𝟎. 𝟐 CoT : Okay, so Amy is trying to figure out how many hours she needs to work each ...
+> 𝝀 = 𝟎. 𝟖 CoT : To determine how many hours per week Amy must work during the school ...
+
+# …  
+
+> 𝝀 = 𝟏. 𝟎 CoT : To solve this problem, we need to determine Amy's hourly wage and then ...
+
+2. Accuracy and SeqLSS Selection 
+
+Accuracy Selection  
+
+> Question
+
+CoT #0 𝝀  = 𝟎. 𝟎  
+
+> Question
+
+CoT #5 𝝀  = 𝟎. 𝟖  
+
+> Question
+
+CoT #1 𝝀  = 𝟎. 𝟐  
+
+> Question
+
+CoT #6 𝝀  = 𝟏. 𝟎 
+
+# …Merge and Generate 
+
+SeqLSS Selection 
+
+Calculate  𝑺𝒆𝒒𝑳𝑺𝑺 = 𝟏−𝑼 𝒊  𝜶 ∗𝑺 𝒊  
+
+> σ𝒊=𝒕
+> 𝒏 𝑺 𝒊
+
+Score  
+
+> CoT #0 SeqLSS=0.43
+
+𝝀  = 𝟎. 𝟎  
+
+> CoT #1 SeqLSS=0.62
+
+𝝀  = 𝟎. 𝟐  
+
+> CoT #3 SeqLSS=0.32
+
+𝝀  = 𝟎. 𝟔 
+
+Reasoning Question 
+
+High Quality 
+
+Rationale Trace 
+
+Small Student Model Finetuned Model 
+
+3. Format and  Distillation Figure 3: Overview of the proposed MI-Distillation framework. MI-Distillation first constructs an instruct-reasoning spectrum via model interpolation and generates diverse CoT trajectories from the interpolated teachers. It then filters the candidates by answer correctness and selects student-aligned rationales using the proposed SeqLSS 
+
+criterion. The selected question–rationale pairs are finally used to distill a small student model. 
+
+bias the student toward invalid reasoning pat-terns (Xiang and Tang, 2025). For each trajectory 
+
+Ri,λ generated along the Instruct-Reasoning spec-trum, we retain it only when its final prediction matches the ground-truth answer ai.
+
+SeqLSS Selection. After correctness filtering, multiple valid rationales may still differ substan-tially in how useful they are for a specific student model. An ideal CoT trajectory should be informa-tive enough to provide non-trivial reasoning signals, while remaining aligned with the student’s cur-rent predictive distribution. To capture this trade-off, we introduce a student-conditioned criterion, 
+
+Learnable Surprisal Score ( LSS ), defined at the token level. Given an input problem x and a can-didate rationale R = ( r1, . . . , r T ), the surprisal of token ri under the student model θs is 
+
+Si = − log pθs (ri | x, r <i ), (7) which quantifies how much new information ri
+
+conveys to the student. However, high-surprisal tokens are not always beneficial: they may lie far outside the student’s learnable region. We measure this distributional misalignment by the cumulative probability mass that the student assigns to tokens ranked above ri:
+
+Ui = X    
+
+> v∈ V
+> pθs (v|x,r <i )> p θs (ri|x,r <i )
+
+pθs (v | x, r <i ). (8) Intuitively, Ui reflects how much probability mass the student assigns to tokens ranked above the tar-get token; a smaller Ui indicates that ri lies closer to the student’s high-probability region and is there-fore easier to learn. The token-level LSS combines these two quantities: 
+
+LSS i = Si (1 − Ui)α, (9) where Si rewards informative tokens and (1 − Ui)α
+
+down-weights tokens that fall outside the student’s high-probability region. The exponent α ≥ 0 con-trols the strength of this learnability penalty, so that LSS i favors tokens that are simultaneously in-formative and learnable. Naively averaging LSS i
+
+over a rationale is unstable, since a few tokens with extreme surprisal may dominate the sequence-level score (Yang et al., 2026). We therefore aggre-gate token-level scores using surprisal as a normal-ization signal, yielding the Sequential Learnable Surprisal Score :
+
+SeqLSS( R) = 
+
+PTi=1 Si (1 − Ui)α
+
+PTi=1 Si
+
+. (10) Intuitively, SeqLSS( R) estimates the proportion of informative reasoning signal in R that lies within the student’s learnable region. For each prob-lem, we select the correct candidate rationale with the highest SeqLSS , thereby balancing reasoning-information density with student-side distributional alignment for CoT distillation. Distillation Method Evaluation Datasets Avg. AIME24 AMC23 GPQA-Diamond GSM8K MATH-500 Minerva Olympiad 
+
+Student Model: Qwen2.5-3B-Instruct 
+
+Short CoT (32B-Instruct) 5.42 ±1.67 35 .00 ±6.65 25 .88 ±2.87 83 .49 ±1.04 62 .20 ±1.97 25 .37 ±1.59 27 .00 ±0.94 37.77 Long CoT (QwQ-32B) 3.75 ±3.19 27 .03 ±4.10 19 .32 ±0.96 80 .78 ±0.43 54 .05 ±0.72 20 .13 ±1.25 21 .11 ±1.18 32.31 Mix Large 5.21 ±2.42 36 .09 ±6.45 29 .29 ±2.10 84 .74 ±0.57 63 .00 ±0.98 26 .38 ±1.42 28 .89 ±1.36 39.09 Mix Long 2.29 ±2.35 30 .63 ±4.96 22 .60 ±2.20 83 .00 ±1.04 57 .40 ±1.93 22 .33 ±2.11 23 .96 ±1.03 34.60 Curriculum Distillation 3.54 ±3.54 29 .38 ±4.70 24 .24 ±4.38 81 .22 ±1.00 56 .15 ±1.11 21 .51 ±2.18 22 .85 ±1.05 34.13 
+
+MI-Distillation (Ours) 5.42 ±2.06 40 .31 ±5.39 29 .55 ±1.27 85 .06 ±0.53 66 .15 ±1.08 25 .46 ±1.10 29 .49 ±0.81 40.21 
+
+Student Model: Llama3.2-3B-Instruct 
+
+Short CoT (32B-Instruct) 3.96 ±2.78 24 .38 ±5.88 23 .99 ±2.35 76 .65 ±1.17 51 .40 ±1.25 17 .10 ±2.43 17 .43 ±1.44 30.70 Long CoT (QwQ-32B) 0.83 ±1.49 20 .00 ±4.18 22 .47 ±2.69 78 .53 ±0.97 45 .25 ±2.46 13 .24 ±1.08 13 .87 ±1.00 27.74 Mix Large 4.58 ±2.95 27 .19 ±4.82 24 .37 ±1.99 76 .88 ±0.45 52 .90 ±1.18 17 .19 ±0.63 17 .58 ±0.82 31.53 Mix Long 1.67 ±2.11 21 .09 ±4.91 26 .26 ±2.37 77 .84 ±0.99 44 .55 ±1.58 14 .43 ±1.48 14 .43 ±0.31 28.61 Curriculum Distillation 0.42 ±1.14 19 .53 ±5.72 21 .09 ±2.55 73 .41 ±0.59 44 .00 ±0.85 12 .41 ±2.67 14 .73 ±0.85 26.51 
+
+MI-Distillation (Ours) 6.88 ±3.10 30 .47 ±2.28 24 .62 ±2.52 77 .75 ±0.77 54 .60 ±1.02 16 .27 ±0.46 19 .96 ±0.28 32.93 
+
+Table 2: Performance comparison of different distillation methods on Qwen2.5-3B-Instruct and Llama3.2-3B-Instruct student models. For each student-model group, the best result is highlighted in bold , while the second-best result is underlined. Standard deviations are reported as subscripts for compactness. 
+
+Selection Method Evaluation Datasets Avg. GPQA-Diamond GSM8K MATH-500 Minerva Olympiad 
+
+PPL (Marion et al., 2023) 27 .15 ±4.25 85 .42 ±0.59 64 .50 ±1.18 18 .29 ±2.04 29 .12 ±1.06 44 .90 
+
+IFD (Li et al., 2024b) 26 .89 ±2.98 84 .69 ±0.82 63 .70 ±1.83 17 .46 ±1.10 26 .34 ±1.23 43 .82 
+
+Random 26 .01 ±3.97 84 .48 ±0.33 63 .25 ±1.34 19 .21 ±1.54 26 .78 ±0.77 43 .95 
+
+SeqLSS-min 26 .77 ±1.89 83 .55 ±0.21 59 .00 ±1.82 16 .36 ±1.66 24 .81 ±1.54 42 .10 
+
+SeqLSS (Ours) 29 .55 ±1.27 85 .06 ±0.53 66 .15 ±1.08 25 .46 ±1.10 29 .49 ±0.81 47 .14 
+
+Table 3: Ablation on the SeqLSS selection criterion with Qwen2.5-3B-Instruct as the student model. All methods select trajectories from the identical candidate pool generated by the interpolated teachers under the same answer-correctness filtering, and differ only in the ranking criterion. SeqLSS-min selects the trajectories with the 
+
+lowest SeqLSS scores. The best result in each column is shown in bold , and the second-best is underlined. Standard deviations are reported as subscripts for compactness. 
+
+Format and Distillation. After accuracy and SeqLSS-based selection, the retained trajectories form the final distillation set Dselect = {(qi, R i)},where qi denotes the input question and Ri is the selected response trajectory, including both the rea-soning process and the final answer. The student model θS is trained on Dselect with the standard next-token prediction objective: 
+
+L(θS ) = − X
+
+(qi,R i)∈D select 
+
+log pθS (Ri | qi). (11) The resulting student model is then evaluated on downstream reasoning benchmarks. 
+
+6 Experiments 
+
+Experiment Details. To evaluate the effective-ness and robustness of MI-Distillation, we con-duct experiments on two student models from dif-ferent model families: Qwen2.5-3B-Instruct and Llama3.2-3B-Instruct. We use QwQ-32B as the Long CoT teacher and Qwen2.5-32B-Instruct as the Short CoT teacher. For data generation, we follow the recommended decoding setting with temperature 0.6, top-p 0.95 (Guo et al., 2025), and a maximum generation length of 8192 tokens. The training corpus is constructed from 7,500 ran-domly sampled problems from the MATH training set (Hendrycks et al., 2021). For each problem, we generate candidate reasoning trajectories using the two endpoint teachers as well as the interpo-lated teachers in our MI-Distillation framework. Unless otherwise specified, the learnability penalty coefficient α is empirically set to 4. 
+
+Training and Evaluation. All student mod-els are fine-tuned for 3 epochs using LLaMA-Factory (Zheng et al., 2024), with a global batch size of 32 and a peak learning rate of 1 × 10 −5. To comprehensively assess the distilled students, we evaluate them on a suite of reasoning benchmarks with varying difficulty, including GSM8K (Cobbe et al., 2021), MATH-500 (Hendrycks et al., 2021), AMC23 (AMC, 2025), AIME24 (Zhang and Math-AI, 2024), GPQA-Diamond (Rein et al., 2023), 
+
+Minerva (Lewkowycz et al., 2022), and Olympiad-Bench (He et al., 2024). We follow the teacher-generation decoding protocol and report Pass@1 with the corresponding standard deviation. Fur-ther details regarding hardware configurations and inference setups are provided in Appendix C. 
+
+Baselines. In addition to standard distillation from Short CoT and Long CoT teachers, we com-pare MI-Distillation against three stronger base-lines that combine or schedule different types of CoT supervision. Mix Long (Li et al., 2025) ran-domly mixes Short-CoT and Long-CoT trajectories at a 4:1 ratio, providing a simple data-level combi-nation of concise and elaborated reasoning traces. 
+
+Mix Large (Li et al., 2025) extends this setting by incorporating trajectories generated from teach-ers of different scales under the same mixing ratio, thereby increasing teacher diversity. Curriculum Learning (Jiang et al., 2025) introduces Long-CoT supervision progressively during training, encour-aging the student to gradually adapt from simpler reasoning patterns to more complex ones. 
+
+6.1 Results and Analysis Main Results. Table 2 reports the main compar-ison on two 3B student models. MI-Distillation achieves the best average performance on both Qwen2.5-3B-Instruct and Llama3.2-3B-Instruct, outperforming the strongest baseline by 1.12 and 1.40 points, respectively. It also yields consistent gains on most challenging reasoning benchmarks, including AMC23, MATH-500, and Olympiad-Bench. Consistent with our analysis, Long CoT distillation often underperforms Short CoT distilla-tion, showing that more detailed rationales are not inherently more learnable for small students. By selecting trajectories from the Instruct-Reasoning spectrum, MI-Distillation better balances reason-ing depth and student learnability, leading to more robust improvements across model families. 
+
+Comparison with Fixed Interpolation Coeffi-cients. Table 4 compares MI-Distillation with di-rect distillation from CoT trajectories generated un-der fixed interpolation coefficients. MI-Distillation consistently achieves the best performance across GSM8K, MATH-500, and AMC23, outperform-ing the strongest fixed-λ baseline by 0.19, 2.70, and 1.09 points, respectively. Crucially, no sin-gle interpolation coefficient dominates across all                       
+
+> Coefficient GSM8K MATH-500 AMC23
+> λ= 0 .283 .07 ±1.13 58 .70 ±1.05 32 .34 ±4.96
+> λ= 0 .484 .00 ±0.77 63 .45 ±0.62 36 .88 ±4.23
+> λ= 0 .684 .48 ±0.23 62 .20 ±1.10 39 .22 ±6.10
+> λ= 0 .884 .63 ±0.83 63 .20 ±1.26 37 .97 ±5.72
+> MI-Distillation 84 .82 ±0.66 66 .15 ±1.08 40 .31 ±5.39
+
+Table 4: Comparison between MI-Distillation and distillation from fixed interpolation coefficients us-ing Qwen2.5-3B-Instruct as the student model. MI-Distillation consistently outperforms all fixed-λ variants across GSM8K, MATH-500, and AMC23, demonstrat-ing the advantage of adaptive trajectory selection over relying on a single interpolated teacher distribution. 
+
+benchmarks: λ = 0 .8 performs best on GSM8K, whereas λ = 0 .4 and λ = 0 .6 are stronger on MATH-500 and AMC23. This highlights the limi-tation of using a globally fixed interpolation coef-ficient for reasoning distillation. In contrast, MI-Distillation adaptively selects trajectories from the Instruct-Reasoning spectrum, enabling the student to benefit from reasoning traces that better balance information density with learnability. 
+
+Ablation on the SeqLSS Selection Criterion. 
+
+To verify that the gains of MI-Distillation stem from the proposed ranking criterion itself, we com-pare SeqLSS against widely used data-selection baselines on the same candidate trajectories gener-ated by model interpolation, including perplexity-based selection (PPL) (Marion et al., 2023), IFD (Li et al., 2024b), and random selection. We additionally include SeqLSS-min , which instead selects the trajectories with the lowest SeqLSS scores, to examine whether the proposed ranking identifies genuinely useful supervision. As shown in Table 3, SeqLSS achieves the best average per-formance and outperforms all baselines on four of the five benchmarks. In contrast, SeqLSS-min per-forms worst overall, confirming that the improve-ment is attributable to the proposed ranking crite-rion rather than merely to subsampling the candi-date pool. A complementary sensitivity analysis of the learnability penalty coefficient α is provided in Appendix D.5. 
+
+Training Dynamics under Different Learnabil-ity Penalties. We further examine the training dy-namics of student models under different strengths of the learnability penalty in MI-Distillation. Fig-ure 4 plots the training loss of Qwen2.5-3B-Instruct and Llama-3.2-3B-Instruct when varying the penalty coefficient α. Across both student back-0 200 400 600          
+
+> Training step
+> 0.2 0.4 0.6 0.8
+> Training loss
+> (a) Qwen2.5-3B-Instruct
+> 0200 400 600
+> Training step
+> 0.0 0.2 0.4 0.6 0.8 1.0
+> (b) Llama-3.2-3B-Instruct
+> Short CoT Long CoT Mix Long MI-Distillation α = 1 α = 2 α = 3 α = 4
+
+Figure 4: Training loss of student models under dif-ferent learnability penalty coefficient α. Compared with Long CoT and Mix Long, MI-Distillation exhibits more stable optimization across both student backbones, indicating that learnability-aware selection improves the alignment between reasoning trajectories and student-model capacity. 
+
+bones, MI-Distillation exhibits substantially lower and more stable training loss than Long CoT and Mix Long, indicating that selecting trajectories with explicit learnability control alleviates the opti-mization difficulty introduced by overly complex reasoning traces. Meanwhile, increasing α gener-ally leads to smoother optimization and lower loss, especially for Llama-3.2-3B-Instruct, suggesting that stronger learnability-aware selection can bet-ter align the distilled trajectories with the student model’s learning capacity. Although Short CoT achieves the lowest training loss, it provides less informative reasoning supervision. MI-Distillation maintains a favorable balance by preserving richer reasoning signals while remaining more learnable than direct Long-CoT distillation. 
+
+7 Conclusion 
+
+In this work, we investigate Long CoT distillation for small student models from a gradient-centric perspective. Our analysis shows that Long CoT supervision induces larger and more concentrated gradient updates than Short CoT, with the effect becoming stronger as model capacity increases. These results suggest that effective reasoning distil-lation requires balancing rationale informativeness with student learnability. Based on this insight, we propose MI-Distillation , which constructs a continuous Instruct-Reasoning data spectrum via model interpolation, and SeqLSS , a student-aware criterion for selecting informative and learnable tra-jectories. Extensive experiments demonstrate that MI-Distillation consistently improves small-model CoT distillation over strong baselines, highlight-ing a practical path toward transferring reasoning abilities from LRMs to compact models. 
+
+Limitations 
+
+While MI-Distillation with SeqLSS shows consis-tent benefits, several limitations remain. First, our experiments mainly focus on mathematical reason-ing benchmarks, where final-answer verification is relatively reliable. Extending MI-Distillation to open-ended reasoning, code generation, multilin-gual tasks, and domains with weaker automatic ver-ification remains an important direction for future work. Second, SeqLSS requires scoring multiple candidate rationales with the student model, in-troducing additional offline data-construction cost compared with distillation from a single teacher. While this cost is incurred before training, more efficient scoring or approximation strategies would further improve scalability to larger corpora and broader teacher spectra. Finally, SeqLSS estimates student-side learnability through token-level like-lihoods, which may not fully capture higher-level reasoning properties such as logical faithfulness, conciseness, robustness, or step-level correctness. Future work could integrate learnability-aware se-lection with process-level verification, step-wise feedback, or stronger rationale-quality assessment. 
+
+Acknowledgments 
+
+This research is supported by the Na-tional Natural Science Foundation of China (No.62476127,62306140), the Natural Science Foundation of Jiangsu Province (No.BK20242039), the Fundamental Research Fund for the Central Universities (NO.NXD2026006), the Disciplinary Basic Research Project Fund (No.ILF26023), the Research Fund (No.PO250624101698), the Scientific Research Starting Foundation of Nanjing University of Aeronautics and Astronautics (No.YQR21022), and the High Performance Computing Platform of Nanjing University of Aeronautics and Astronautics. 
+
+References 
+
+AMC. 2025. American mathematics competitions (amc). Nicholas Carlini, Daniel Paleka, Krishnamurthy Dj Dvi-jotham, Thomas Steinke, Jonathan Hayase, A Feder Cooper, Katherine Lee, Matthew Jagielski, Milad Nasr, Arthur Conmy, and 1 others. 2024. Stealing part of a production language model. arXiv preprint arXiv:2403.06634 .Karl Cobbe, Vineet Kosaraju, Mohammad Bavarian, Mark Chen, Heewoo Jun, Lukasz Kaiser, Matthias Plappert, Jerry Tworek, Jacob Hilton, Reiichiro Nakano, Christopher Hesse, and John Schulman. 2021. Training verifiers to solve math word prob-lems. arXiv preprint arXiv:2110.14168 .Sicheng Feng, Gongfan Fang, Xinyin Ma, and Xinchao Wang. 2025. Efficient reasoning models: A survey. 
+
+arXiv preprint arXiv:2504.10903 .Aaron Grattafiori, Abhimanyu Dubey, Abhinav Jauhri, Abhinav Pandey, Abhishek Kadian, Ahmad Al-Dahle, Aiesha Letman, Akhil Mathur, Alan Schelten, Alex Vaughan, and 1 others. 2024. The llama 3 herd of models. arXiv preprint arXiv:2407.21783 .Daya Guo, Dejian Yang, Haowei Zhang, Junxiao Song, Ruoyu Zhang, Runxin Xu, Qihao Zhu, Shi-rong Ma, Peiyi Wang, Xiao Bi, and 1 others. 2025. Deepseek-r1: Incentivizing reasoning capability in llms via reinforcement learning. arXiv preprint arXiv:2501.12948 .Chaoqun He, Renjie Luo, Yuzhuo Bai, Shengding Hu, Zhen Leng Thai, Junhao Shen, Jinyi Hu, Xu Han, Yujie Huang, Yuxiang Zhang, and 1 oth-ers. 2024. Olympiadbench: A challenging bench-mark for promoting agi with olympiad-level bilin-gual multimodal scientific problems. arXiv preprint arXiv:2402.14008 .Dan Hendrycks, Collin Burns, Saurav Kadavath, Akul Arora, Steven Basart, Eric Tang, Dawn Song, and Ja-cob Steinhardt. 2021. Measuring mathematical prob-lem solving with the math dataset. arXiv preprint arXiv:2103.03874 .Geoffrey Hinton, Oriol Vinyals, and Jeff Dean. 2015. Distilling the knowledge in a neural network. arXiv preprint arXiv:1503.02531 .Gabriel Ilharco, Marco Tulio Ribeiro, Mitchell Worts-man, Suchin Gururangan, Ludwig Schmidt, Han-naneh Hajishirzi, and Ali Farhadi. 2022. Edit-ing models with task arithmetic. arXiv preprint arXiv:2212.04089 .Aaron Jaech, Adam Kalai, Adam Lerer, Adam Richard-son, Ahmed El-Kishky, Aiden Low, Alec Helyar, Aleksander Madry, Alex Beutel, Alex Carney, and 1 others. 2024. Openai o1 system card. arXiv preprint arXiv:2412.16720 .Naman Jain, Alex Gu, Wen-Ding Li, Fanjia Yan, Tian-jun Zhang, Sida Wang, Armando Solar-Lezama, Koushik Sen, and Ion Stoica. 2025. Livecodebench: Holistic and contamination free evaluation of large language models for code. In International Con-ference on Learning Representations , volume 2025, pages 58791–58831. Wangyi Jiang, Yaojie Lu, Hongyu Lin, Xianpei Han, and Le Sun. 2025. Teach small models to reason by curriculum distillation. In Proceedings of the 2025 Conference on Empirical Methods in Natural Language Processing , pages 7423–7433. Hoang Anh Just, Myeongseob Ko, and Ruoxi Jia. 2025. Distilling reasoning into student llms: Local natu-ralness for selecting teacher data. arXiv preprint arXiv:2510.03988 .Jaehoon Kim, Kwangwook Seo, and Dongha Lee. 2025. In their own words: Reasoning traces tailored for small models make them better reasoners. arXiv preprint arXiv:2509.22230 .Woosuk Kwon, Zhuohan Li, Siyuan Zhuang, Ying Sheng, Lianmin Zheng, Cody Hao Yu, Joseph Gon-zalez, Hao Zhang, and Ion Stoica. 2023. Efficient memory management for large language model serv-ing with pagedattention. In Proceedings of the 29th symposium on operating systems principles , pages 611–626. Yangsong Lan, Hongliang Dai, and Piji Li. 2026. Crisp: Compressing redundancy in chain-of-thought via in-trinsic saliency pruning. In Findings of the Associa-tion for Computational Linguistics: ACL 2026 , pages 39355–39373. Aitor Lewkowycz, Anders Andreassen, David Dohan, Ethan Dyer, Henryk Michalewski, Vinay Ramasesh, Ambrose Slone, Cem Anil, Imanol Schlag, Theo Gutman-Solo, and 1 others. 2022. Solving quan-titative reasoning problems with language models. 
+
+Advances in neural information processing systems ,35:3843–3857. Ming Li, Yanhong Li, and Tianyi Zhou. 2024a. What happened in llms layers when trained for fast vs. slow thinking: A gradient perspective. arXiv preprint arXiv:2410.23743 .Ming Li, Yong Zhang, Zhitao Li, Jiuhai Chen, Lichang Chen, Ning Cheng, Jianzong Wang, Tianyi Zhou, and Jing Xiao. 2024b. From quantity to quality: Boost-ing llm performance with self-guided data selection for instruction tuning. In Proceedings of the 2024 Conference of the North American Chapter of the Association for Computational Linguistics: Human Language Technologies (Volume 1: Long Papers) ,pages 7602–7635. Yuetai Li, Xiang Yue, Zhangchen Xu, Fengqing Jiang, Luyao Niu, Bill Yuchen Lin, Bhaskar Ramasubrama-nian, and Radha Poovendran. 2025. Small models struggle to learn from strong reasoners. In Find-ings of the Association for Computational Linguis-tics: ACL 2025 , pages 25366–25394. Hunter Lightman, Vineet Kosaraju, Yuri Burda, Harri-son Edwards, Bowen Baker, Teddy Lee, Jan Leike, John Schulman, Ilya Sutskever, and Karl Cobbe. 2024. Let’s verify step by step. In International Conference on Learning Representations , volume 2024, pages 39578–39601. Max Marion, Ahmet Üstün, Luiza Pozzobon, Alex Wang, Marzieh Fadaee, and Sara Hooker. 2023. When less is more: Investigating data pruning for pretraining llms at scale. arXiv preprint arXiv:2309.04564 .Niklas Muennighoff, Zitong Yang, Weijia Shi, Xi-ang Lisa Li, Li Fei-Fei, Hannaneh Hajishirzi, Luke Zettlemoyer, Percy Liang, Emmanuel Candès, and Tatsunori B Hashimoto. 2025. s1: Simple test-time scaling. In Proceedings of the 2025 Conference on Empirical Methods in Natural Language Processing ,pages 20286–20332. David Rein, Betty Li Hou, Asa Cooper Stickland, Jack-son Petty, Richard Yuanzhe Pang, Julien Dirani, Ju-lian Michael, and Samuel R Bowman. 2023. Gpqa: A graduate-level google-proof q&a benchmark. arXiv preprint arXiv:2311.12022 .ByteDance Seed, Jiaze Chen, Tiantian Fan, Xin Liu, Lingjun Liu, Zhiqi Lin, Mingxuan Wang, Chengyi Wang, Xiangpeng Wei, Wenyuan Xu, and 1 others. 2025. Seed1. 5-thinking: Advancing superb rea-soning models with reinforcement learning. arXiv preprint arXiv:2504.13914 .Zhihong Shao, Peiyi Wang, Qihao Zhu, Runxin Xu, Junxiao Song, Xiao Bi, Haowei Zhang, Mingchuan Zhang, YK Li, Yang Wu, and 1 others. 2024. Deepseekmath: Pushing the limits of mathematical reasoning in open language models. arXiv preprint arXiv:2402.03300 .Kimi Team, Tongtong Bai, Yifan Bai, Yiping Bao, SH Cai, Yuan Cao, Y Charles, HS Che, Cheng Chen, Guanduo Chen, and 1 others. 2026. Kimi k2. 5: Visual agentic intelligence. arXiv preprint arXiv:2602.02276 .Qwen Team. 2025. Qwq-32b: Embracing the power of reinforcement learning. Renzhi Wang, Chongqiang Wei, Zhisheng Wang, and Piji Li. R4: Nested reasoning-retrieval for reward modeling in role-playing agents. Taiqiang Wu, Runming Yang, Tao Liu, Jiahao Wang, and Ngai Wong. 2025. Revisiting model inter-polation for efficient reasoning. arXiv preprint arXiv:2510.10977 .Yang Xiang and Buzhou Tang. 2025. Towards efficient cot distillation: Self-guided rationale selector for bet-ter performance with fewer rationales. Jundong Xu, Hao Fei, Liangming Pan, Qian Liu, Mong-Li Lee, and Wynne Hsu. 2024. Faithful logical rea-soning via symbolic chain-of-thought. In Proceed-ings of the 62nd Annual Meeting of the Association for Computational Linguistics (Volume 1: Long Pa-pers) , pages 13326–13365. Prateek Yadav, Derek Tam, Leshem Choshen, Colin A Raffel, and Mohit Bansal. 2023. Ties-merging: Re-solving interference when merging models. Ad-vances in neural information processing systems ,36:7093–7115. An Yang, Baosong Yang, Beichen Zhang, Binyuan Hui, Bo Zheng, Bowen Yu, Chengyuan Li, Dayiheng Liu, Fei Huang, Haoran Wei, Huan Lin, Jian Yang, Jian-hong Tu, Jianwei Zhang, Jianxin Yang, Jiaxi Yang, Jingren Zhou, Junyang Lin, Kai Dang, and 22 oth-ers. 2024. Qwen2.5 technical report. arXiv preprint arXiv:2412.15115 .Yuming Yang, Mingyoung Lai, Wanxu Zhao, Xiao-ran Fan, Zhiheng Xi, Mingqi Wu, Chiyue Huang, Jun Zhao, Haijun Lv, Jian Tong, and 1 others. 2026. Which reasoning trajectories teach students to rea-son better? a simple metric of informative alignment. 
+
+arXiv preprint arXiv:2601.14249 .Qiying Yu, Zheng Zhang, Ruofei Zhu, Yufeng Yuan, Xiaochen Zuo, Yu Yue, Weinan Dai, Tiantian Fan, Gaohong Liu, Lingjun Liu, and 1 others. 2025. Dapo: An open-source llm reinforcement learning system at scale. arXiv preprint arXiv:2503.14476 .Yifan Zhang and Team Math-AI. 2024. American invi-tational mathematics examination (aime) 2024. Yifan Zhang and Team Math-AI. 2025. American invi-tational mathematics examination (aime) 2025. Yaowei Zheng, Richong Zhang, Junhao Zhang, Yanhan Ye, and Zheyan Luo. 2024. Llamafactory: Unified efficient fine-tuning of 100+ language models. In 
+
+Proceedings of the 62nd annual meeting of the as-sociation for computational linguistics (volume 3: system demonstrations) , pages 400–410. 
+
+A Detailed Problem Setup 
+
+We study chain-of-thought reasoning distillation from a large teacher model to a compact stu-dent model. Given a supervised reasoning dataset 
+
+D = {(qi, a i)}Ni=1 , where qi denotes the input prob-lem and ai denotes the reference answer, a teacher model θT is prompted to generate a reasoning tra-jectory Ri conditioned on qi. Each trajectory con-tains intermediate reasoning steps together with a final prediction, and serves as process-level super-vision for student fine-tuning. The resulting distillation corpus is constructed as 
+
+Ddistill = {(qi, R i)}Ni=1 .
+
+The student model θS is then optimized with the standard next-token prediction objective: 
+
+L(θS ) = − X
+
+> (qi,R i)∈D distill
+
+log pθS (Ri | qi).
+
+Process-level supervision goes beyond final-answer imitation by exposing the student to ex-plicit reasoning trajectories. However, teacher rea-soning trajectories can differ substantially in their utility for compact students: more detailed ratio-nales may encode richer reasoning information, but may also introduce greater learning difficulty. The tension between reasoning informativeness and stu-dent learnability motivates our study of how rea-soning supervision interacts with student capacity, as well as the student-aware trajectory selection strategy in MI-Distillation. 
+
+B Detailed Preliminaries and Gradient Formulations 
+
+In Section 3, we omitted the module-specific and layer-wise notations to provide a high-level, in-tuitive overview of the gradient signatures. This appendix presents the complete mathematical for-mulations, including the optimization objective and the rigorous layer-wise definitions of the SVD-based metrics. 
+
+B.1 Supervised Fine-Tuning Objective 
+
+Formally, let (x, y ) denote a training instance from the distillation dataset, where x represents the in-put instruction or problem, and y = ( y1, . . . , y T )
+
+denotes the target sequence consisting of the CoT rationale followed by the final answer. Let Mθ be the student model parameterized by θ. For a given instance (x, y ), Supervised Fine-Tuning (SFT) op-timizes the model by minimizing the normalized token-level negative log-likelihood: 
+
+LSFT (θ; x, y ) = − 1
+
+T
+
+> T
+
+X
+
+> t=1
+
+log pθ(yt | x, y <t )
+
+(12) 
+
+B.2 Layer-wise Gradient Extraction 
+
+To analyze the optimization behavior, we focus on the gradients associated with the attention projec-tion modules. For the i-th layer of an N -layer stu-dent LLM, where i ∈ { 0, . . . , N − 1}, we denote the gradients of the query, key, value, and output projection matrices as G(i) 
+
+> Q
+
+, G(i) 
+
+> K
+
+, G(i) 
+
+> V
+
+, and G(i) 
+
+> O
+
+,respectively. For analytical brevity, let GX,i ∈ Rm×n repre-sent the gradient matrix for any given projection 
+
+X ∈ { Q, K, V, O } at layer i.
+
+B.3 SVD-based Gradient Metrics 
+
+Directly quantifying high-dimensional gradient ma-trices in modern LLMs is computationally challeng-ing and often uninformative. Following (Li et al., 2024a), we characterize the spectral structure of each gradient matrix GX,i through Singular Value Decomposition (SVD) (Carlini et al., 2024): 
+
+GX,i = UX,i ΣX,i V⊤ 
+
+> X,i
+
+(13) where ΣX,i is the diagonal matrix containing the singular values. Let r = min( m, n ) denote the maximum possible rank. We summarize the result-ing singular-value spectrum using two metrics: 
+
+Nuclear Norm. The nuclear norm measures the total spectral mass of the gradient, reflecting the overall magnitude of the optimization signal in-duced by distillation. It is formally defined as: 
+
+∥GX,i ∥∗ =
+
+> r
+
+X
+
+> k=1
+
+σ(X,i ) 
+
+> k
+
+(14) where σ(X,i ) 
+
+> k
+
+denotes the k-th singular value of 
+
+GX,i .
+
+Effective Rank. The effective rank measures the Shannon entropy of the normalized singular-value spectrum. It mathematically captures the number of effective dimensions involved in the gradient update: 
+
+ERank( GX,i ) = exp −
+
+> r
+
+X
+
+> k=1
+
+p(X,i ) 
+
+> k
+
+log p(X,i )
+
+> k
+
+!
+
+,
+
+(15) where p(X,i ) 
+
+> k
+
+= σ(X,i )
+
+> k
+
+∥GX,i ∥∗
+
+Overall, the nuclear norm captures the magnitude of gradient updates, while the effective rank cap-tures their spectral concentration. Together, they allow us to compare how Short CoT and Long CoT supervision differ not only in update strength, but also in the dimensional structure of the resulting optimization trajectories. 
+
+C Experimental Setup Details 
+
+Models. We instantiate the Instruct–Reasoning spectrum at two teacher scales. For the 32B setting, we use QwQ-32B (Team, 2025) as the reasoning-oriented teacher and Qwen2.5-32B-Instruct (Yang et al., 2024) as the instruction-oriented teacher. For the 14B setting, we use DeepSeek-R1-Distill-Qwen-14B (Guo et al., 2025) and Qwen2.5-14B-Instruct (Yang et al., 2024) as the correspond-ing reasoning- and instruction-oriented endpoints. Student distillation experiments are conducted on Qwen2.5-3B-Instruct (Yang et al., 2024) and Llama-3.2-3B-Instruct (Grattafiori et al., 2024). Training Data Generation. To construct the dis-tillation corpus, we sample 7,500 problems from the MATH training split (Hendrycks et al., 2021). Following Guo et al. (2025), we synthesize candi-date reasoning trajectories using a sampling temper-ature of T = 0 .6 and a nucleus sampling parameter of p = 0 .95 . All responses are generated using the model-specific chat templates detailed in Table 5. The trajectories produced by both the original and interpolated teacher models form our initial can-didate pool D. This pool is subsequently refined through a correctness filter and our SeqLSS-based selection mechanism. 
+
+Implementation Details. Following the dataset construction via MI-Distillation, we fine-tune the Qwen2.5-3B-Instruct and Llama-3.2-3B-Instruct models. To maintain distribution consistency, we apply the identical model-specific prompt tem-plates utilized during the data generation phase. Our training pipeline is built upon the LLaMA-Factory framework (Zheng et al., 2024), integrated with DeepSpeed ZeRO-3 Offloading to optimize memory efficiency without compromising through-put. Both student models are optimized using AdamW with a learning rate of 1 × 10 −5. The training spans 3 epochs with a maximum context length of 8,192 tokens, and we maintain an ef-fective global batch size of 32 through gradient accumulation. All experiments are conducted in 
+
+bfloat16 precision for numerical stability. 
+
+C.1 Hardware Infrastructure 
+
+Our experimental infrastructure comprises two dis-tinct server nodes: one equipped with 8 NVIDIA L20 GPUs and another featuring 8 NVIDIA RTX A5000 GPUs. All models and training pipelines are implemented using the PyTorch framework. 
+
+C.2 Inference and Evaluation 
+
+To ensure efficient evaluation, we deploy our fine-tuned models using the vLLM engine (Kwon et al., 2023). Following the exact hyperparameter config-urations utilized during the teacher model’s Chain-of-Thought (CoT) generation phase, we adopt a sampling strategy with a temperature of T = 0 .6
+
+and nucleus sampling of top-p = 0 .95 . The maxi-mum sequence length is set to 8,192 tokens. Regarding evaluation metrics, all results are re-ported using pass @1 accuracy. To obtain reliable estimates under different test-set sizes, we vary the number of independent evaluation runs. For bench-marks with a limited number of test instances, in-cluding AIME 2024 and AMC 2023, we repeat evaluation 16 times with independently sampled outputs. For larger-scale benchmarks, including GSM8K, MATH-500, GPQA-Diamond, Minerva, and OlympiadBench, we repeat evaluation 4 times. We report the mean accuracy across runs together with the corresponding standard deviation. 
+
+C.3 Evaluation Datasets 
+
+To comprehensively assess the mathematical rea-soning capabilities of our models, we conduct eval-uations across a diverse set of standard benchmarks. As previously mentioned, all evaluations on these datasets are performed using the identical hyper-parameters employed during the teacher model’s generation process. The detailed descriptions of the selected datasets are as follows: • GSM8K (Cobbe et al., 2021): A collection of high-quality grade-school math word problems that require multi-step arithmetic and linguistic reasoning. • MATH-500 (Lightman et al., 2024): A repre-sentative subset of 500 problems sampled from the MATH benchmark (Hendrycks et al., 2021), spanning diverse topics and difficulty levels in competition mathematics. • AMC 2023 (AMC, 2025): Problems from the 2023 American Mathematics Competitions, de-signed to evaluate advanced high-school mathe-matical problem-solving ability. • AIME 2024 (Zhang and Math-AI, 2024): Achallenging benchmark drawn from the 2024 American Invitational Mathematics Examination, evaluating advanced mathematical reasoning and problem-solving ability. • GPQA-Diamond (Rein et al., 2023): A highly challenging subset of GPQA consisting of expert-written, graduate-level multiple-choice questions in biology, physics, and chemistry, designed to test scientific reasoning beyond easily searchable knowledge. • Minerva (Lewkowycz et al., 2022): A suite of challenging quantitative reasoning problems cov-ering mathematics and STEM topics, intended to assess models’ ability to solve complex technical questions. • OlympiadBench (He et al., 2024): A rigor-ous benchmark of Olympiad-level mathematics problems that evaluates high-difficulty reasoning, symbolic manipulation, and logical deduction. Model Family Chat Template     
+
+> Qwen2.5-Instruct <|im_start|>user {question} Please reason step by step, and put your final answer within \boxed{}.<|im_end|> <|im_start|>assistant
+> Llama-3.2-Instruct <|begin_of_text|><|start_header_id|>user<|end_header_id|> {question} Please reason step by step, and put your final answer within \boxed{}.<|eot_id|><|start_header_id|>assistant<|end_header_id|>
+> Table 5: Model-specific chat templates used for teacher trajectory generation and student-model distillation. For brevity, only the user turn and the generation prompt are shown, and the system turn inserted by the default chat template is omitted. Special control tokens are highlighted in teal, and {question} denotes the placeholder for the input query.
+
+Baseline Implementations. We provide further details regarding the construction of the baselines evaluated in our experiments. To ensure a fair and rigorous comparison, all baseline models are trained on an identical set of questions, with strict control over answer filtering, prompt formatting, student model architectures, and optimization hy-perparameters, fully aligning with our proposed MI-Distillation. Consequently, these baselines dif-fer solely in their underlying strategies for selecting, mixing, and scheduling the distillation trajectories. 
+
+Baseline Details. We provide implementation de-tails for the stronger baselines considered in our experiments. All baselines are constructed on the same question set and trained with the same for-matting, answer filtering, student models, and opti-mization hyperparameters as MI-Distillation. 
+
+Mix Long (Li et al., 2025) randomly mixes Short- and Long-CoT trajectories with a fixed 4:1 
+
+ratio, serving as a simple data-level combination of concise and elaborated reasoning supervision. 
+
+Mix Large (Li et al., 2025) follows the same mixing ratio but incorporates teacher-scale diver-sity. Specifically, we use Qwen2.5-32B-Instruct 
+
+as the large teacher and Qwen2.5-14B-Instruct 
+
+as the smaller teacher to generate mixed instruction-style reasoning trajectories. 
+
+Curriculum Learning (Jiang et al., 2025) is implemented strictly following the original two-stage curriculum. Stage 1 trains the student with the I NSTRUCT +N OTHINK mixture, and Stage 2 continues training from the Stage 1 checkpoint us-ing the N OTHINK +N ORETHINK mixture. This baseline evaluates whether a manually scheduled transition among different reasoning formats can improve reasoning distillation. 
+
+D Extended Experimental Results and Analysis 
+
+D.1 Evaluation of Interpolated Teachers on MATH-500. 
+
+Table 7 reports the performance of interpolated teacher models on MATH-500 across different dif-ficulty levels, including both the Instruct and Rea-soning endpoints. As the interpolation coefficient increases, the model places more weight on the Reasoning model, generally leading to higher accu-racy and longer reasoning trajectories. This trend suggests that model interpolation induces a grad-ual transition from concise instruction-following behavior to more elaborate reasoning behavior. Notably, the interpolated teachers do not form a perfectly monotonic spectrum across all difficulty levels. We attribute this to minor discrepancies be-tween the Instruct and Reasoning endpoints, such as differences in prompt formatting, chat templates, and RoPE scaling configurations, which may in-troduce marginal effects, especially on easier prob-lems. Overall, however, the interpolated teachers exhibit a clear progressive pattern, and this spec-trum becomes more pronounced as problem diffi-culty increases. 
+
+D.2 Comparison between Direct Interpolation and TIES-Merging 
+
+Our framework constructs the Instruct-Reasoning spectrum via direct parameter interpolation, as de-fined in Eq. (3). A natural concern is that such naive parameter combination may introduce inter-ference between the two endpoint models, and that more sophisticated merging schemes may be nec-essary. To examine whether our findings depend on the specific merging strategy, we compare di-rect interpolation with TIES-Merging (Yadav et al., 2023) using QwQ-32B and Qwen2.5-32B-Instruct under matched interpolation ratios, and evaluate the resulting merged teachers on five reasoning benchmarks. The results are reported in Table 6. TIES-Merging does not consistently outper-form direct interpolation: it achieves better aver-age performance at larger instruct weights ( λ ∈{0.6, 0.8}) but performs worse at smaller ones (λ ∈ { 0.2, 0.4}). More importantly, both merg-ing strategies preserve the overall behavior of the interpolated teachers across the spectrum, indicat-ing that the effectiveness of MI-Distillation is not specific to naive linear interpolation. These results support direct interpolation as a simple and compet-itive design choice rather than a universally optimal one, and more advanced merging methods can be seamlessly incorporated into our framework when beneficial. 
+
+D.3 Full Student Distillation Results with Fixed Interpolation Coefficients 
+
+Table 8 provides the full student distillation results using fixed interpolation coefficients. This exper-iment complements the main results by evaluat-ing how different points on the Instruct-Reasoning teacher spectrum affect downstream student perfor-mance. Here, λ denotes the interpolation weight toward the instruct model, where λ = 1 .0 corre-sponds to the pure instruct teacher and λ = 0 .0
+
+corresponds to the pure reasoning teacher. In con-trast to MI-Distillation, which selects trajectories adaptively for each training instance, this setting distills training examples from a single fixed inter-polated teacher. Across both Qwen2.5-3B-Instruct and Llama3.2-3B-Instruct, intermediate interpolation coefficients generally outperform the two endpoints. For Qwen2.5-3B-Instruct, the best average perfor-mance is obtained at λ = 0 .8, while Llama3.2-3B-Instruct performs best at λ = 0 .6. These re-sults indicate that moderate interpolation can pro-vide more suitable supervision than either purely instruct-style or purely reasoning-style trajectories. At the same time, the optimal coefficient varies across student families and benchmarks, suggest-ing that a fixed global interpolation point is in-sufficient. This observation further supports our instance-level selection strategy in MI-Distillation, which adaptively balances reasoning informative-ness with student-side learnability. 
+
+D.4 Embedding-space analysis of the interpolated CoT spectrum. 
+
+To further verify that model interpolation induces a meaningful transition between Long-CoT and Short-CoT supervision, we analyze the generated trajectories in the embedding space. For each inter-polation coefficient λ, we embed the corresponding CoT trajectories and visualize them using PCA. We also compute pairwise cosine distances between trajectories generated from different interpolation coefficients. As shown in Figure 5, the CoT embeddings ex-hibit a clear and progressive shift as λ varies from the reasoning-oriented endpoint to the instruction-oriented endpoint. For both Qwen2.5-3B-Instruct and Llama-3.2-3B-Instruct, neighboring interpola-tion coefficients tend to occupy adjacent regions in the PCA space, while endpoints are more clearly separated. The pairwise distance matrices fur-ther support this observation: trajectories gener-ated from nearby coefficients have smaller cosine distances, whereas trajectories from distant coeffi-cients, especially across the two endpoints, show substantially larger distances. These results indi-cate that interpolation does not simply produce isolated teacher variants, but instead constructs a smooth Instruct-Reasoning data spectrum that bridges Short CoT and Long CoT supervision. 
+
+D.5 Ablation on the Learnability Penalty Coefficient 
+
+We ablate the learnability penalty coefficient α in SeqLSS, which balances reasoning informativeness against student-side learnability during trajectory selection. As shown in Table 9, α does not induce a monotonic trend; instead, different values corre-spond to different trade-offs over the interpolation spectrum. Across both Qwen2.5-3B-Instruct and Llama-3.2-3B-Instruct, α = 4 achieves the best av-erage performance, indicating a favorable balance between selecting informative CoT trajectories and maintaining sufficient alignment with the student model. Smaller values of α remain competitive on sev-eral individual benchmarks, suggesting that the pre-ferred strength of learnability regularization can be task- and model-dependent. However, α = 4 
+
+provides the most reliable overall behavior across the two student families. We therefore use α = 4 
+
+as the default setting in our main experiments. Interp. Coef. λ Merging Evaluation Datasets Avg. ∆ Avg. GPQA-Diamond GSM8K MATH-500 Minerva Olympiad 
+
+λ = 0 .2 Direct 63 .64 96 .13 90 .00 34 .93 62 .46 69 .43 −3.12 
+
+TIES 57 .58 96 .44 87 .20 32 .35 58 .01 66 .32 
+
+λ = 0 .4 Direct 54 .55 96 .06 88 .80 35 .29 58 .90 66 .72 −1.27 
+
+TIES 53 .54 95 .68 86 .80 33 .82 57 .42 65 .45 
+
+λ = 0 .6 Direct 55 .05 96 .06 83 .60 30 .88 53 .12 63 .74 +2 .12 
+
+TIES 58 .59 95 .98 87 .80 31 .62 55 .34 65 .87 
+
+λ = 0 .8 Direct 55 .05 96 .06 83 .40 30 .88 49 .55 62 .99 +1 .17 
+
+TIES 53 .54 96 .21 84 .60 31 .25 55 .19 64 .16 
+
+Table 6: Comparison between direct parameter interpolation and TIES-Merging for constructing interpolated teachers. Teachers are merged from QwQ-32B and Qwen2.5-32B-Instruct, where λ denotes the interpolation weight toward the instruct model as in Eq. (3). ∆ Avg. denotes the difference in average performance (TIES −
+
+Direct). Within each λ group, the better result of the two merging strategies on each benchmark is shown in bold .
+
+MI Level 1 Level 2 Level 3 Level 4 Level 5 Average Acc. ↑ Tok. ↓ Acc. ↑ Tok. ↓ Acc. ↑ Tok. ↓ Acc. ↑ Tok. ↓ Acc. ↑ Tok. ↓ Acc. ↑ Tok. ↓
+
+14B Models 
+
+0.0 95.35 1,351 94.44 1,465 94.29 2,097 92.19 3,440 81.34 4,731 91.52 2,617 0.2 95.35 973 93.33 1,117 96.19 1,705 89.06 2,243 77.61 3,664 90.31 1,940 0.4 93.02 529 86.67 644 91.43 1,101 79.69 1,521 71.64 2,609 84.49 1,281 0.6 97.67 318 93.33 424 95.24 588 78.91 835 70.15 1,444 87.06 722 0.8 95.35 293 91.11 378 91.43 581 71.88 717 55.97 851 81.15 564 1.0 95.35 348 93.33 432 89.52 499 75.00 621 54.48 759 81.54 532 
+
+32B Models 
+
+0.0 95.35 1,661 96.67 2,137 95.24 2,864 88.28 3,775 75.37 5,228 90.18 3,133 0.2 95.35 1,195 97.78 1,400 96.19 1,813 91.41 2,533 83.58 3,763 92.86 2,141 0.4 95.35 499 94.44 752 97.14 930 87.50 1,483 82.84 2,298 91.45 1,192 0.6 95.35 362 94.44 489 95.24 543 81.25 742 73.13 922 87.88 612 0.8 93.02 353 91.11 441 93.33 515 81.25 669 67.91 897 85.32 575 1.0 95.35 339 91.11 425 92.38 502 78.91 600 64.93 714 84.54 516 
+
+Table 7: Performance of the interpolated teacher model on MATH-500 across difficulty levels (Level 1–5). λ
+
+denotes the model-interpolation coefficient, ranging from the reasoning model ( λ = 0 ) to the instruct model ( λ = 1 ). For each level and the average performance, we report accuracy ( Acc. ) and generated tokens ( Tok. ). Within each model-size group, the best accuracy and the lowest token cost per column are shown in bold and bold .Interp. Coef. λ Evaluation Datasets Avg. AIME24 AMC23 GPQA-Diamond GSM8K MATH-500 Minerva Olympiad 
+
+Student Model: Qwen2.5-3B-Instruct 
+
+λ = 1 .0 5.42 ±1.67 35 .00 ±6.65 25 .88 ±2.87 83 .49 ±1.04 62 .20 ±1.97 25 .37 ±1.59 27 .00 ±0.94 37 .77 
+
+λ = 0 .8 5.62 ±2.91 37 .19 ±4.82 28 .03 ±0.65 84 .63 ±0.83 63 .20 ±1.26 26 .75 ±1.91 29 .23 ±1.62 39 .24 
+
+λ = 0 .6 3.33 ±2.72 39 .22 ±6.10 25 .88 ±3.48 84 .48 ±0.23 63 .20 ±1.10 27 .21 ±1.44 30 .19 ±1.84 39 .07 
+
+λ = 0 .4 6.04 ±3.04 36 .88 ±4.23 25 .63 ±2.04 84 .00 ±0.77 63 .45 ±0.62 24 .72 ±1.21 28 .56 ±1.46 38 .47 
+
+λ = 0 .2 3.75 ±2.69 32 .34 ±4.96 23 .86 ±2.68 83 .07 ±1.13 58 .70 ±1.05 22 .24 ±1.26 24 .89 ±1.05 35 .55 
+
+λ = 0 .0 3.75 ±3.19 27 .03 ±4.10 19 .32 ±0.96 80 .78 ±0.43 54 .05 ±0.72 20 .13 ±1.25 21 .11 ±1.18 32 .31 
+
+Student Model: Llama3.2-3B-Instruct 
+
+λ = 1 .0 3.96 ±2.78 24 .38 ±5.88 23 .99 ±2.35 76 .65 ±1.17 51 .40 ±1.25 17 .10 ±2.43 17 .43 ±1.44 30 .70 
+
+λ = 0 .8 6.25 ±3.42 30 .16 ±5.51 24 .75 ±3.27 78 .37 ±0.53 50 .80 ±1.66 17 .00 ±1.06 19 .96 ±1.24 32 .47 
+
+λ = 0 .6 6.25 ±3.42 28 .59 ±4.65 25 .13 ±2.52 79 .34 ±0.59 52 .45 ±2.18 16 .82 ±0.76 20 .47 ±0.63 32 .72 
+
+λ = 0 .4 5.21 ±3.65 27 .19 ±5.69 26 .39 ±1.51 78 .92 ±1.21 51 .35 ±1.81 17 .46 ±1.42 18 .29 ±1.24 32 .12 
+
+λ = 0 .2 3.54 ±2.57 23 .91 ±2.41 23 .11 ±2.81 78 .34 ±0.76 49 .60 ±0.85 15 .44 ±1.27 15 .21 ±0.89 29 .88 
+
+λ = 0 .0 0.83 ±1.49 20 .00 ±4.18 22 .47 ±2.69 78 .53 ±0.97 45 .25 ±2.46 13 .24 ±1.08 13 .87 ±1.00 27 .74 
+
+Table 8: Full student distillation results using fixed interpolation coefficients. Here, λ denotes the interpolation weight toward the instruct model, with λ = 1 .0 corresponding to the pure instruct teacher and λ = 0 .0 to the pure reasoning teacher. All results are reported as Pass@1 accuracy, averaged over multiple evaluation runs with standard deviations. Specifically, AIME24 and AMC23 are evaluated over 16 runs due to their limited test-set sizes, while the remaining benchmarks are evaluated over 4 runs. The best result within each student-model block is highlighted. PCA embedding 
+
+(a) Qwen2.5-3B-Instruct 
+
+interpolation coefficient λ (instruct weight)      
+
+> 0.0 0.2 0.4 0.6 0.8 1.0
+
+0.0 0.2 0.4 0.6 0.8 1.0 
+
+interpolation coefficient λ
+
+0.0 0.2 0.4 0.6 0.8 1.0     
+
+> interpolation coefficient  λ
+> 0.016 0.057 0.188 0.194 0.192 0.016 0.040 0.143 0.148 0.147 0.057 0.040 0.119 0.126 0.125 0.188 0.143 0.119 0.027 0.034 0.194 0.148 0.126 0.027 0.032 0.192 0.147 0.125 0.034 0.032
+
+(b) Pairwise CoT distance 
+
+PCA embedding 
+
+(c) Llama-3.2-3B-Instruct 
+
+interpolation coefficient λ (instruct weight)      
+
+> 0.0 0.2 0.4 0.6 0.8 1.0
+
+0.0 0.2 0.4 0.6 0.8 1.0 
+
+interpolation coefficient λ
+
+0.0 0.2 0.4 0.6 0.8 1.0     
+
+> interpolation coefficient  λ
+> 0.022 0.054 0.118 0.118 0.116 0.022 0.038 0.089 0.089 0.088 0.054 0.038 0.082 0.084 0.083 0.118 0.089 0.082 0.025 0.031 0.118 0.089 0.084 0.025 0.028 0.116 0.088 0.083 0.031 0.028
+
+(d) Pairwise CoT distance 
+
+0.000 0.025 0.050 0.075 0.100 0.125 0.150 0.175 
+
+> cosine distance
+
+0.00 0.02 0.04 0.06 0.08 0.10 
+
+> cosine distance
+
+Figure 5: Visualization of the CoT representation spectrum induced by model interpolation. Panels (a) and (c) show PCA projections of CoT embeddings using Qwen2.5-3B-Instruct and Llama-3.2-3B-Instruct, respectively, with colors denoting the interpolation coefficient λ (instruct weight). Red arrows indicate the dominant shift across the spectrum. Panels (b) and (d) report pairwise cosine distances between coefficients. Adjacent coefficients are consistently closer than distant ones, indicating that interpolation yields a gradual transition between Long-CoT and Short-CoT supervision rather than disconnected teacher distributions. Coefficient Evaluation Datasets Avg. AIME24 AMC23 GPQA-Diamond GSM8K MATH-500 Minerva Olympiad 
+
+Student Model: Qwen2.5-3B-Instruct 
+
+α = 1 5.62 ±2.91 34 .53 ±5.93 30 .43 ±5.29 85 .33 ±0.27 64 .92 ±1.74 25 .18 ±2.66 30 .08 ±1.64 39.44 
+
+α = 2 6.04 ±2.50 39 .84 ±4.70 29 .42 ±1.45 84 .61 ±0.47 64 .60 ±0.86 27 .02 ±1.36 29 .78 ±1.18 40 .19 
+
+α = 3 6.04 ±3.89 37 .81 ±4.27 30 .05 ±0.65 85 .24 ±0.45 64 .75 ±1.62 24 .26 ±0.74 29 .93 ±1.18 39.73 
+
+α = 4 5.42 ±2.06 40 .31 ±5.39 29 .55 ±1.27 85 .06 ±0.53 66 .15 ±1.08 25 .46 ±1.10 29 .49 ±0.81 40 .21 
+
+Student Model: Llama-3.2-3B-Instruct 
+
+α = 1 4.79 ±2.71 25 .16 ±3.82 23 .86 ±3.31 77 .65 ±0.50 52 .25 ±0.82 16 .45 ±3.20 19 .14 ±1.21 31.33 
+
+α = 2 5.42 ±2.69 27 .50 ±5.08 21 .97 ±4.67 77 .60 ±0.60 52 .85 ±1.00 17 .10 ±1.14 19 .55 ±0.88 31.71 
+
+α = 3 6.04 ±3.49 30 .63 ±4.87 26 .39 ±2.08 77 .60 ±0.80 51 .70 ±1.41 18 .29 ±1.35 19 .58 ±0.51 32 .89 
+
+α = 4 6.88 ±3.10 30 .47 ±2.28 24 .62 ±2.52 77 .75 ±0.77 54 .60 ±1.02 16 .27 ±0.46 19 .96 ±0.28 32 .93 
+
+Table 9: Ablation study on the learnability penalty coefficient α in MI-Distillation. We evaluate SeqLSS-based trajectory selection under different values of α on two 3B student models. For each student-model block, the best result in each column is shown in bold , and the second-best result is underlined. The default setting, α = 4 , is highlighted in blue. Standard deviations are reported as subscripts for compactness. E Examples of Model Outputs with Different Interpolation Weights 
+
+User Prompt 
+
+Joe is studying a bacteria population. There are 20 bacteria present at 3:00 p.m. and the population doubles every 3 minutes. Assuming none of the bacteria die, how many bacteria are present at 3:15 p.m. the same day? Please reason step by step, and put your final answer within \boxed{} .
+
+Model Output: λ = 0 .0 (Reasoning Model) 
+
+Okay, let’s see. Joe is studying bacteria that double every 3 minutes. Starting at 3:00 p.m. with 20 bacteria, and we need to find out how many there are at 3:15 p.m. Hmm, so first, how much time passes between 3:00 and 3:15? That’s 15 minutes. Right. Since the bacteria double every 3 minutes, I need to figure out how many 3-minute intervals are in 15 minutes. Let me do that division: 15 divided by 3 equals 5. So there are 5 doubling periods. Now, starting with 20 bacteria, each doubling period multiplies the population by 2. So after each 3 minutes, the number doubles. So after the first 3 minutes, it’s 20 * 2 = 40. Then after 6 minutes, that’s 40 * 2 = 80. Continuing this way: 3rd interval (9 minutes total) would be 160, 4th interval (12 minutes) 320, and the 5th interval (15 minutes) would be 640. Wait, but maybe there’s a formula for exponential growth here? The formula is N = N 0 ∗ 2(t/T ), where N0 is initial amount, t is total time, and T is the doubling period. Let me plug in the numbers. N0 is 20, t is 15 minutes, T is 3 minutes. So that’s 
+
+20 ∗ 2(15 /3) = 20 ∗ 25. 25 is 32, so 20 * 32 = 640. Hmm, same as before. So that seems right. Let me check again. 15 divided by 3 is indeed 5, so 25 is 32. 20 times 32 is 640. Yeah, that makes sense. So the answer should be 640. Wait, is there a chance I made a mistake in the formula? Let me think. The formula for exponential growth when doubling is indeed N = N 0 ∗ 2(t/ doubling time ).So yes, that’s correct. Alternatively, step by step: At 3:00 pm: 20 3:03 pm: 40 3:06 pm: 80 3:09 pm: 160 3:12 pm: 320 3:15 pm: 640 Yep, that’s five doublings. Each time multiplying by 2. So 25 is 32, times 20 gives 640. I think that’s right. So the final answer is 640. Let me just make sure I didn’t miscalculate 25. 2, 4, 8, 16, 32. Yes, five doublings. So 20*32 is indeed 640. Okay, confident now. The bacteria population doubles every 3 minutes. Starting at 3:00 p.m. with 20 bacteria, we need to calculate the population at 3:15 p.m., which is 15 minutes later. First, determine the number of doubling periods in 15 minutes: 
+
+15 minutes 
+
+3 minutes per doubling = 5 doublings Using the formula for exponential growth N = N0 × 2t, where N0 = 20 , t = 5 :
+
+N = 20 × 25 = 20 × 32 = 640 
+
+Thus, the number of bacteria present at 3:15 p.m. is 640 .Model Output: λ = 0 .2
+
+Okay, let’s see. Joe is studying bacteria that double every 3 minutes. At 3:00 p.m., there are 20 bacteria. We need to find out how many there are at 3:15 p.m. Hmm, first, I should figure out how much time passes between 3:00 and 3:15. That’s 15 minutes, right? Now, since the bacteria double every 3 minutes, I need to determine how many 3-minute intervals are in 15 minutes. Let me divide 15 by 3. 15 divided by 3 is 5. So, there are 5 intervals of 3 minutes each in 15 minutes. That means the bacteria population doubles 5 times. Starting with 20 bacteria, each doubling multiplies the population by 2. So after the first 3 minutes, it would be 20 * 2 = 40. Then after 6 minutes, 40 * 2 = 80. Continuing this way: At 3:03 p.m. - 40 At 3:06 p.m. - 80 At 3:09 p.m. - 160 At 3:12 p.m. - 320 At 3:15 p.m. - 640 Wait, but maybe there’s a formula for exponential growth that I can use instead of calculating each step. The formula is N = N 0 ∗ 2(t/T ), where N0 is the initial population, t is the total time, and T is the doubling time. Let me plug in the numbers. N0 is 20, t is 15 minutes, and T is 3 minutes. So N = 20 ∗ 2(15 /3) . 15 divided by 3 is 5, so that’s 25. 25 is 32. Then 20 * 32 equals 640. Hmm, both methods give me 640. So I think that’s the answer. Let me just double-check the steps again. Starting at 20, doubling 5 times: 20, 40, 80, 160, 320, 640. Yep, that’s five doublings. Each time multiplying by 2, so 25 is 32, times 20 is 640. I think that’s right. The key was figuring out how many doubling periods fit into 15 minutes, which is 5. Then applying the exponential growth formula. So the final answer should be 640 bacteria at 3:15 p.m. The bacteria population doubles every 3 minutes. From 3:00 p.m. to 3:15 p.m., there are 15 minutes, which is 15 3 = 5 doubling periods. Starting with 20 bacteria, the population after 5 doublings is calculated as: 
+
+20 × 25 = 20 × 32 = 640 640 
+
+Model Output: λ = 0 .4
+
+Okay, let’s see. Joe is studying bacteria that double every 3 minutes. At 3:00 p.m., there are 20 bacteria. We need to find out how many there are at 3:15 p.m. Hmm, first, I should figure out how much time passes between 3:00 and 3:15. That’s 15 minutes, right? Now, since the bacteria double every 3 minutes, I need to see how many 3-minute intervals are in 15 minutes. Let me divide 15 by 3. That’s 5. So there are 5 intervals of 3 minutes each in 15 minutes. Each interval, the population doubles. Starting with 20 bacteria, after the first 3 minutes, it becomes 20 * 2 = 40. Then after another 3 minutes (6 minutes total), it doubles again to 40 * 2 = 80. Continuing this way: - At 3:03 p.m. (3 minutes): 20 * 2 = 40 - At 3:06 p.m. (6 minutes): 40 * 2 = 80 - At 3:09 p.m. (9 minutes): 80 * 2 = 160 - At 3:12 p.m. (12 minutes): 160 * 2 = 320 - At 3:15 p.m. (15 minutes): 320 * 2 = 640 Alternatively, I can use the formula for exponential growth: N = N 0 ∗ 2(t/T ), where N0 is the initial number, t is the time elapsed, and T is the doubling time. Here, N0 = 20, t = 15 minutes, T = 3 minutes. Plugging in: 
+
+N = 20 ∗ 2(15 /3) = 20 ∗ 25 = 20 ∗ 32 = 640 .
+
+So both methods give me 640 bacteria at 3:15 p.m. Let me just check my calculations again. 25 is 32, and 20 times 32 is indeed 640. Yep, that seems right. Therefore, the final answer is 640 .Model Output: λ = 0 .6
+
+To determine the number of bacteria present at 3:15 p.m., we need to calculate how many times the population doubles between 3:00 p.m. and 3:15 p.m. 1. Determine the time interval: - From 3:00 p.m. to 3:15 p.m. is a 15-minute period. 2. Calculate the number of doubling periods: - The population doubles every 3 minutes. -Number of doubling periods = Total time interval / Doubling time - Number of doubling periods = 15 minutes / 3 minutes per doubling = 5 doublings 3. Initial population: - At 3:00 p.m., there are 20 bacteria. 4. Population growth calculation: - Each doubling period multiplies the population by 2. - After 5 doublings, the population is multiplied by 25.5. Final population calculation: - Final population = Initial population * 25 - Final population = 20 * 25 - 25 = 32 - Final population = 20 * 32 = 640 Thus, the number of bacteria present at 3:15 p.m. is 640 .
+
+Model Output: λ = 0 .8
+
+To determine the number of bacteria present at 3:15 p.m., given that the population doubles every 3 minutes and starts with 20 bacteria at 3:00 p.m., we can follow these steps: 1. Identify the time interval and the doubling period: - The time interval from 3:00 p.m. to 3:15 p.m. is 15 minutes. - The bacteria population doubles every 3 minutes. 2. Calculate the number of doubling periods within the 15-minute interval: - Number of doubling periods = Total time interval / Doubling period - Number of doubling periods = 15 minutes / 3 minutes per period = 5 periods 3. Use the formula for exponential growth: - The population after n doubling periods can be calculated using the formula: 
+
+P = P0 × 2n
+
+where P is the final population, P0 is the initial population, and n is the number of doubling periods. 4. Plug in the known values: - Initial population P0 = 20 - Number of doubling periods n = 5 -Final population P = 20 × 25
+
+5. Calculate the final population: - 25 = 32 - P = 20 × 32 = 640 
+
+Therefore, the number of bacteria present at 3:15 p.m. is 640 .
+
+Model Output: λ = 1 .0 (Instruct Model) 
+
+To solve this problem, we need to calculate how many times the bacteria population doubles from 3:00 p.m. to 3:15 p.m. 1. Identify the time span and doubling period: - The time span from 3:00 p.m. to 3:15 p.m. is 15 minutes. - The bacteria population doubles every 3 minutes. 2. Determine the number of doubling periods within the 15-minute span: - Number of doubling periods = Total time span / Doubling period - Number of doubling periods = 15 minutes / 3 minutes per doubling = 5 3. Calculate the population after each doubling period: - Initial population at 3:00 p.m. = 20 -Population doubles every 3 minutes. 4. Use the formula for exponential growth: - The population after n doubling periods is given by 
+
+P = P0 × 2n, where P0 is the initial population and n is the number of doubling periods. - Here, 
+
+P0 = 20 and n = 5 .5. Substitute the values into the formula: - P = 20 × 25
+
+6. Calculate the final population: - P = 20 × 32 - P = 640 
+
+Thus, the number of bacteria present at 3:15 p.m. is 640 .
