@@ -1,0 +1,604 @@
+Title: Verify Before You Distill: Prompt-Level Teacher Gating for On-Policy Distillation
+
+URL Source: https://arxiv.org/pdf/2609.02998v1
+
+Published Time: Fri, 04 Sep 2026 00:04:02 GMT
+
+Number of Pages: 17
+
+Markdown Content:
+# Verify Before You Distill: Prompt-Level Teacher Gating for On-Policy Distillation 
+
+AllSpark Team 
+
+On-policy distillation (OPD) accelerates post-training by providing dense token-level supervision from a frozen teacher on the student’s own rollouts. Vanilla OPD applies this supervision uni-formly across prompts, without checking whether the teacher is reliable for each prompt. Because reverse KL is mode-seeking, a confidently wrong teacher can induce a strong yet misleading up-date. Distributional proxies, such as entropy or teacher–student likelihood agreement, measure uncertainty or agreement but do not directly verify outcome correctness. We introduce Teacher-Gated On-Policy Distillation (TGOPD), built on the principle that teacher reliability should be verified at the prompt level before dense supervision is admitted. TGOPD estimates reliability from a small set of verifier-scored teacher probes and routes each prompt exclusively to dense OPD when the reliability check passes or to verifier-grounded GRPO otherwise. Across 4B and 35B students in mathematics, code, and instruction following, TGOPD outperforms Vanilla OPD in all six single-domain settings and achieves higher seven-benchmark averages at both scales under multi-domain training. By using otherwise-idle teacher capacity for reliability estimation, TGOPD also reduces teacher-side compute waste in asynchronous OPD, increasing teacher-node GPU utilization from 9.8% to 78.9% in the measured 4B single-domain run. 
+
+Date: August 28, 2026 
+
+Status: Public Technical Report 
+
+## 1 Introduction 0 15 30 45 60    
+
+> time within a one-hour window (min)
+> 050 100
+> GPU utilization (%)  mean 79% reclaimed capacity
+> (a) Frozen-teacher node utilization
+> mean 10% (idle 59%)
+> Teacher node Cluster average 050 100
+> GPU utilization (%)
+> 10% 51% 79% 69%
+> +69 +18
+> (b) Average GPU utilization
+> Vanilla OPD TGOPD (ours)
+
+Figure 1: Teacher-side GPU underuti-lization in asynchronous OPD. (a) Un-der Vanilla OPD, teacher-node utilization remains below 5% for 59% of the mea-sured hour; TGOPD uses this otherwise-idle capacity for reliability probes. (b) 
+
+Mean teacher-node utilization increases from 9.8% to 78.9%. On-policy distillation (OPD) is a compute-efficient approach to post-training language models [1, 5, 23]. Reinforcement learning with verifiable rewards (RLVR) assigns a single scalar reward to an entire trajectory. In contrast, OPD samples roll-outs from the student and uses a stronger teacher to pro-vide a reverse-KL learning signal at every token, transform-ing sparse outcome supervision into dense per-token guid-ance. This dense feedback can enable the student to reach teacher-level accuracy roughly an order of magnitude faster than RLVR [23]. Despite this training efficiency, asynchronous OPD leaves much of the teacher’s compute idle. In a typical asynchronous deployment, the student generates rollouts on dedicated in-ference nodes, while a stronger, domain-specialized frozen teacher scores completed rollouts on a separate node. A scor-ing pass requires only a forward evaluation over tokens that have already been generated. It is therefore much cheaper than autoregressive decoding and cannot begin until a batch of student rollouts is ready, leaving the teacher’s accelerators idle between scoring batches. Figure 1 quantifies this ineffi-ciency in a 4B run: the teacher node averages 9.8% GPU uti-lization and remains below 5% utilization for 59% of the mea-sured hour, while the rollout and training nodes remain busy. This observation motivates using the otherwise-idle teacher capacity to improve the training signal itself. The idle capacity can be used to address a more fundamen-tal weakness of Vanilla OPD: teacher supervision is admitted without a prompt-level reliability check. Reverse KL is mode-seeking and concentrates the student on the teacher’s high-arXiv:2609.02998v1 [cs.LG] 2 Sep 2026 −0.4 −0.3 −0.2 −0.1 0.0                  
+
+> mean token log-prob density
+> AUROC 0.51
+> (a) Code: teacher confidence
+> −0.25 −0.20 −0.15 −0.10 −0.05
+> mean token log-prob
+> AUROC 0.73
+> (b) Math: teacher confidence
+> 0.0 0.2 0.4 0.6 0.8 1.0
+> diagnostic teacher reliability q(10)
+> T(x)
+> 0.00 0.25 0.50 0.75 1.00
+> P(top-conf. response correct)  q(10)
+> T< 0.5 : top-confidence response incorrect 84% (Code) / 61% (Math)
+> (c) OPD imitation-target quality
+> y=q(10)
+> T
+> Code Math lower reliability ( q(10)
+> T< 0.7 )higher reliability ( q(10)
+> T≥ 0.7 )
+
+Figure 2: Teacher confidence does not consistently indicate prompt-level reliability. This diagnostic uses ten offline teacher responses for each of 2,400 prompts per domain; q(10 ) 
+
+> T
+
+is their verifier pass rate and is distinct from the KT = 3 online estimator used for training. (a,b) Teacher self-confidence under higher (q(10 ) 
+
+> T
+
+≥ 0.7) and lower ( q(10 ) 
+
+> T
+
+< 0.7) reliability. Confidence separates the groups at AUROC 0.51 on code and 0.73 on math. (c) In the low-reliability regime ( q(10 ) 
+
+> T
+
+< 0.5), the teacher’s highest-confidence sampled response is incorrect 84% of the time on code and 61% on math. probability behavior [5, 23]. This property makes OPD efficient when the teacher is reliable, but it can also amplify confident errors. Reliability varies by prompt: a globally informative teacher signal may not be locally exploitable [9], and a stronger teacher can induce negative transfer into a smaller student [10]. Do-main routing alone does not resolve this issue because existing multi-teacher frameworks use the selected teacher’s dense reward without verifying its reliability on the particular prompt [14]. Reliability-aware OPD has developed along two complementary directions. The first uses distributional evidence. EOPD introduces forward KL at high-entropy teacher tokens [6]. TrOPD defines token-level trust regions from teacher–student decoding agreement [24]. REOPOLD clips and samples token rewards using likelihood ratios and student entropy [7]. These signals capture uncertainty, compatibility, or optimization risk, but they do not directly test whether a teacher answer is correct. Outcome evidence has also been used to regulate more local decisions. RG-OPD retains trajectory-level distillation when verifier feedback agrees with the teacher–student likelihood gap [2]. RLSD uses environmental correctness to determine update direction while self-distillation modulates its magnitude [26]. At the token level, SPOT evaluates teacher-proposed branches through verifier-scored student continuations [16]. Together, these methods show how outcome feedback can control individual trajectories or token branches. TGOPD instead uses repeated teacher outcomes to make a prompt-level admission decision before dense supervision is applied. Figure 2 motivates this prompt-level decision. For the diagnostic, we draw ten offline teacher responses per prompt and define q(10 ) 
+
+> T
+
+(x) as their verifier pass rate. The larger sample count gives a finer-grained analysis than the three fresh online probes used during training; both quantities measure the same verifier-defined teacher reliability. On code, self-confidence barely separates higher- and lower-reliability prompts (AU-ROC 0.51), compared with 0.73 on math. Within the low-reliability regime, the teacher’s highest-confidence sampled response is still incorrect 84% of the time on code and 61% on math. Because reverse KL empha-sizes high-probability teacher behavior, this is precisely the type of error that Vanilla OPD can propagate. Teacher-Gated On-Policy Distillation (TGOPD) uses the teacher’s idle capacity to estimate prompt-level re-liability before selecting a supervision signal. As shown in Figure 3, the teacher generates KT probe rollouts for the same prompt; a verifier scores them; and their pass rate qT (x) = K−1 
+
+> T
+
+∑k rk provides the online relia-bility estimate. If qT (x) ≥ τ, TGOPD uses dense OPD alone. Otherwise, it rejects the teacher signal and uses verifier-grounded GRPO alone, provided that the student rollout group contains reward variation. The two branches are routed rather than blended. Because the probes run primarily while the teacher would otherwise be idle, teacher-node GPU utilization rises from 9.8% to 78.9% and cluster utilization from 51.5% to 69.5%, with modest measured end-to-end overhead. 2Across 4B and 35B students in mathematics, code, and instruction following, TGOPD outperforms Vanilla OPD in all six domain–scale settings. The largest gains occur on code, where confidence is least informative about teacher reliability. These results support the design choice: verify the teacher at the prompt level, retain its dense signal when the reliability check passes, and withdraw that signal when the check fails. 
+
+## 2 Preliminaries 
+
+Setup and notation. Let πθ denote the student policy and πT a frozen teacher; in a multi-teacher setting, 
+
+πT = πT,dom (x) is the teacher routed to the domain of prompt x. For each prompt x ∼ D , the student samples a group of G on-policy rollouts {yi}Gi=1 ∼ πθ (· | x), and a binary verifier r(x, y) ∈ { 0, 1 } scores each rollout against a ground-truth outcome: unit tests for code and a rule-based judge for mathematics and instruction following. We write yit for the t-th token of rollout i and sg [·] for the stop-gradient operator. 
+
+On-policy distillation (OPD). OPD supervises every token of the student’s own rollouts by minimizing the mode-seeking reverse KL KL (πθ ∥ πT ). Estimated from the single sampled token at each position, this objective takes the form of a policy-gradient update whose per-token advantage is the teacher–student log-likelihood ratio [5, 23, 14]: ˆAOPD  
+
+> i,t
+
+= β sg 
+
+[
+
+log πT
+
+(
+
+yit | x, yi
+
+> <t
+
+)
+
+− log πθ
+
+(
+
+yit | x, yi
+
+> <t
+
+)] 
+
+, (1) where β > 0 sets the scale of the teacher signal. Every token therefore receives its own dense, individ-ually weighted learning signal, which contributes to OPD’s sample efficiency relative to learning from a single trajectory-level reward. Being mode-seeking, the objective concentrates the student on the teacher’s highest-probability behavior rather than spreading probability mass over alternatives. Note that equation 1 depends only on πT and πθ , not on the verifier r: it measures how far the student is from the teacher but does not directly assess whether the teacher’s output is correct. When πT is unreliable on x, the resulting dense gradient can therefore be misleading. 
+
+GRPO with verifiable rewards. When teacher supervision is unavailable or withheld, the student can in-stead learn from the verifier alone. GRPO [17] centers the reward within each group; we omit the standard-deviation normalization [13]: ˆAGRPO  
+
+> i
+
+= r
+
+(
+
+x, yi)
+
+− 1
+
+G
+
+> G
+
+# ∑
+
+> j=1
+
+r
+
+(
+
+x, yj)
+
+, ˆAGRPO  
+
+> i,t
+
+= ˆAGRPO  
+
+> i
+
+∀ t. (2) Unlike the token-specific OPD advantage in equation 1, this signal assigns the same scalar advantage to every token in a rollout. It is therefore trajectory-level rather than token-specific, but remains verifier-grounded: its sign is determined by the verifier outcome relative to the group mean. 
+
+The gap. Vanilla OPD provides dense token-level supervision without directly verifying teacher reliabil-ity, whereas GRPO provides verifier-grounded but coarse trajectory-level supervision. Vanilla OPD and GRPO-only training each apply a fixed supervision rule uniformly across prompts, even though teacher reliability—and hence the preferable learning signal—may vary from prompt to prompt. TGOPD, de-scribed next, makes this choice per prompt by applying the same verifier to teacher probes as well as student rollouts. It routes each prompt to exactly one signal; OPD and GRPO are never blended on the same prompt. 
+
+## 3 Teacher-Gated On-Policy Distillation 
+
+TGOPD represents teacher reliability as a per-prompt quantity and uses it to choose between two supervi-sion regimes. A verifier audits the teacher on the current prompt. A successful audit selects dense OPD; oth-erwise, teacher supervision is withheld and the update uses verifier-grounded GRPO. The two signals are never added or interpolated. Figure 3 contrasts this procedure with vanilla OPD. In panel A, the teacher’s log-probabilities enter every update. In panel B, they enter only after the audit passes; a verifier-grounded signal is used when the audit fails. Section 3.1 defines the reliability estimate and the gate it drives, §3.2 gives the objective the gate induces, and §3.3 shows how the audit overlaps with the asynchronous training loop’s otherwise-idle teacher window. 3A Vanilla OPD   
+
+> Prompt Student Rollouts Teacher
+
+❄ OPD on all prompts       
+
+> +0.7 +0.1 −0.6 +0.3 +0.2 …
+> Update B
+
+TGOPD    
+
+> Prompt teacher probes Verifier Reliability Student Rollouts Teacher
+
+❄      
+
+> Adaptive supervision
+> +0.8 +0.3 −0.1 +0.6 +0.2 …+0.33 +0.33 +0.33 +0.33 …
+> Update
+
+Figure 3: TGOPD overview. (A) Vanilla OPD: the student generates G on-policy rollouts, and the frozen teacher scores every token. The resulting teacher–student log-probability gap provides dense token-level supervision (equation 1) on every prompt. (B) TGOPD: while the student decodes, the teacher uses its otherwise-idle capacity to generate a small set of probe rollouts. A verifier scores these probes, and their pass rate qT (x) (equation 4) estimates prompt-level teacher reliability. Teacher scoring and routine verifier evaluation of student rollouts make both candidate advantages available; the latter is omitted from the diagram for visual clarity. The gate selects dense OPD when qT (x) ≥ τ and verifier-grounded GRPO (equation 2) otherwise. The two supervision branches are mutually exclusive. 
+
+3.1 Teacher Reliability Probe and Gate 
+
+The gate requires an estimate of teacher reliability for each prompt, which the vanilla OPD loop does not provide. We define this quantity below and estimate it with a small number of teacher samples. 
+
+Reliability and its estimator. We define the teacher’s reliability on a prompt as its expected verifier re-ward, 
+
+RT (x) = Ey∼πT (·| x)
+
+[r(x, y)] ∈ [0, 1 ], (3) that is, the probability that a sample from the teacher solves x. Since RT is not available in closed form, we estimate it with a small teacher probe: the teacher independently generates KT rollouts { ˆyk}KT 
+
+> k=1
+
+∼ πT (· | x)
+
+on the same prompt. The verifier used for student rollouts scores each teacher rollout, and their empirical pass rate is (Figure 3B) 
+
+qT (x) = 1
+
+KTKT
+
+# ∑
+
+> k=1
+
+r
+
+(
+
+x, ˆ yk)
+
+. (4) Because the probes are i.i.d. draws from πT (· | x) and r is binary, KT qT (x) ∼ Binomial (KT , RT (x)) . The esti-mator is therefore unbiased, E[qT (x)] = RT (x), for any probe budget, with variance RT (x)(1 − RT (x))/KT .Unbiasedness alone does not imply that a particular finite probe budget yields reliable accept/reject deci-sions. We empirically find KT = 3 sufficient in our main experiments; Section 4.5 uses a larger budget to examine the threshold at a finer resolution. 
+
+Verifier-grounded reliability signal. The estimator qT (x) uses task outcomes rather than the teacher’s own confidence. Entropy and teacher–student likelihood agreement are functions of model distributions alone: they can quantify uncertainty or compatibility, but cannot by themselves distinguish equally confi-dent correct and incorrect answers. Evaluating r on completed teacher outputs provides direct outcome evidence. Unlike verifier-aware token or trajectory gates, qT (x) aggregates repeated teacher outcomes into a prompt-level reliability estimate before the supervision branch is selected. 
+
+The reliability gate. A hard gate admits the teacher only when its estimated reliability reaches a threshold 
+
+τ ∈ (0, 1 ] (Figure 3B, “reliability gate”): 
+
+g(x) = 1[ qT (x) ≥ τ ] ∈ { 0, 1 }. (5) 4Since qT (x) takes values in {0, 1/ KT , . . . , 1 }, the gate opens exactly when at least ⌈τKT ⌉ of the KT probes pass; only the pair (⌈τKT ⌉, KT
+
+), and not τ in isolation, is operationally meaningful. We use KT = 3 and 
+
+τ = 2/3 in all main experiments, i.e. a two-of-three majority. Section 4.5 sweeps the threshold at KT = 5and finds a broad optimum around a simple majority. This result suggests that a coarse reliability decision is sufficient; the gate need not rank prompts precisely. 
+
+3.2 Gate-Conditioned Supervision Routing 
+
+For each prompt, the gate selects one of the two supervision signals defined in §2. When it is open, the dense OPD signal controls the update and the trajectory-level verifier reward does not enter the gradient. When the gate is closed, teacher supervision is withheld and the verifier-grounded GRPO signal controls the update. Withholding teacher supervision therefore does not necessarily discard the training prompt. Whenever the student’s rollout group contains reward variation, the group-relative fallback assigns positive advantage to above-average attempts and negative advantage to below-average ones (Figure 3B, lower signal box). If every rollout receives the same reward, however, the centered GRPO advantage is exactly zero and that prompt produces no update. For pipeline regularity, both candidate advantages are formed for every prompt before the update. This eager computation does not imply additive supervision: the binary gate selects exactly one candidate, giving the per-token advantage ˆATGOPD  
+
+> i,t
+
+= g(x) ˆAOPD  
+
+> i,t
+
++ (1 − g(x)) ˆAGRPO  
+
+> i,t
+
+. (6) Because g(x) ∈ { 0, 1 }, equation 6 is a selector rather than an interpolation: OPD and GRPO never jointly supervise the same prompt. Vanilla OPD and pure GRPO are its two degenerate endpoints, obtained by fixing g(x) = 1 and g(x) = 0, respectively, for every prompt. The resulting advantage enters the standard clipped policy-gradient surrogate. Let πold denote the frozen rollout-policy snapshot and define ρi,t(θ) = πθ (yit | x, yi
+
+> <t
+
+)/πold (yit | x, yi
+
+> <t
+
+). We optimize 
+
+LTGOPD (θ) = − E x∼D {yi }Gi=1∼πold (·| x)
+
+ 1
+
+∑i |yi|
+
+> G
+
+# ∑ 
+
+> i=1
+> |yi|
+
+# ∑
+
+> t=1
+
+min 
+
+(
+
+ρi,t(θ) ˆATGOPD  
+
+> i,t
+
+, clip (ρi,t(θ), 1 − ϵ, 1 + ϵ) ˆATGOPD 
+
+> i,t
+
+) .(7) The advantage is held fixed within the update. The asynchronous implementation additionally uses IcePop to suppress excessive train–inference mismatch; this system-level correction does not alter the supervision-routing objective above (§4.1). 
+
+Un-normalized fallback. Our implementation omits the standard-deviation normalization of GRPO [13]. This avoids rescaling the fallback by the within-group reward standard deviation. We use it as an imple-mentation convention, not as a requirement of the gate. A controlled comparison with normalized variants is left to future work. 
+
+Design choices. The gate acts at the prompt level: a prompt is supervised either entirely by OPD or entirely by the verifier-grounded fallback, never by a per-token or additive mixture. This avoids entangling two signals of different density and provenance within a single trajectory, where the effective supervision would depend on an arbitrary interpolation weight. The gate also withdraws teacher supervision only where the audit fails, so on the majority of prompts the full direction and magnitude of the dense OPD signal survives intact. Section 4.2 shows the cost of reducing the teacher’s role on every prompt rather than only on those that fail the audit. 
+
+3.3 Algorithm and System Realization 
+
+Algorithm 1 summarizes one rollout-update cycle. Relative to vanilla OPD, TGOPD retains the same stu-dent rollout and teacher scoring operations and adds the probe in equation 4, which determines the gate in equation 5. Most of this added work runs in the shaded idle teacher compute region of Figure 3B; the measured residual overhead is summarized in Appendix D. 5Algorithm 1 TGOPD: one asynchronous rollout–update cycle 
+
+Require: current student πθ ; frozen rollout snapshot πold ; frozen teacher πT ; verifier r
+
+Require: prompt batch B; group size G; probe budget KT ; threshold τ; PPO clip ϵ; step size η
+
+Ensure: updated student parameters θ 
+
+> 1:
+
+for each prompt x ∈ B do  
+
+> 2:
+
+concurrently: ▷ probe fills the teacher’s idle window  
+
+> 3:
+
+rollout nodes: {yi}Gi=1 ∼ πold (· | x); record rollout log-probs ▷ nominal critical path  
+
+> 4:
+
+teacher node: { ˆyk}KT 
+
+> k=1
+
+∼ πT (· | x) 
+
+> 5:
+
+qT (x) ← 1 
+
+> KT
+
+∑KT 
+
+> k=1
+
+r
+
+(
+
+x, ˆ yk)
+
+▷ reliability estimate, equation 4 
+
+// both candidate signals are formed for every prompt  
+
+> 6:
+
+evaluate log πT
+
+(yit | x, yi
+
+> <t
+
+) for all i, t ▷ teacher scoring pass  
+
+> 7:
+
+score the student rollouts: r(x, yi) for i = 1, . . . , G ▷ the RLVR signal  
+
+> 8:
+
+if qT (x) ≥ τ then ▷ teacher supervision admitted  
+
+> 9:
+
+ˆAi,t ← ˆAOPD  
+
+> i,t
+
+for all i, t ▷ equation 1  
+
+> 10:
+
+else ▷ teacher supervision withheld  
+
+> 11:
+
+ˆAi,t ← ˆAGRPO  
+
+> i,t
+
+for all i, t ▷ equation 2  
+
+> 12:
+
+end if  
+
+> 13:
+
+end for  
+
+> 14:
+
+form ρi,t(θ) from current and recorded rollout log-probs  
+
+> 15:
+
+θ ← θ − η ∇θ LTGOPD (θ) over B ▷ equation 7 
+
+Overlapping probes with teacher idle time. In an asynchronous deployment, the teacher’s standard task is a forward pass over already-generated tokens. This is far cheaper than the student’s autoregressive decoding and cannot begin until a batch of student rollouts is ready, so the teacher node idles for most of each cycle (§4.4). TGOPD issues the KT probe rollouts at the start of the cycle, concurrently with student generation, so most probe work occupies this window. If all KT decodes finish before the student-side batch completes, the probe adds no wall-clock cost; in practice the overlap is substantial but not perfect (Appendix D). 
+
+Scoring stays unconditional. Teacher scoring runs on every prompt, exactly as under vanilla OPD, and the verifier scores the student’s rollouts because that reward is the reinforcement-learning signal in any case. The scoring pass is a single forward evaluation over tokens the student has already produced. It is batched as rollouts arrive and runs on a node that is not the throughput bottleneck. Making this pass conditional for a minority of prompts would add a data-dependent pipeline branch while saving little computation. The additional work in TGOPD therefore consists of the KT probe decodes, which is why teacher utilization can rise from 9.8% to 78.9% with only modest end-to-end overhead (§4.4): most audit work consumes capacity that was previously wasted, while the measured remainder slightly extends the cycle. 
+
+## 4 Experiments 
+
+4.1 Experimental Setup Models and teachers. We evaluate at two scales: a dense 4B student (Qwen3.5-4B) and a mixture-of-experts 35B student (Qwen3.6-35B-A3B, with 3B active parameters). For each of three domains (mathe-matics, code, and instruction following, or IF), we train a dedicated domain-specialist teacher by applying GRPO [17] to the same base model. Teachers are frozen after training and used to generate reliability probes and score student rollouts; their own evaluation scores provide both a teacher-performance reference and a GRPO-only reference on the same architecture (the “Teacher” row in Table 1). All runs use the slime frame-work [30] with an asynchronous rollout–update loop that overlaps teacher scoring with student generation. Student updates use the standard PPO-clipped surrogate in equation 7. The implementation additionally applies IcePop [11] to stabilize the train–inference probability mismatch introduced by asynchronous roll-out; this correction is shared by all compared methods and is not part of the TGOPD gate. Within TGOPD, the OPD and GRPO advantages are mutually exclusive: the former is used only when the teacher passes 6Table 1: In-domain distillation results across two model scales and three domains. Each domain group is an independent experiment with its own GRPO-trained teacher ( πT ), training corpus, and in-domain evaluation benchmarks. The Teacher row reports the domain teacher’s own scores, serving as both a teacher-performance reference and the GRPO-only reference. Bold : best among distillation methods per column. Underline: surpasses the teacher. MATH CODE IF         
+
+> (πmath T)(πcode T)(πIF T)
+
+Method AIME 2025 AIME 2026 HMMT-Feb LiveCodeBench OJBench IFBench IFEval 
+
+Qwen3.5-4B 
+
+Base Model 47.8 58.1 40.5 39.4 14.4 35.9 85.3 Teacher 63.4 73.4 54.8 53.3 17.0 55.9 85.3 Vanilla OPD 61.1 71.2 54.3 42.3 18.8 48.5 83.9 TrOPD 62.1 70.5 56.8 49.6 18.1 53.2 84.6 RG-OPD 63.5 73.6 54.1 45.6 19.4 54.3 84.1 RLSD-style 48.8 56.7 40.3 38.4 15.1 31.5 79.8 TGOPD (ours) 64.8 73.5 52.7 47.1 20.0 50.4 85.2 
+
+Qwen3.6-35B-A3B 
+
+Base Model 69.8 74.4 64.3 61.0 26.1 30.9 86.8 Teacher 76.3 79.8 65.3 62.7 27.6 52.1 90.8 Vanilla OPD 73.2 77.5 62.4 60.2 26.7 41.3 90.1 TrOPD 75.8 77.7 65.2 58.5 26.1 44.5 90.8 RG-OPD 73.4 77.2 64.7 57.5 27.8 44.0 90.2 RLSD-style 71.9 76.6 61.2 56.9 25.4 38.3 87.1 TGOPD (ours) 74.0 78.7 64.1 64.0 28.7 43.7 91.5 
+
+the prompt-level audit, and the latter only when it fails (equation 6). Appendix B summarizes the recorded optimization and infrastructure settings. 
+
+Baselines. All comparisons share the same student initialization, frozen domain teacher, training corpus, and training pipeline. Vanilla OPD [23] applies the sampled-token reverse-KL advantage in equation 1 to every prompt. TrOPD [24] uses an adaptive token-level trust region, applying reverse KL within the re-gion, forward KL to outliers, and teacher-prefix off-policy guidance. RG-OPD [2] retains trajectory-level distillation only when the verifier-derived advantage agrees with the teacher–student likelihood gap; in-consistent trajectories are omitted from its distillation objective. We also include an RLSD-style baseline inspired by RLSD [26]: the verifier-derived advantage determines update direction, while the same exter-nal frozen teacher used by the other baselines rescales token-level magnitude. This variant adopts RLSD’s direction–magnitude decomposition without reproducing its privileged-context self-distillation setting. 
+
+Training data and evaluation. Mathematics prompts are drawn from DAPO-Math-17K [28]; code prompts are the input–output prediction questions of CodeI/O [8]; and IF prompts are filtered from Nemotron-Cascade 2 [27]. Each method is trained per domain from the same student initialization and the same prompt pool. We report in-domain benchmarks: AIME 2025 and AIME 2026 (accuracy, 64-run average), HMMT-Feb 2025 (accuracy, 32-run average) for mathematics; the code-generation subtask of Live-CodeBench (pass@1, 6-run average) and OJBench overall (C++/Python aggregate) for code; and IFBench and IFEval for instruction following. Appendix C summarizes the evaluation protocols and the number of independent evaluation generations for each benchmark. 
+
+4.2 Main Results 
+
+Table 1 reports results across two scales and three independently trained domain experiments. TGOPD outperforms Vanilla OPD in all six domain ×scale settings, with the largest gains on code ( +3.0 average at 4B, +2.9 at 35B), followed by IF ( +1.6/ +1.9) and math ( +1.5/ +1.2). This ordering is consistent with the “confidently wrong” failure described in Figure 2. The code teacher’s errors are virtually indistinguishable 7Table 2: TGOPD applied to multi-domain OPD (MOPD). Each run trains a single student on math, code, and IF simultaneously, routing prompts to domain-specialist teachers. Results are reported at 199 training steps with KT = 3, τ = 2/3. Bold : better of the two methods per column. MATH CODE IF Method Avg AIME 25 AIME 26 HMMT-Feb LCB OJBench IFBench IFEval 
+
+Qwen3.5-4B 
+
+MOPD 53.40 58.07 63.75 50.73 50.48 18.10 48.78 83.89 MOPD + TGOPD 54.54 58.13 67.60 51.25 50.00 18.97 51.72 84.11 
+
+Qwen3.6-35B-A3B 
+
+MOPD 60.99 73.12 77.29 60.73 57.43 23.28 44.40 90.68 MOPD + TGOPD 61.94 72.97 78.02 62.40 57.81 27.59 43.99 90.78 
+
+from its correct answers by confidence (AUROC 0.51), so the harmful dense signal is least detectable in this domain. Across the full table, TGOPD ranks first among distillation methods on 7 of 14 in-domain benchmark columns and surpasses the domain teacher on six of them. The code results provide the clearest example. At the 35B scale, every other distillation method causes negative transfer on LiveCodeBench: the student scores below the untrained base model (OPD −0.8, TrOPD −2.5, RG-OPD −3.5, RLSD-style −4.1). Yet TGOPD is the only method that achieves positive trans-fer ( +3.0 over base) and, in fact, surpasses the teacher itself ( +1.3 LCB, +1.1 OJBench). This exceedance is consistent with how the gate partitions the supervision: on prompts that fail the reliability audit, the gate closes and withdraws the dense teacher signal. When the student’s rollout group contains reward varia-tion, the GRPO fallback can still reinforce the relatively better attempts; for uniform-outcome groups, its centered advantage is zero. This prompt-wise routing performs better than applying either supervision pol-icy uniformly across all prompts in this setting. At the 4B scale, the pattern is the same in direction though smaller in magnitude: Vanilla OPD closes only 21% of the base-to-teacher gap on LCB, while TGOPD closes 55%. This difference is consistent with the gate removing unreliable teacher signals. The RLSD-style variant uses the teacher only to scale update magnitude and relies on verifier feedback for the update direction. It applies this rule to all prompts rather than only those on which the teacher is unreliable, and falls below the untrained base model on 8 of 14 in-domain columns, most severely on IF IFEval ( −5.5 at 4B) and code LCB ( −4.1 at 35B). TGOPD instead preserves the full OPD direction and magnitude on prompts that pass the audit. These results suggest that reducing the teacher’s role uniformly can remove useful supervision along with harmful signals. 
+
+4.3 Extension to Multi-Domain OPD 
+
+The experiments above evaluate TGOPD in the single-domain setting, where each run trains one student with one domain teacher. We also consider multi-domain OPD (MOPD) [14, 15], in which a single student is trained on math, code, and IF prompts simultaneously, with each prompt routed to a domain-specialist teacher. Because the gating decision is per-prompt and per-teacher, TGOPD applies to MOPD without modification: the routed teacher generates KT = 3 probes on its assigned prompt, the domain verifier scores them, and the gate admits or withholds teacher supervision as before. Table 2 reports results at 199 training steps. At the 4B scale, TGOPD improves the seven-benchmark average from 53.40 to 54.54 ( +1.14), winning 6 of 7 columns; at the 35B scale the average rises from 60.99 to 61.94 (+0.95), winning 5 of 7 columns. The largest single-benchmark gains appear on AIME 2026 ( +3.85 at 4B), IFBench ( +2.94 at 4B), and OJBench ( +0.87 at 4B, +4.31 at 35B); the code result in particular is consistent with the single-domain finding, since confidence is least informative about teacher reliability on code. The few regressions (LCB at 4B, −0.48; AIME 2025, −0.15; IFBench, −0.41, at 35B) are all under half a point and within the run-to-run variance of early-training checkpoints. The average improvements at both scales show that the same per-prompt gate can be used in multi-domain distillation without reducing overall quality. 84B SOPD 35B SOPD 4B MOPD 35B MOPD          
+
+> 025 50 75 100
+> GPU utilization (%)
+> 10 79 983 767 558
+> single-domain multi-domain
+> (a) Teacher-node utilization distribution
+> 4B SOPD 35B SOPD 4B MOPD 35B MOPD
+> 025 50 75
+> GPU utilization (%)
+> 51 44 41 43 69 56 54 52
+> +18.0 +11.8 +12.7 +8.6
+> single-domain multi-domain
+> (b) Cluster-average utilization
+> Vanilla OPD TGOPD (ours)
+
+Figure 4: GPU utilization before and after TGOPD, across four configurations. (a) Split-violin view of teacher-node utilization. Under vanilla OPD the mass piles up near 0% in every configuration; TGOPD shifts the whole distribution upward, showing that probes use the idle window. The MOPD distributions under TGOPD are visibly bimodal because probing is domain-routed: the teacher node is partitioned into three domain-specialist engines and only the engine owning the current prompt’s domain is active, so the node alternates between partial and full occupancy rather than saturating as a single undivided teacher does. (b) Cluster-average utilization. Gains track both the teacher’s share of the cluster (1/5 at 4B vs. 1/7 at 35B) and the saturation the probe achieves (higher under SOPD than under MOPD). Table 3: GPU utilization before and after TGOPD across four training configurations (single-domain OPD (SOPD) and multi-domain OPD (MOPD), at both model scales). Idle = fraction of 15-second samples below 5%; each run is a one-hour window. Rollout-node utilization remains within normal run-to-run variation in all four cases, showing no sustained resource contention; utilization alone does not establish zero wall-clock overhead. In MOPD the single frozen teacher node hosts three domain-specialist engines (code 4 GPU, math 2 GPU, IF 2 GPU); the rollout figure is the mean of the two student-rollout nodes. Teacher node Rollout nodes Cluster average Configuration OPD TGOPD OPD TGOPD OPD TGOPD 4B SOPD (5 nodes, teacher = 1/5) 9.8% (59% idle) 78.9% (0%) 69.6% 70.5% 51.5% 69.5% 
+
+35B SOPD (7 nodes, teacher = 1/7) 8.8% (57% idle) 82.8% (0%) 73.6% 73.8% 44.5% 56.3% 
+
+4B MOPD (5 nodes, teacher = 1/5) 7.0% (78% idle) 66.6% (0%) 64.2% 66.3% 40.8% 53.5% 
+
+35B MOPD (7 nodes, teacher = 1/7) 5.0% (70% idle) 57.7% (2%) 65.6% 63.8% 42.9% 51.5% 4.4 Compute Efficiency: Reclaiming Idle Teacher Capacity 
+
+Figure 1 showed low teacher utilization at the 4B scale. We extend the analysis to both model scales and to single- and multi-domain OPD, giving four configurations in total. We also examine whether probe generation affects other workloads. Table 3 and Figure 4 report summary statistics; the underlying one-hour utilization traces for all four configurations are plotted in Appendix D. 
+
+The idle pattern is structural, not configuration-specific. Table 3 and Figure 4 show the same profile in every configuration. Without probes, the teacher node averages between 5.0% and 9.8% utilization, with 57–78% of all 15-second samples falling below 5%. The cause is architectural rather than incidental. The teacher’s scoring pass is a single forward evaluation over already-generated tokens, so it completes in a small fraction of the time the student spends on autoregressive decoding, and it cannot begin until the student finishes. The teacher therefore waits by construction, at every scale and in both training modes. Multi-domain OPD is the more wasteful of the two modes: its teacher node idles for 78% (4B) and 70% (35B) of samples, against 57–59% under SOPD. This follows from how the node is partitioned: three domain-specialist engines share it, and each runs only on prompts routed to its own domain. Any individual engine, and hence the node average, sits at zero for a larger share of the run. 9Probes mostly fill the gap, with modest end-to-end overhead. Activating teacher probes raises teacher utilization to 78.9% and 82.8% under SOPD (4B, 35B) and to 66.6% and 57.7% under MOPD, with idle time falling to 0–2% throughout. The MOPD figures are lower for the same reason its baseline is more idle: probing is domain-routed, so only the engine owning the current prompt’s domain is active and the node cannot reach the saturation a single undivided teacher achieves. The traces in Appendix D make this concrete: the MOPD teacher oscillates between partial and full occupancy, whereas the SOPD teacher holds a tight band near saturation. Rollout-node utilization remains stable across the four configurations: 69.6 → 70.5, 73.6 → 73.8, 64.2 → 66.3, and 65.6 → 63.8 percent, every change lying within the ±2-point run-to-run variance of these nodes. This stability shows that probe generation does not create sustained resource contention on the student nodes, but it does not by itself prove wall-clock neutrality. 
+
+Cluster gains track teacher fraction and probe saturation. Cluster-wide utilization improves by +18.0 and +11.8 points under SOPD and by +12.7 and +8.6 under MOPD (4B, 35B respectively). The ordering follows from two factors. At 4B, the teacher accounts for 1/5 of the nodes, compared with 1/7 at 35B, so the same teacher-side gain has a larger effect on the cluster average. Probe saturation is also lower under MOPD because the teacher node is partitioned by domain. Decomposing the cluster delta into per-role contributions shows that the teacher term dominates in every case: it accounts for 13.8 of the +18.0 at 4B SOPD, 10.6 of +11.8 at 35B SOPD, 11.9 of +12.7 at 4B MOPD, and 7.5 of +8.6 at 35B MOPD. The residual in each case comes from ordinary run-to-run drift on the train nodes and is largest at 4B SOPD ( +3.8); in the two MOPD runs the train nodes move by −0.0 and +1.6 points, so essentially the entire gain is reclaimed teacher capacity. 
+
+Consistency across deployment topologies. The same pattern appears in single- and multi-domain OPD despite their different teacher allocations. SOPD dedicates a full node to one teacher, whereas MOPD partitions that node across three domain specialists that are individually idle more often. In both cases, most probe work uses previously idle capacity. The utilization gain therefore does not depend on one particular teacher layout. 
+
+4.5 Ablation: Gate Threshold ≥1/5 ≥2/5 ≥3/5 ≥4/5 5/5      
+
+> Gate threshold τ(min. passing probes, KT= 5 )
+> 50 55 60 65 70 75
+> Accuracy (%)
+> AIME 2026 AIME 2025 HMMT-Feb
+> Vanilla OPD
+> 73.1 64.4 58.0
+> best τ
+
+Figure 5: Gate-threshold sweep on math benchmarks (Qwen3.5-4B, KT = 5, 99 steps). Solid: TGOPD; dotted: Vanilla OPD. All three benchmarks peak near 
+
+τ = 3/5. The main experiments fix τ = 2/3 and KT = 3. For this di-agnostic ablation, we increase the probe budget to KT = 5, yielding five nontrivial pass-count cutoffs and thus a finer-grained view of threshold sensitivity. We sweep τ across 
+
+{1/5, 2/5, 3/5, 4/5, 5/5 } while keeping all other hyperparam-eters identical (Qwen3.5-4B, math domain, 99 training steps). Figure 5 shows an inverted-U relationship between gate strict-ness and downstream accuracy. At low thresholds ( τ ≤ 2/5), the pass requirement admits many lower-reliability teacher signals, including confidently wrong ones. Performance still exceeds Vanilla OPD on AIME 2025 ( +2.2) and HMMT-Feb ( +1.0), but the gains are smaller because the gate provides little filtering. At τ = 3/5, all three benchmarks reach their peak: AIME 2026 scores 73.1, AIME 2025 scores 64.4, and HMMT-Feb scores 58.0. These values exceed Vanilla OPD by +1.9, +3.3, and +3.7, re-spectively. At high thresholds ( τ ≥ 4/5), many useful teacher signals are rejected. HMMT-Feb falls below the Vanilla OPD baseline at τ = 5/5 (52.0 vs. 54.3), which is consistent with useful OPD signal being discarded. The peak at τ = 3/5 (pass rate 60%) is close to the default τ =
+
+2/3 ( ≈ 67%) used in the main experiments. Under the KT = 5 diagnostic setting, the results indicate a broad performance optimum around a majority-vote criterion. 
+
+4.6 Ablation: What the Gate Does After It Closes 
+
+The threshold ablation determines when the gate closes. We next compare two policies for closed-gate prompts. TGOPD uses a verifier-grounded GRPO update (equation 6), which remains informative when 10 Table 4: Closed-gate policy on multi-domain runs at 199 training steps. All three rows within a block share a training corpus and student initialization; the two gated rows additionally share the gate ( KT = 3, τ = 2/3) and differ only in the update applied to gated-off prompts. Bold : best per column within a block. MATH CODE IF Closed-gate policy Avg AIME 25 AIME 26 HMMT-Feb LCB OJBench IFBench IFEval 
+
+Qwen3.5-4B 
+
+Vanilla MOPD (no gate) 53.40 58.07 63.75 50.73 50.48 18.10 48.78 83.89 GRPO fallback 54.54 58.13 67.60 51.25 50.00 18.97 51.72 84.11 
+
+Mask only 54.97 59.95 69.79 51.98 50.76 18.53 50.88 82.88 
+
+Qwen3.6-35B-A3B 
+
+Vanilla MOPD (no gate) 60.99 73.12 77.29 60.73 57.43 23.28 44.40 90.68 GRPO fallback 61.94 72.97 78.02 62.40 57.81 27.59 43.99 90.78 
+
+Mask only 61.78 74.22 76.77 62.50 57.14 27.16 44.62 90.05 the student rollout group contains both better and worse outcomes. A simpler alternative masks the prompt by disabling the OPD branch and excluding all of its tokens from the update. Both variants use the same gate ( KT = 3, τ = 2/3) and differ only in what replaces the withdrawn teacher signal. The comparison separates the effect of blocking an unreliable signal from the effect of providing a replacement. Table 5 reports the single-domain mathematics runs. Both variants improve on Vanilla OPD at both scales, and the two are close: the GRPO fallback leads on average ( +1.47 / +1.24 at 4B / 35B) against masking (+1.32 / +0.64). The margin is carried entirely by the AIME sets, where the fallback is ahead in all four comparisons; masking is the better policy on HMMT-Feb at both scales (55.52 vs. 52.70; 64.27 vs. 64.10). Table 4 repeats the comparison under multi-domain training, where the seven-benchmark average sum-marizes how each policy behaves across domains. The ordering changes with scale: masking is stronger at 4B ( +1.57 vs. +1.14), leading on all three mathematics columns and LCB, while the fallback recovers the lead at 35B ( +0.95 vs. +0.79). The clearest domain-level pattern appears in code: the GRPO fallback outperforms masking on OJBench at both scales (18.97 vs. 18.53; 27.59 vs. 27.16), where execution-based verification provides a direct correctness signal. Table 5: Closed-gate policy on single-domain mathematics runs.                             
+
+> Policy Avg AIME25 AIME26 HMMT-Feb
+> Qwen3.5-4B
+> Vanilla OPD 62.20 61.10 71.20 54.30 GRPO fallback 63.67 64.80 73.50 52.70 Mask only 63.52 62.29 72.76 55.52
+> Qwen3.6-35B-A3B
+> Vanilla OPD 71.03 73.20 77.50 62.40 GRPO fallback 72.27 74.00 78.70 64.10 Mask only 71.67 73.54 77.19 64.27
+
+Blocking the signal accounts for most of the gain. Across the four settings, masking improves on the ungated baseline by +1.08 points on average, against +1.20 for the full GRPO fallback. Roughly 90% of TGOPD’s benefit therefore remains when gated-off prompts contribute no update. This compari-son suggests that blocking unreliable teacher signals accounts for most of the gain, while the GRPO replacement provides a smaller additional benefit. 
+
+The fallback is the stronger default, though narrowly. The GRPO fallback outperforms masking in three of the four settings, with the largest margin occurring at 35B on single-domain mathe-matics (improvements of +1.24 vs. +0.64 over vanilla OPD). This pattern suggests that applying verifier-grounded GRPO to prompts that fail the audit is generally preferable to omitting their updates altogether, although the margins remain small. Masking wins only at 4B MOPD, but by the largest single margin in the table ( +1.57 vs. +1.14). Since all four margins are small (0.15–0.60 points), we adopt the fallback for its consistency rather than its magnitude. A plausible reading of the split is that the fallback helps where the student can already solve a fair share of the gated-off prompts on its own, because mixed-outcome groups provide a meaningful relative signal. It is exactly inert when every rollout in a group is incorrect (or correct), since centering then yields zero advantage. The aggregate results do not isolate how often each regime oc-curs. Future work should report this breakdown and examine whether the closed-gate policy should vary by domain. 11 5 Related Work 
+
+5.1 On-Policy Distillation and Multi-Teacher Frameworks 
+
+On-policy distillation (OPD) trains a student on its own rollouts while a stronger teacher provides token-level supervision through a mode-seeking reverse-KL objective [5, 1, 19]. Compared with a single sequence-level reward, this dense feedback can substantially improve sample efficiency [23]. Vanilla OPD applies teacher supervision uniformly across prompts, while multi-teacher OPD routes each prompt to a domain-expert teacher to integrate multiple domain capabilities into one student [14, 15, 22]. Recent analyses show that teacher usefulness varies across instances. OPD may fail when teacher knowl-edge is not locally exploitable by the student [9], when student prefixes drift from teacher-supported states [4], or when an overly strong teacher induces negative transfer into a smaller student [10]. Existing multi-teacher systems route prompts by domain but do not verify the selected teacher on each instance before using its token-level rewards. These studies motivate instance-aware teacher selection, but do not estimate prompt-level reliability from repeated verifier-scored teacher rollouts. TGOPD performs this verification before admitting dense teacher supervision. 
+
+5.2 Reliability-Aware Distillation and the Confidence–Correctness Gap 
+
+One line of reliability-aware distillation adapts OPD using signals derived from model distributions. EOPD introduces forward KL at high-entropy teacher tokens [6], while TrOPD defines token-level trust regions us-ing teacher–student decoding agreement [24]. REOPOLD stabilizes implicit token rewards through mixture clipping and student-entropy sampling [7], whereas REOPD extrapolates token rewards from compatibil-ity signals under a batch-level budget, without an external verifier [21]. When no external grader is avail-able, GATES uses agreement among sampled tutor traces as a trajectory-level reliability proxy [20]. These methods address uncertainty, diversity, distribution mismatch, or optimization stability, but do not directly verify outcome correctness. PW-OPSD further shows that high teacher entropy can reflect either non-viable uncertainty or benign solution diversity [12], while ESR finds that the position-dependent degradation of off-policy teacher guidance is not fully explained by KL or entropy [29]. A complementary line explicitly incorporates outcome evidence. RG-OPD conditions trajectory-level teacher supervision on agreement between verifier feedback and the teacher–student likelihood gap [2]. RLSD uses environmental correctness to determine the update direction while self-distillation modulates its magnitude [26]. At a finer granularity, SPOT evaluates teacher-proposed candidates using verifier-scored student continuations and distills outcome-calibrated local targets [16]. Related data-selection methods ver-ify static responses or tokens before training [3, 18, 25]. TGOPD differs in the granularity and timing of its decision: it verifies repeated complete teacher rollouts to estimate prompt-level reliability before dense su-pervision is admitted. Each prompt is then routed exclusively to either OPD or GRPO, rather than blending the two signals or calibrating individual trajectories, tokens, or candidate branches. 
+
+## 6 Conclusion 
+
+This paper addresses vanilla OPD’s unconditional trust in teacher supervision through Teacher-Gated On-Policy Distillation (TGOPD), a prompt-level gate grounded in verifier-scored teacher probes. TGOPD admits dense OPD only when the reliability audit passes and otherwise routes the prompt to verifier-grounded GRPO, thereby withholding teacher supervision selectively rather than weakening it on every prompt. Across 4B and 35B students in mathematics, code, and instruction following, TGOPD outperforms vanilla OPD in all six single-domain settings and increases the seven-benchmark average by 1.14 and 0.95 points in the corresponding multi-domain settings. The probes largely reuse idle teacher capacity, raising utilization from 9.8% to 78.9% in the measured 4B single-domain run; a matched 35B code run incurs a 5.9% increase in mean step time. The current method requires an automatic verifier and makes a binary routing decision, so extending outcome-grounded reliability estimation to open-ended tasks and uncertainty-aware gates is an important direction for future work. 
+
+## References 
+
+[1] Rishabh Agarwal, Nino Vieillard, Yongchao Zhou, Piotr Stanczyk, Sabela Ramos, Matthieu Geist, and Olivier Bachem. On-policy distillation of language models: Learning from self-generated mistakes. In 12 International Conference on Learning Representations (ICLR) , 2024. arXiv:2306.13649. [2] Mohammad Sadegh Akhondzadeh, Vijay Lingam, Atula Tejaswi, Chanakya Ekbote, Sujay Sanghavi, and Aleksandar Bojchevski. Reward-gated on-policy distillation. arXiv preprint arXiv:2607.04037 , 2026. [3] Hanze Dong et al. Raft: Reward ranked finetuning for generative foundation model alignment. arXiv preprint arXiv:2304.06767 , 2023. [4] Yuqian Fu, Haohuan Huang, Kaiwen Jiang, Jiacai Liu, Zhuo Jiang, Yuanheng Zhu, and Dongbin Zhao. Revisiting on-policy distillation: Empirical failure modes and simple fixes. arXiv preprint arXiv:2603.25562 , 2026. [5] Yuxian Gu, Li Dong, Furu Wei, and Minlie Huang. Minillm: Knowledge distillation of large language models. In International Conference on Learning Representations (ICLR) , 2024. arXiv:2306.08543. [6] Woogyeol Jin, Taywon Min, Yongjin Yang, Dennis Wei, Yi Zhou, Swanand Ravindra Kadhe, Nathalie Baracaldo, and Kimin Lee. Entropy-aware on-policy distillation of language models. arXiv preprint arXiv:2603.07079 , 2026. [7] Jongwoo Ko, Sara Abdali, Young Jin Kim, Tianyi Chen, and Pashmina Cameron. Scaling reasoning efficiently via relaxed on-policy distillation. arXiv preprint arXiv:2603.11137 , 2026. [8] Junlong Li, Daya Guo, Dejian Yang, Runxin Xu, Yu Wu, and Junxian He. Codei/o: Condensing reason-ing patterns via code input-output prediction. In International Conference on Machine Learning (ICML) .PMLR, 2025. [9] Yaxuan Li, Yuxin Zuo, Bingxiang He, Jinqian Zhang, Chaojun Xiao, Cheng Qian, Tianyu Yu, Huan-ang Gao, Wenkai Yang, Zhiyuan Liu, and Ning Ding. Rethinking on-policy distillation of large language models: Phenomenology, mechanism, and recipe. arXiv preprint arXiv:2604.13016 , 2026. [10] Yuetai Li et al. Small models struggle to learn from strong reasoners. arXiv preprint arXiv:2502.12143 ,2025. [11] Ling Team, Anqi Shen, Baihui Li, Bin Hu, Bin Jing, Cai Chen, Chao Huang, Chao Zhang, Chaokun Yang, Cheng Lin, et al. Every step evolves: Scaling reinforcement learning for trillion-scale thinking model. arXiv preprint arXiv:2510.18855 , 2025. [12] Xiaogeng Liu, Xinyan Wang, Yingzi Ma, Yechao Zhang, and Chaowei Xiao. When are teacher tokens reliable? position-weighted on-policy self-distillation for reasoning. arXiv preprint arXiv:2605.21606 ,2026. [13] Zichen Liu et al. Understanding r1-zero-like training: A critical perspective. arXiv preprint arXiv:2503.20783 , 2025. [14] LLM-Core Xiaomi. Mimo-v2-flash technical report. arXiv preprint arXiv:2601.02780 , 2026. [15] Wenhan Ma, Jianyu Wei, Liang Zhao, Hailin Zhang, Bangjun Xiao, Lei Li, Qibin Yang, Bofei Gao, Yudong Wang, Rang Li, Jinhao Dong, Zhifang Sui, and Fuli Luo. MOPD: Multi-teacher on-policy distillation for capability integration in LLM post-training. arXiv preprint arXiv:2606.30406 , 2026. [16] Zikun Qu, Min Zhang, Mingze Kong, Zhiwei Shang, Zhengyu Chen, Yikun Ban, Shuang Qiu, and Zhongxiang Dai. SPOT: Sparse probing and outcome calibration for on-policy distillation. arXiv preprint arXiv:2608.04419 , 2026. [17] Zhihong Shao et al. Deepseekmath: Pushing the limits of mathematical reasoning in open language models. arXiv preprint arXiv:2402.03300 , 2024. [18] Avi Singh et al. Beyond human data: Scaling self-training for problem-solving with language models. 
+
+Transactions on Machine Learning Research (TMLR) , 2024. arXiv:2312.06585. [19] Mingyang Song and Mao Zheng. A survey of on-policy distillation for large language models. arXiv preprint arXiv:2604.00626 , 2026. [20] Alex Stein, Furong Huang, and Tom Goldstein. GATES: Self-distillation under privileged context with consensus gating. arXiv preprint arXiv:2602.20574 , 2026. 13 [21] Yang Sun, Lichao Ma, Houyuan Qin, Yuxin Liu, Hanyang Lu, Yao Zhu, Pinlong Cai, and Guohang Yan. REOPD: Reliability-adaptive reward extrapolation for on-policy distillation. arXiv preprint arXiv:2608.11698 , 2026. [22] Zechen Sun, Zhiwei Zhang, Fei Zhao, Juntao Li, Chuan Mu, Huayu Deng, Guojian Zhan, Wenliang Chen, Yao Hu, and Min Zhang. D 3-MOPD: Adaptive dynamic domain scheDuling for efficient multi-teacher distillation. arXiv preprint arXiv:2608.24987 , 2026. [23] Thinking Machines Lab. On-policy distillation. https://thinkingmachines.ai/blog/ on-policy-distillation/ , 2025. [24] Xingrun Xing, Haoqing Wang, Boyan Gao, Ziheng Li, and Yehui Tang. Trust region on-policy distilla-tion. arXiv preprint arXiv:2606.01249 , 2026. [25] Wenda Xu et al. Speculative knowledge distillation: Bridging the teacher-student gap through inter-leaved sampling. In International Conference on Learning Representations (ICLR) , 2025. arXiv:2410.11325. [26] Chenxu Yang, Chuanyu Qin, Qingyi Si, Minghui Chen, Naibin Gu, Dingyu Yao, Zheng Lin, Weiping Wang, Jiaqi Wang, and Nan Duan. Self-distilled RLVR. arXiv preprint arXiv:2604.03128 , 2026. [27] Zhuolin Yang, Zihan Liu, Yang Chen, Wenliang Dai, Boxin Wang, Sheng-Chieh Lin, Chankyu Lee, Yangyi Chen, Dongfu Jiang, Jiafan He, et al. Nemotron-cascade 2: Post-training llms with cascade rl and multi-domain on-policy distillation. arXiv preprint arXiv:2603.19220 , 2026. [28] Qiying Yu, Zheng Zhang, Ruofei Zhu, Yufeng Yuan, Xiaochen Zuo, Yu Yue, Weinan Dai, Tiantian Fan, Gaohong Liu, Lingjun Liu, et al. Dapo: An open-source llm reinforcement learning system at scale. 
+
+Advances in Neural Information Processing Systems (NeurIPS) , 2026. [29] Ziheng Zhou, Jiaqi Li, Huacong Tang, Ying Nian Wu, and Demetri Terzopoulos. Less is more: Early stopping rollout for on-policy distillation. arXiv preprint arXiv:2605.27028 , 2026. [30] Zilin Zhu, Chengxing Xie, Xin Lv, and slime Contributors. slime: An llm post-training framework for rl scaling. https://github.com/THUDM/slime , 2025. 
+
+## A Contributors 
+
+Zhiwei Zhang, Zechen Sun, Fei Zhao, Kang Peng, Bin Liang, Huayu Deng, Yao Hu, Kam-Fai Wong, Mu Chuan. 
+
+## B Training Hyperparameters and Infrastructure 
+
+Table 6 reports the settings retained in the run records at both model scales. Within each controlled com-parison, Vanilla OPD and TGOPD share the student initialization, data, optimization settings, and system topology. IcePop/TIS is an implementation-level safeguard for the asynchronous engine; the method itself is defined by the gate and routed advantage in equation 6. 14 Table 6: Training configuration by model scale. Both scales follow the same optimization and online-probing protocol; only model-dependent system settings differ. 
+
+Setting Qwen3.5-4B Qwen3.6-35B-A3B Runtime slime asynchronous stack slime asynchronous stack Execution Asynchronous rollout and update Asynchronous rollout and update Rollout batch size 64 prompts per cycle 64 prompts per cycle Responses per prompt ( G) 4 4Update batch size 128 128 Updates per rollout cycle 2 2Optimizer Adam ( β1 = 0.9, β2 = 0.98, ϵ = 10 −8) Adam ( β1 = 0.9, β2 = 0.98, ϵ = 10 −8)Learning rate 1 × 10 −6 1 × 10 −6
+
+Learning-rate schedule Constant Constant Weight decay 0.1 0.1 Advantage estimator Group mean, without std normalization Group mean, without std normalization Policy surrogate PPO clipping, ϵ = 0.2 PPO clipping, ϵ = 0.2 Asynchronous mismatch control IcePop/TIS, ratio clip 2.0 IcePop/TIS, ratio clip 2.0 Probe realization Three fresh online teacher rollouts Three fresh online teacher rollouts Teacher probes ( KT ) 3 3Default reliability threshold ( τ)2/3 2/3 Maximum response length 16,384 (math); 8,192 (code and IF) 16,384 (math); 8,192 (code and IF) 
+
+Infrastructure. The 4B runs use five 8-GPU nodes (40 GPUs): two trainer nodes, two student-rollout nodes, and one teacher node. The 35B runs use seven 8-GPU nodes (56 GPUs): four trainer nodes, two student-rollout nodes, and one teacher node. For the 4B 16K runs, we cap the SGLang static memory fraction at 0.60 and both the maximum running requests and teacher-server concurrency at 64. 
+
+Probe realization. At both model scales, the frozen teacher draws three fresh probe responses online for each prompt and the gate opens when at least two pass the verifier. Thus the 4B and 35B experiments instantiate the same reliability test described in §3.1; the resource topology changes with model scale, but the training rule does not. 
+
+## C Evaluation Benchmark Details 
+
+Table 7 lists the benchmarks used for in-domain evaluation, together with the number of independent generation runs and the metric reported in the main tables. For benchmarks evaluated with multiple runs, the reported score is the average over those runs. For LiveCodeBench we report only the code-generation subtask; for OJBench we report the overall score aggregated over the C++ and Python splits. Table 7: Evaluation benchmark details. Runs : number of independent generations per checkpoint; the score reported in all main-text tables is the mean over these runs. 
+
+Domain Benchmark #Runs Metric Math AIME 2025 64 Accuracy (avg64) AIME 2026 64 Accuracy (avg64) HMMT-Feb 2025 32 Accuracy (avg32) Code LiveCodeBench (code generation) 6 Pass@1 (avg6) OJBench (overall) 1 Aggregate (C++/Python) IF IFBench 1 Accuracy IFEval 1 Accuracy 
+
+15 D Per-Configuration GPU Utilization Traces 
+
+Section 4.4 summarizes teacher-node utilization by its mean and idle fraction (Table 3) and its marginal distribution (Figure 4a). Neither summary preserves the time axis. Figure 6 therefore plots the raw one-hour trace for every configuration. All eight traces are sampled at 15-second resolution over a one-hour window taken from steady-state training, and the two curves within a panel are drawn on a common axis. 
+
+Matched end-to-end timing. To avoid inferring wall-clock neutrality from utilization alone, we addition-ally compare the completed 35B CodeIO TGOPD and OPD runs under identical settings. Across 500 aligned rollout cycles, TGOPD increases mean step time by 5.9%, while mean decode throughput changes by less than 0.1%. Thus most probe work overlaps with idle teacher capacity, but the audit is not strictly free. The traces clarify three aspects of the utilization results in §4.4. 
+
+The baseline teacher is bursty, not uniformly slow. In all four panels the light-blue curve alternates between brief spikes and long stretches pinned at zero, rather than hovering at a low but steady level. Each spike is one scoring pass; the flat intervals are the student’s rollout phase, during which the teacher has no scoring work. The idle fraction in Table 3 measures these intervals. Their duration is set by the student rollout rather than teacher scoring speed, so shrinking the teacher or batching its scoring work differently would not remove the gap. 
+
+Probes fill the gaps rather than adding load. Under TGOPD, the dark-blue curve occupies a high band and rarely returns to zero, but its peaks do not exceed the peaks the baseline already reached. The probe is therefore consuming the interval between scoring passes rather than competing with them, which is the mechanism behind the stable rollout-node utilization reported in Table 3; the matched timing comparison above shows that the overlap is substantial but not complete. 
+
+Multi-domain probing oscillates because it is domain-routed. The SOPD panels show a tight blue band around 79–83%, whereas the MOPD panels swing between roughly 40% and 85%. The MOPD teacher node is partitioned into three domain-specialist engines (code 4 GPU, math 2 GPU, IF 2 GPU), and only the engine owning the current prompt’s domain is active, so node occupancy steps between partial and full as the domain mix of the batch changes. This oscillation is what produces the bimodal marginal distribution visible in Figure 4a and the lower MOPD means in Table 3. It reflects how the node is divided rather than a failure of the probe to fill the window: the idle fraction still falls to 0–2%. 16 0 15 30 45 60 025 50 75 100 
+
+> GPU utilization (%)
+> 5 nodes, teacher = 1/5
+
+(a) 4B SOPD 
+
+mean 79% 
+
+> mean 10% (idle 59%)
+
+0 15 30 45 60 025 50 75 100 7 nodes, teacher = 1/7 
+
+(b) 35B SOPD 
+
+mean 83% 
+
+> mean 9% (idle 57%)
+
+0 15 30 45 60 
+
+time within a one-hour window (min) 
+
+025 50 75 100 
+
+> GPU utilization (%)
+> 5 nodes, teacher = 1/5
+
+(c) 4B MOPD 
+
+mean 67% 
+
+> mean 7% (idle 78%)
+
+0 15 30 45 60 
+
+time within a one-hour window (min) 
+
+025 50 75 100 7 nodes, teacher = 1/7 
+
+(d) 35B MOPD 
+
+mean 58% 
+
+> mean 5% (idle 70%)
+
+Vanilla OPD TGOPD (ours) reclaimed capacity Figure 6: Teacher-node GPU utilization over a one-hour window for each configuration. Light blue: vanilla OPD. Dark blue: TGOPD. The shaded region indicates the teacher capacity reclaimed through probe generation. Dashed lines indicate the mean utilization of each run. (a,b) Single-domain OPD at the 4B and 35B scales. (c,d) Multi-domain OPD at the corresponding scales. 17
