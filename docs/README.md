@@ -6,27 +6,19 @@
 </div>
 
 ## 每次日报
-- 最新运行日期：2026-09-04
-- 运行时间：2026-09-04 22:35:40 UTC
+- 最新运行日期：2026-09-05
+- 运行时间：2026-09-05 20:44:41 UTC
 - 运行状态：成功
-- 本次总论文数：3
-- 精读区：3
+- 本次总论文数：0
+- 精读区：0
 - 速读区：0
 
 ### 今日简报（AI）
-今日精读两篇满分论文，聚焦“先验证再蒸馏”与“顺序优于联合”两大策略，直击在线策略蒸馏与RLVR的协同痛点。最值得关注：提示级教师门控可显著提升蒸馏质量，而顺序式蒸馏比联合训练更能发挥强化学习验证优势。下一步建议普通读者优先复现“验证前置”流程，再对比“顺序训练”的收益。
-- 详情：[/202609/04/README](/202609/04/README)
+> 今日无新推荐，系统未产出可展示论文。
+- 详情：[/202609/05/README](/202609/05/README)
 
 ### 精读区论文标签
-1. [Verify Before You Distill: Prompt-Level Teacher Gating for On-Policy Distillation](/202609/04/2609.02998v1-verify-before-you-distill-prompt-level-teacher-gating-for-on-policy-distillation)  
-   标签：评分：10.0/10、query:policy-dist
-   evidence：面向LLM后训练提出教师门控同策略蒸馏，在施加稠密监督前校验教师可靠性。
-2. [Sequential Beats Joint: On the Interplay between On-Policy Distillation and RLVR](/202609/04/2609.04108v1-sequential-beats-joint-on-the-interplay-between-on-policy-distillation-and-rlvr)  
-   标签：评分：10.0/10、query:policy-dist
-   evidence：核心研究后训练中在线策略蒸馏与RLVR的关系，指出先OPD后RL最优
-3. [Rethinking On-Policy Distillation of Large Language Models II: One Training Example](/202609/04/2609.04172v1-rethinking-on-policy-distillation-of-large-language-models-ii-one-training-example)  
-   标签：评分：9.0/10、query:policy-dist
-   evidence：在大语言模型后训练同策略蒸馏中研究单条查询的最少数据极限与状态覆盖机制。
+- 本次无精读推荐。
 
 ### 速读区论文标签
 - 本次无速读推荐。
