@@ -1,6 +1,9 @@
 * <a class="dpr-sidebar-root-link" href="#/">首页</a>
 * <a class="dpr-sidebar-root-link dpr-sidebar-noactive-link" href="javascript:void(0)" data-dpr-hash="#/tutorial/README">使用教程</a>
 * Daily Papers
+  * 2026-09-06 <!--dpr-date:20260906-->
+    * 速读区
+      * <a class="dpr-sidebar-item-link dpr-sidebar-item-structured" href="#/202609/06/2609.02042v1-act-more-decide-less-skill-guided-adaptive-action-chunking-for-long-horizon-llm-agents" data-sidebar-item="{&quot;title&quot;: &quot;Act More, Decide Less: Skill-Guided Adaptive Action Chunking for Long-Horizon LLM Agents&quot;, &quot;link&quot;: &quot;https://arxiv.org/abs/2609.02042v1-act-more-decide-less-skill-guided-adaptive-action-chunking-for-long-horizon-llm-agents&quot;, &quot;score&quot;: &quot;6.0&quot;, &quot;tags&quot;: [{&quot;kind&quot;: &quot;query&quot;, &quot;label&quot;: &quot;policy-dist&quot;}], &quot;evidence&quot;: &quot;在长程LLM智能体RL训练中，从轨迹蒸馏动作块边界监督&quot;}">Act More, Decide Less: Skill-Guided Adaptive Action Chunking for Long-Horizon LLM Agents</a>
   * 2026-09-04 <!--dpr-date:20260904-->
     * 精读区
       * <a class="dpr-sidebar-item-link dpr-sidebar-item-structured" href="#/202609/04/2609.02998v1-verify-before-you-distill-prompt-level-teacher-gating-for-on-policy-distillation" data-sidebar-item="{&quot;title&quot;: &quot;Verify Before You Distill: Prompt-Level Teacher Gating for On-Policy Distillation&quot;, &quot;link&quot;: &quot;https://arxiv.org/abs/2609.02998v1-verify-before-you-distill-prompt-level-teacher-gating-for-on-policy-distillation&quot;, &quot;score&quot;: &quot;10.0&quot;, &quot;tags&quot;: [{&quot;kind&quot;: &quot;query&quot;, &quot;label&quot;: &quot;policy-dist&quot;}], &quot;evidence&quot;: &quot;面向LLM后训练提出教师门控同策略蒸馏，在施加稠密监督前校验教师可靠性。&quot;}">Verify Before You Distill: Prompt-Level Teacher Gating for On-Policy Distillation</a>
