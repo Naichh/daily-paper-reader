@@ -1,0 +1,959 @@
+Title: TV-Regulated OPD: Direction Matters in On-Policy Distillation
+
+URL Source: https://arxiv.org/pdf/2609.08341v1
+
+Published Time: Wed, 09 Sep 2026 04:01:02 GMT
+
+Number of Pages: 20
+
+Markdown Content:
+Preprint 
+
+# TV-R EGULATED OPD: D IRECTION MATTERS IN ON-POLICY DISTILLATION 
+
+# Han Xiao 1,* Yifan Niu 1,* Dongyi Liu 1 Chang Luo 2 Jia Li 1,3, †
+
+> 1
+
+The Hong Kong University of Science and Technology (Guangzhou) 
+
+> 2
+
+The University of Edinburgh 
+
+> 3
+
+The Hong Kong University of Science and Technology 
+
+# ABSTRACT 
+
+On-Policy Distillation (OPD) facilitates the transfer of knowledge from domain expert to student in the post-training phase of Large Language Models (LLMs). However, the supervision signals in mainstream OPD methods suffer from high variance and noise which is generally instable during training. In this work, we systematically investigated what really matters to the performance and the funda-mental mechanisms behind the instability during training. We found that retaining only the sign of token-level advantages is sufficient to achieve the performance comparable to standard OPD. Meanwhile, smoother and bounded advantages can stabilize the training process without sacrificing its performance. These motivated us to shape the advantages using the Total Variation (TV) and propose a robust TV regulated On-Policy Distillation (TV-OPD) method. Benefiting from the bounded and diminished advantages, TV-OPD exhibits stable training dynamics and steady late-stage performance. We conducted comprehensive experiments and found that, across various settings, TV-OPD consistently achieved better performance and lower variance in the late-stage of training. 
+
+# 1 INTRODUCTION 
+
+On-Policy Distillation (OPD) has emerged as a key algorithm for the post-training of large models, serving to transfer knowledge from a teacher model to a student model [1, 11]. Benefiting from its on-policy and dense supervision nature, OPD enables highly efficient data utilization while minimizing adverse effects on the student model’s other capabilities; consequently, it is widely adopted across the industry, including Qwen, MiMo, GLM, and DeepSeek [15, 14, 4, 3]. The widely used OPD method employs the difference in log-probabilities between the teacher and the student as a token-wise supervision signal [11, 10]. The sign of this signal determines whether a token should be encouraged or suppressed, while the absolute value of the coefficient influences the magnitude of the corresponding gradient. However, this coefficient lacks a uniform upper bound on its magnitude. Existing studies have observed that this signal exhibits high variance and extreme values, leading to training instability and limiting the ultimate performance ceiling [12, 13]. Consequently, effectively utilizing this token-wise supervision signal is a crucial issue for improving sample-OPD training. To address these issues, representative existing methods modify token-wise weights through tech-niques such as clipping, compression, power transformations, control variates, or divergence-corrected coefficients [12, 18, 13, 19, 17]. These methods operate on the assumption that the token-level reweighting derived from the supervision signal is highly informative; they precisely control gradient reweighting to ensure the teacher’s signal is accurately conveyed to the student. However, we find that this assumption does not necessarily hold. We further decompose the OPD supervision signal into three components: sign, relative magnitude, and global magnitude. The sign determines whether to encourage or suppress a token; the relative 
+
+> *
+
+Equal contribution. 
+
+> †
+
+Correspondence to Jia Li (jialee@ust.hk). 
+
+1arXiv:2609.08341v1 [cs.LG] 8 Sep 2026 Preprint magnitude dictates the token’s gradient weight; and the global magnitude determines the intensity of a single update. While keeping the sign constant, we conducted experiments where we eliminated token-wise relative magnitudes, retained only a shared global scale, or randomly shuffled the relative magnitudes among tokens. The controlled results in Section 4 demonstrate that sign information and global scale are the two key factors for effective supervision: retaining only the sign enables stable and effective learning, while retaining a global scale that decays as the teacher and student distributions converge facilitates convergence in the later stages of training. In contrast, fine-grained, token-wise magnitude allocation yielded no consistent benefits. Based on these observations, we propose TV-regulated OPD (TV-OPD) to fully leverage information regarding token-wise directional supervision and global update intensity. Regarding directional supervision, we retain only the sign of the log-probability difference; we demonstrate in Section 5 that this signal is equivalent to optimizing the total variation (TV) distance between the teacher’s and student’s conditional distributions, offering the advantages of being bounded and having low variance. For global intensity, we utilize this TV distance to regulate the global update scale, ensuring that the update intensity decays as the teacher and student distributions converge. The experiments in Section 6 demonstrate that TV-OPD achieves training performance comparable to baseline methods in both 1.5B and 8B settings, while exhibiting greater stability during training and superior performance in the later stages. 
+
+# 2 RELATED WORK 
+
+Knowledge distillation transfers a teacher’s predictive distribution to a student [9]. For autoregressive models, OPD moves supervision onto student-generated prefixes, where the student must act at inference time. One line of work develops distribution-matching objectives: MiniLLM uses reverse KL for language-model distillation [5], while Generalized Knowledge Distillation combines student-generated data with flexible divergence choices [1]. These methods motivate matching conditional distributions on student-visited states rather than relying exclusively on fixed teacher responses. A second line concerns how this supervision is estimated. Full-vocabulary OPD computes conditional divergence gradients by summing over token probabilities, whereas sampled-token OPD uses the teacher–student log-ratio at the generated token as a lightweight policy-gradient coefficient [11]. Top-k approximations trade vocabulary coverage for cost. Variance-reduction methods retain sampled-token updates while modifying their estimator: vOPD subtracts a detached control-variate baseline and also studies a top-k approximation to that baseline [12]. This differs from truncating the divergence objective itself. Other variants change the advantage or the information available to it. PowerOPD uses bounded, sign-consistent power transformations of the likelihood ratio [18]; clipping and log-scale compression regulate extreme signals associated with mismatch and length exploitation [13]. OPD+ derives corrected policy-gradient coefficients for general f -divergence objectives [19]. TIDE combines bounded Hellinger shaping for sampled student-excess tokens with teacher top-k injection for student-deficit tokens [17]. These approaches address distinct issues in estimation, objective design, and missing supervision. Our focus is the information carried by the sampled-token coefficient itself: controlled interventions separate its teacher-relative direction from fine-grained magnitude, motivating a TV update with a separately regulated global scale. 
+
+# 3 PRELIMINARY 
+
+3.1 STUDENT ROLLOUTS AND TEACHER SUPERVISION 
+
+Let x ∼ ρ be a prompt and y = ( a1, . . . , a H ) a student-generated response of length H (random unless a fixed horizon is specified). At token position t, the state is st = ( x, a <t ) and at ∼ π¯θ (· | st),where ¯θ denotes the rollout parameters. The fixed teacher evaluates these same prefixes; it does not generate the training states. We assume a shared vocabulary V and write p(· | s) = πT (· | s) for the teacher and qθ (· | s) = πθ (· | s) for the student. Both probabilities are positive on V, as with untruncated softmax sampling. The index t denotes token position, k denotes optimizer step, and b
+
+indexes a rollout in a batch of B rollouts. When only token coefficients are discussed, i is a flattened index for a pair (b, t ) within one step. 2Preprint Full-vocabulary distillation compares the two conditional distributions at each visited state. Sampled-token OPD instead uses their log-probabilities at the generated token [11], giving the dense coefficient 
+
+ARaw (s, a ) = ∆( s, a ) = log p(a | s) − log q¯θ (a | s). (1) Here ∆ denotes the log-ratio evaluated using the rollout student; at the on-policy point θ = ¯θ, it equals log p(a | s) − log qθ (a | s). A positive coefficient promotes a token to which the teacher assigns more probability; a negative coefficient suppresses it. We use “advantage” for this distillation coefficient, which is distinct from a task-return advantage. 3.2 THE SAMPLED -T OKEN OPTIMIZATION SURROGATE 
+
+Let ν¯θ denote the distribution of states visited by the rollout student, with a specified token weighting. Holding this distribution fixed, the conditional reverse-KL objective is 
+
+LRKL (θ; ¯θ) = Es∼ν¯θ [DKL (qθ (· | s) ∥ p(· | s))] . (2) Here DKL (q∥p) = P 
+
+> a
+
+q(a) log( q(a)/p (a)) . At the on-policy point θ = ¯θ, the score identity 
+
+Ea∼qθ ∇θ log qθ (a | s) = 0 gives 
+
+− ∇ θ LRKL |θ=¯θ = E s∼ν¯θ ,a∼q¯θ (·| s)
+
+[∆( s, a ) ∇θ log qθ (a | s)|θ=¯θ ] . (3) Thus Raw OPD estimates a reverse-KL descent signal at the visited states. For a batch B of active tokens, a general coefficient Ai enters training through the detached surrogate 
+
+bLA(θ) = − 1
+
+|B| 
+
+X
+
+> i∈B
+
+sg[ Ai] log qθ (ai | si), bgA = −∇ θ bLA. (4) Only the student log-probability receives gradients. The teacher, sampled prefixes, and coefficients are held fixed. Reusing rollouts away from ¯θ requires importance weighting; clipping or other optimizer operations can further modify the update. Our exact gradient identities refer to the on-policy, pre-optimizer signal and stopped state occupancy, not the full derivative of a sequence-level objective. 3.3 CONDITIONAL TOTAL VARIATION 
+
+We will also use total variation (TV), defined at a shared state by 
+
+DTV (p, q θ ) = 12
+
+X
+
+> a∈V
+
+|p(a | s) − qθ (a | s)| ∈ [0 , 1] . (5) This is a distance between next-token distributions. Averaging it over student-visited states measures local mismatch along student rollouts; it is a different quantity from TV between complete response distributions. With this notation, we can isolate what information the raw coefficient supplies before selecting the objective and regulator of our method. 
+
+# 4 OBSERVATION : D IRECTION AND MAGNITUDE IN OPD 
+
+4.1 SEPARATING DIRECTION FROM MAGNITUDE 
+
+The surrogate in Eq. (4) makes the coefficient’s role explicit: it scales each sampled token’s score vector. We decompose 
+
+ARaw  
+
+> i
+
+= zimi, zi = sign(∆ i), mi = |∆i|. (6) Direction zi specifies promotion or suppression relative to the teacher. Magnitude mi determines both the relative allocation across tokens and the overall coefficient scale. To test whether precise magnitude allocation is necessary, we hold the direction rule fixed and intervene on mi.3Preprint 
+
+Figure 1: Magnitude interventions on the JustRL-DeepSeek-1.5B → DeepSeek-R1-Distill-Qwen-1.5B pair. Solid curves and bands show the mean ± one standard deviation across two runs; dashed segments indicate reduced run coverage. Quantitative comparisons use the jointly complete interval. 4.2 CONTROLLED MAGNITUDE ABLATIONS 
+
+We compare four coefficient variants under matched prompt, rollout-sampling, optimizer, and eval-uation settings. Each run generates its own on-policy trajectories as its student evolves. Given 
+
+∆i = zimi, we define Raw: zimi, Sign: zi, Group-Constant: ziκzi , Permuted: zimσ(i). (7) Here, κzi is shared by tokens in the same sign group, and σ is a random permutation over the comparison unit. Appendix D provides the construction details. All variants preserve zi. The experiment therefore isolates fine-grained magnitude without changing the teacher-relative direction. 
+
+Controlled interventions on the sampled-token coefficient.                
+
+> Variant Direction Magnitude Token allocation
+> Raw Preserved Raw distribution Raw Sign Preserved Unit Removed Group-Constant Preserved Sign-group mean Within-group removed Permuted Preserved Raw distribution Within-sign permuted
+
+Raw versus Sign tests whether exact magnitude is needed once direction is fixed. Permuted shuffles magnitudes only among tokens with the same sign, preserving sign membership and the within-sign empirical magnitude distribution while breaking token–magnitude correspondence. Group-Constant replaces every positive advantage by the mean of all positive advantages and every negative advantage by the mean of all negative advantages. It therefore preserves a separate aggregate scale for the positive and negative groups while removing within-group allocation. Appendix D describes additional controls. 4.3 EMPIRICAL OBSERVATIONS 
+
+Direction alone retains effective supervision. In the two-seed diagnostic in Figure 1, Sign achieves the highest two-benchmark trajectory average ( 36 .29% ), followed by Raw ( 35 .40% ), Group-Constant (34 .67% ), and Permuted ( 34 .35% ), over the common evaluation horizon. Sign also leads in per-seed best-over-training accuracy: 50 .00 ± 1.18 on AIME 2024 and 37 .50 ± 0.00 on AIME 2025, versus 
+
+47 .50 ± 0.00 and 35 .83 ± 1.18 for Raw (Appendix D). Token-wise magnitude reweighting provides no consistent benefit in this diagnostic. Neither the original likelihood-gap weights, coarse sign-group scales, nor reassigned magnitudes improve on Sign. These results support retaining teacher-relative direction without relying on precise magnitude allocation. The evidence is specific to this pair and does not directly measure supervision noise; Section 6 evaluates Sign-TV on a second pair. 4Preprint        
+
+> Raw OPD
+> ∆i=zimi
+> Direction and token magnitude
+> −→
+> Sign-TV
+> ATV
+> i=zi
+> Conditional TV descent
+> −→
+> TV-OPD
+> ATVR
+> i,k =ckzi,k
+> Direction and shared global scale
+
+Figure 2: TV-OPD separates local direction from global strength. Removing raw log-ratio magnitude yields Sign-TV, a conditional TV descent signal. A shared TV-responsive regulator restores global attenuation without restoring token-wise likelihood-gap weights. Optimization scale nevertheless remains useful information, distinct from relative token weights. As teacher and student approach agreement, raw log-ratios shrink, whereas Sign assigns unit magnitude to every unequal coordinate. Removing magnitude thus also removes discrepancy-dependent coefficient attenuation, although the expected gradient need not have constant norm. This motivates retaining direction for local supervision and using aggregate discrepancy to regulate global strength. The next section realizes both through TV: the sign signal defines TV descent, and a shared TV-responsive scale regulates its intensity without restoring token-wise magnitude weights. 
+
+# 5 METHOD : TV-R EGULATED OPD 
+
+The observations in Section 4 motivate retaining the sign of the teacher–student log-ratio for token supervision and recovering global attenuation through a shared scale. TV-regulated OPD (TV-OPD) connects these two components through the same discrepancy: the sign signal optimizes conditional TV, and an estimate of that TV sets the global supervision strength. We first derive this connection, then show how to estimate TV using the sampled-token log-probabilities already available in OPD. The gradient identities below are evaluated at the on-policy point θ = ¯θ, holding the sampled-state distribution fixed as in Section 3. 5.1 FROM SIGN SUPERVISION TO TV O PTIMIZATION 
+
+At a fixed state s, retaining only the sign gives the coefficient ATV (s, a ) = sign(∆( s, a )) . The logarithm is strictly increasing, so this is also the sign of the probability difference p(a | s)−qθ (a | s):tokens underrepresented by the student are encouraged, and overrepresented tokens are suppressed. This is precisely the direction obtained by reducing the absolute probability differences that define TV in Eq. (5). To make the connection explicit, abbreviate the conditional probabilities by p(a) and qθ (a). Differen-tiating TV and using the score identity ∇θ qθ (a) = qθ (a)∇θ log qθ (a) gives 
+
+−2∇θ DTV (p, q θ ) = X
+
+> a∈V
+
+sign( p(a) − qθ (a)) ∇θ qθ (a)= Ea∼qθ [sign(∆( s, a )) ∇θ log qθ (a | s)] .
+
+(8) Thus the sign-weighted update in Eq. (4) estimates a conditional TV descent direction, up to a global factor of two. Averaging over the fixed distribution of student-visited states gives the corresponding average-TV objective. We call this unregulated baseline Sign-TV . At equality coordinates, we set 
+
+sign(0) = 0 ; Appendix A.2 gives the formal subgradient statement. Replacing the raw coefficient preserves each token’s promotion or suppression direction while changing the discrepancy objective from reverse KL to TV; the aggregate gradient direction can change with the token weights. This formulation has two useful properties. First, the sign coefficient has magnitude at most one, so extreme teacher–student log-ratios cannot assign arbitrarily large weights to individual token signals. This bounds the teacher-induced coefficient, while the score norm and optimizer still affect the actual update. Second, TV closeness controls differences in the expectation of any bounded next-token statistic. If the teacher has positive expected task advantage at a state, a policy sufficiently close to it in TV retains positive expected advantage there. This is a local behavioral guarantee under a teacher-quality assumption; full-response improvement requires additional conditions. Formal statements and proofs of both properties appear in Appendix A. 5Preprint 5.2 ESTIMATING TV FROM SAMPLED TOKENS 
+
+To use the same discrepancy for global regulation, we need its value as well as its descent direction. Directly evaluating Eq. (5) requires both distributions over the full vocabulary. Sampled-token OPD provides only their log-probabilities at the generated token, but these are sufficient for an unbiased estimate at each state. The key is probability-mass conservation: because p and qθ both sum to one, the student’s total excess probability equals its total deficit. TV therefore equals the excess mass on tokens for which qθ > p .Writing [z]+ = max( z, 0) and factoring out the student sampling probability, 
+
+DTV (qθ , p ) = X
+
+> a∈V
+
+[qθ (a) − p(a)] + = Ea∼qθ
+
+"
+
+1 − p(a)
+
+qθ (a)
+
+
+
+> +
+
+#
+
+. (9) This yields the sampled-token estimator 
+
+bd(s, a ) = 
+
+
+
+1 − p(a | s)
+
+qθ (a | s)
+
+
+
+> +
+
+= [1 − e∆( s,a )]+. (10) It uses the same ∆ as the sign coefficient and requires no additional teacher scoring. Although a token contributes to this estimate only when the student overrepresents it, the expectation recovers the entire TV distance by mass conservation. The estimate always lies in [0 , 1] , and its conditional variance is at most 1/4. The one-sided form matters: the equally unbiased symmetric estimator  
+
+> 12
+
+|1 − e∆| can become arbitrarily large for positive log-ratios. In Eq. (10), that branch contributes zero. For numerical evaluation, the equivalent form − expm1(min {∆, 0}) avoids large exponentials and cancellation near agreement. At step k, we pool these estimates over active tokens to obtain bDk. Its target is on-policy average TV : the conditional discrepancy averaged over states visited by the rollout student, with the chosen token weighting. For a fixed rollout horizon, the sample average is unbiased even though successive tokens are dependent. With variable-length responses, active-token pooling is a ratio estimator: it is consistent for the token-weighted target under independent rollouts and activity masks determined before the current action, but need not be unbiased at finite batch size. This target measures local conditional mismatch along rollouts; it differs from TV between complete responses. Appendix B provides the estimator proposition, variance analysis, and masking details. 5.3 TV-B ASED GLOBAL REGULATION 
+
+Sign-TV assigns unit magnitude to every unequal token coordinate, even as the probability gap narrows. To recover discrepancy-dependent attenuation at the global level, TV-OPD uses bDk to set a shared coefficient. We first pool TV numerators and active-token counts across all microbatches and data-parallel workers, then smooth their ratio with a single EMA, ¯Dk = β ¯Dk−1 + (1 − β) bDk. The resulting supervision is 
+
+ATVR  
+
+> i,k
+
+= ck sign(∆ i,k ), ck = clip 
+
+ ¯Dk−1 + ϵDref + ϵ
+
+α
+
+, c min , 1
+
+
+
+. (11) The initial coefficient is one. The first valid step initializes the EMA and freezes Dref to its observed discrepancy; thereafter the EMA updates only the next step’s coefficient. Here ϵ > 0 stabilizes the ratio, α > 0 controls attenuation, and 0 < c min ≤ 1 sets a floor. Below the reference, smaller TV yields smaller coefficients; above it, ck = 1 . Larger α gives stronger attenuation for the same ratio below one. Local signs determine token supervision, while on-policy TV controls only its global scale. The coefficient is fixed before sampling the step, detached, and applied uniformly to its policy-gradient loss. It therefore scales the realized pre-optimizer batch signal without changing relative token weights. Using the previous EMA also preserves the expected TV direction whenever the base signal is unbiased under the chosen token weighting; variable-length pooling retains the qualification above. Appendix B.6 gives the formal argument and scheduler details. TV consequently serves both roles: its descent direction supplies local sign supervision, and its estimated value regulates global strength. 6Preprint 
+
+# 6 EXPERIMENTS 
+
+6.1 SETUP 
+
+Model pairs. We evaluate two same-family teacher–student pairs. In the 8B setting, the teacher is Qwen3-8B and the student is Qwen3-8B-Base after supervised fine-tuning on 400K OpenThoughts examples; OPD uses DeepMath-103K prompts [15, 6, 8]. In the 1.5B setting, the teacher is JustRL-DeepSeek-1.5B, the student starts from DeepSeek-R1-Distill-Qwen-1.5B, and OPD uses DAPO-Math-17K [2, 7, 16]. In both settings, teacher and student use the same tokenizer. This removes cross-tokenizer alignment as a confounding factor. 
+
+Training and evaluation. Each update uses 64 prompts and one on-policy rollout per prompt. We train with AdamW at learning rate 10 −6. We evaluate periodically on AIME 2024 and AIME 2025 with four responses per problem and report mean@4. Each formal comparison uses two paired random seeds. Methods differ only in the sampled-token coefficient or the shared TV-OPD scale. Appendix C provides the full configuration. 
+
+Checkpoint protocol. For each seed, we select one checkpoint that maximizes the mean of AIME 2024 and AIME 2025. We read both benchmark scores from this checkpoint and then report the mean and sample standard deviation across seeds. Ties use the earliest checkpoint, allowing for CSV rounding. The JustRL and Qwen reporting horizon is steps 0–625. Both benchmark scores always come from the same checkpoint within each seed. 6.2 MAIN RESULTS 
+
+Table 1: AIME validation accuracy (mean@4). One checkpoint per seed is selected by the mean of AIME 2024 and 2025, and both scores are read at that checkpoint; entries then report mean ±
+
+standard deviation across two seeds. Bold marks the highest mean in each benchmark row.                                                 
+
+> Benchmark Initial Raw OPD Sign-TV TV-OPD JustRL-1.5B →DS-Distill-Qwen-1.5B
+> AIME 2024 30.83 50.83 ±0.83 51.25 ±0.42 51.67 ±1.18
+> AIME 2025 28.33 37.92 ±0.42 37.08 ±0.42 38.75 ±2.08 Qwen3-8B →Qwen3-8B-SFT
+> AIME 2024 60.83 68.33 ±0.00 65.00 ±0.00 70.00 ±1.17
+> AIME 2025 50.83 57.08 ±2.95 57.08 ±2.08 58.33 ±1.67
+
+Table 1 reports the main results. On the JustRL pair, TV-OPD reaches 51 .67 ± 1.18 on AIME 2024 and 38 .75 ±2.08 on AIME 2025, with a two-benchmark average of 45 .21% . TV-OPD leads on AIME 2024 ( 51 .67 ± 1.18 ) at the reported checkpoints and gives the strongest aggregate result. The selected TV-OPD checkpoints retain the high AIME 2024 point while recovering AIME 2025 performance relative to the fully unrestricted choice. On the larger Qwen pair, TV-OPD reaches 70 .00 ± 1.17 on AIME 2024 and 58 .33 ± 1.67 on AIME 2025, with a two-benchmark average of 64 .17% . This exceeds the strongest baseline in each row by 1.67 and 1.25 points, respectively. Together with the JustRL result, the completed comparisons show that restoring a discrepancy-responsive global scale can improve the aggregate result after removing token-wise log-ratio magnitude. 6.3 TV-OPD AND LATE -S TAGE OPTIMIZATION DYNAMICS 
+
+Final checkpoint accuracy does not distinguish early learning from late-stage retention. We therefore track AIME 2024, AIME 2025, and their average 
+
+Sk = AIME24 k + AIME25 k
+
+2 . (12) 7Preprint 
+
+(a) JustRL-1.5B, AIME 2024 (b) JustRL-1.5B, AIME 2025 
+
+Figure 3: JustRL validation trajectories for Raw, Sign-TV, and TV-OPD. Solid lines and bands show the mean ± one standard deviation across two seeds; dashed segments indicate reduced run coverage. All observations are retained, including points excluded from checkpoint selection. The available exports contain validation accuracy but not the TV-OPD scale ck, conditional TV, or the realized update norm ∥∆θk∥. We therefore analyze observed retention separately from these mechanism diagnostics. Table 2: Stage-wise JustRL validation accuracy (%). Each cell first averages checkpoints within each training stage and seed, then averages the resulting seed-level values. Early, middle, and late windows are steps 0–250, 275–450, and 500–625, respectively. Bold marks the best method in each row.                       
+
+> Metric TV-OPD ( α= 0 .5)Sign-TV Raw OPD
+> AIME 2024, early stage 39.58 40.11 37.50 AIME 2024, middle stage 48.28 46.72 46.41 AIME 2024, late stage 49.58 47.92 46.11 AIME 2025, early stage 30.45 31.70 30.49 AIME 2025, middle stage 35.21 35.99 36.72
+> AIME 2025, late stage 36.53 35.56 35.63
+
+Table 2 compares the three training stages. Sign-TV performs best on both benchmarks in the early stage. In the middle stage, TV-OPD leads on AIME 2024, while Raw leads on AIME 2025. In the late stage, Raw and TV-OPD retain both seeds. TV-OPD is higher by 3.47 points on AIME 2024 and 0.90 points on AIME 2025. The regulator does not improve every stage; its clearest benefit is late-stage retention. We summarize both benchmarks over W = {500 , 525 , . . . , 625 } using 
+
+LateMean = 1
+
+|W |
+
+X
+
+> k∈W
+
+Sk, (13) 
+
+PeakDrop = max  
+
+> k
+
+Sk − 1
+
+|W |
+
+X
+
+> k∈W
+
+Sk. (14) LateMean measures sustained performance. PeakDrop measures the gap between the best observed score over steps 0–625 and late-stage performance. Both statistics retain all observations. For the two methods with complete paired coverage in this window, TV-OPD improves LateMean from 
+
+40 .87 ± 0.83 to 43 .06 ± 0.10 and reduces PeakDrop from 3.51 ± 1.13 to 2.36 ± 0.49 .The proposed mechanism can be tested by jointly tracking ck, conditional TV, and ∥∆θk∥. TV-OPD should reduce the global effective scale without restoring token-wise |∆i|. A correlation with accuracy would support this mechanism, but would not establish that smaller updates cause better task performance. 8Preprint 6.4 SENSITIVITY TO REGULATOR STRENGTH 
+
+We isolate the feedback strength by sweeping α ∈ { 0.5, 1.0, 2.0, 4.0} while leaving the local token weights and all other training settings unchanged. Since the runs have unequal endpoints, we summarize the common 0–625-step horizon rather than compare mismatched selected checkpoints. Table 3: Regulator-strength ablation on the JustRL pair. We average validation accuracy over the common 0–625-step horizon and report mean ± sample standard deviation across two seeds. The last column averages both benchmarks; bold marks the best result.                                        
+
+> αAIME 2024 AIME 2025 Average
+> 0.5 43.33 ±0.70 32.93 ±0.83 38.13 ±0.76
+> 1.0 42.50 ±0.39 32.25 ±0.13 37.38 ±0.13 2.0 40.09 ±0.39 31.05 ±0.31 35.57 ±0.04 4.0 37.65 ±1.09 29.01 ±0.74 33.33 ±0.17
+
+Table 3 shows a monotonic decline as α increases. Relative to α = 0 .5, setting α = 4 .0 lowers the common-horizon mean by 5.68 points on AIME 2024 and 3.92 points on AIME 2025, for a 4.80-point drop in the two-benchmark average. This trend is consistent with the intended mechanism: a larger exponent produces stronger attenuation whenever the estimated TV falls below its reference value. If α is too large, the shared coefficient can therefore over-suppress the distillation signal and slow optimization progress. The sweep supports α = 0 .5 as the operating point for the completed JustRL experiments. It remains a within-pair sensitivity result rather than evidence that the same value is optimal at other model scales. 
+
+# 7 DISCUSSION 
+
+Our results separate two roles of the sampled-token OPD coefficient. The sign determines the teacher-relative update direction, while the magnitude controls both token allocation and global training strength. The controlled ablations show that precise token-wise allocation is not required in the tested settings. The theory further shows that the sign-only update performs conditional TV descent. TV-OPD builds on this result by restoring a single global scale without reintroducing likelihood-gap weighting across tokens. 
+
+Limitations. The current study has three main limitations. First, teacher-relative direction does not guarantee policy improvement. A weak or mismatched teacher can still guide the student toward undesirable behavior. Second, the TV equivalence is a conditional surrogate with stopped state occupancy. It does not differentiate through the rollout distribution or guarantee monotonic sequence-level return. Third, TV-OPD is evaluated on a limited set of model pairs, benchmarks, and seeds. The evidence supports improved optimization dynamics and late-stage retention, but does not establish a higher capability ceiling. 
+
+# 8 CONCLUSION 
+
+In this work, we show that sampled-token OPD can separate where to update from how strongly to train . Sign-TV provides a principled conditional TV objective, and TV-OPD adds a discrepancy-responsive global scale without restoring token-wise magnitude. Across the tested settings, this design remains competitive with raw OPD and improves late-stage retention on the completed regulated comparison. These results provide a simple basis for designing OPD objectives with explicit local direction and global control. 
+
+# REFERENCES 
+
+[1] Rishabh Agarwal, Nino Vieillard, Yongchao Zhou, Piotr Stanczyk, Sabela Ramos, Matthieu Geist, and Olivier Bachem. On-policy distillation of language models: Learning from self-generated mistakes. arXiv preprint arXiv:2306.13649 , 2023. URL https://arxiv.org/ abs/2306.13649 .9Preprint [2] DeepSeek-AI. Deepseek-r1: Incentivizing reasoning capability in llms via reinforcement learning. arXiv preprint arXiv:2501.12948 , 2025. URL https://arxiv.org/abs/2501. 12948 .[3] DeepSeek-AI. DeepSeek-V4: Towards highly efficient million-token context intelligence. arXiv preprint arXiv:2606.19348 , 2026. URL https://arxiv.org/abs/2606.19348 .[4] GLM-5-Team, Aohan Zeng, Xin Lv, et al. GLM-5: from vibe coding to agentic engineering. 
+
+arXiv preprint arXiv:2602.15763 , 2026. URL https://arxiv.org/abs/2602.15763 .[5] Yuxian Gu, Li Dong, Furu Wei, and Minlie Huang. MiniLLM: Knowledge distillation of large language models. In International Conference on Learning Representations , 2024. URL 
+
+https://arxiv.org/abs/2306.08543 .[6] Etash Guha, Ryan Marten, Sedrick Keh, Negin Raoof, Georgios Smyrnis, et al. Openthoughts: Data recipes for reasoning models. arXiv preprint arXiv:2506.04178 , 2025. URL https: //arxiv.org/abs/2506.04178 .[7] Bingxiang He, Zekai Qu, Zeyuan Liu, Yinghao Chen, Yuxin Zuo, Cheng Qian, Kaiyan Zhang, Weize Chen, Chaojun Xiao, Ganqu Cui, et al. Justrl: Scaling a 1.5b llm with a simple rl recipe. 
+
+arXiv preprint arXiv:2512.16649 , 2025. URL https://arxiv.org/abs/2512.16649 .[8] Zhiwei He, Tian Liang, Jiahao Xu, Qiuzhi Liu, Xingyu Chen, Yue Wang, Linfeng Song, Dian Yu, Zhenwen Liang, Wenxuan Wang, Zhuosheng Zhang, Rui Wang, Zhaopeng Tu, Haitao Mi, and Dong Yu. Deepmath-103k: A large-scale, challenging, decontaminated, and verifiable mathematical dataset for advancing reasoning. arXiv preprint arXiv:2504.11456 , 2025. URL 
+
+https://arxiv.org/abs/2504.11456 .[9] Geoffrey Hinton, Oriol Vinyals, and Jeff Dean. Distilling the knowledge in a neural network. In 
+
+NIPS Deep Learning and Representation Learning Workshop , 2015. URL https://arxiv. org/abs/1503.02531 .[10] Yaxuan Li, Yuxin Zuo, Bingxiang He, Jinqian Zhang, Chaojun Xiao, Cheng Qian, Tianyu Yu, Huan-ang Gao, Wenkai Yang, Zhiyuan Liu, and Ning Ding. Rethinking on-policy dis-tillation of large language models: Phenomenology, mechanism, and recipe. arXiv preprint arXiv:2604.13016 , 2026. URL https://arxiv.org/abs/2604.13016 .[11] Kevin Lu and Thinking Machines Lab. On-policy distillation. Thinking Machines Lab: Connec-tionism , 2025. doi: 10.64434/tml.20251026. URL https://thinkingmachines.ai/ blog/on-policy-distillation/ .[12] Minjae Oh, Sangjun Song, Gyubin Choi, Yunho Choi, and Yohan Jo. KL for a KL: On-policy distillation with control variate baseline. arXiv preprint arXiv:2605.07865 , 2026. URL 
+
+https://arxiv.org/abs/2605.07865 .[13] Rui Wang, Hongru Wang, Yi Chen, Boyang Xue, Tianqing Fang, Wenhao Yu, and Kam-Fai Wong. Demystifying on-policy distillation: Roles, pathologies, and regulations. arXiv preprint arXiv:2607.13399 , 2026. URL https://arxiv.org/abs/2607.13399 .[14] Bangjun Xiao, Bingquan Xia, Bo Yang, Bofei Gao, Bowen Shen, et al. MiMo-V2-Flash technical report. arXiv preprint arXiv:2601.02780 , 2026. URL https://arxiv.org/ abs/2601.02780 .[15] An Yang et al. Qwen3 technical report. arXiv preprint arXiv:2505.09388 , 2025. URL 
+
+https://arxiv.org/abs/2505.09388 .[16] Qiying Yu, Zheng Zhang, Ruofei Zhu, Yufeng Yuan, Xiaochen Zuo, et al. DAPO: An open-source LLM reinforcement learning system at scale. arXiv preprint arXiv:2503.14476 , 2025. URL https://arxiv.org/abs/2503.14476 .[17] Zichao Yu, Chengzhi Yu, Shengze Xu, Yujin Han, Bingqing Jiang, Xu Wang, and Difan Zou. Mismatch matters: On-policy distillation beyond token agreement. arXiv preprint arXiv:2608.09836 , 2026. URL https://arxiv.org/abs/2608.09836 .10 Preprint [18] Anhao Zhao, Junlong Tong, Yingqi Fan, Ping Nie, Wenjie Li, and Xiaoyu Shen. PowerOPD: Stabilizing on-policy distillation with bounded power transformation. arXiv preprint arXiv:2606.17199 , 2026. URL https://arxiv.org/abs/2606.17199 .[19] Hanyang Zhao, Haoxian Chen, Han Lin, Genta Indra Winata, David D. Yao, and Wenpin Tang. OPD+: Rethinking the advantage design for on-policy distillation. arXiv preprint arXiv:2606.01039 , 2026. URL https://arxiv.org/abs/2606.01039 .11 Preprint 
+
+# A THEORETICAL PROPERTIES AND PROOFS 
+
+This appendix gives the formal statements supporting the sign-to-TV derivation and the two properties summarized in Section 5: bounded teacher-induced influence and behavioral preservation under TV closeness. The estimator statement and its statistical analysis are in Appendix B. A.1 REVERSE -KL SAMPLED -TOKEN GRADIENT 
+
+For a fixed state s, abbreviate the student qθ (a | s) by qθ (a) and the fixed teacher p(a | s) by p(a).Both have positive probabilities on the finite vocabulary. Differentiation gives 
+
+∇θ DKL (qθ ∥p) = X
+
+> a
+
+∇θ qθ (a)
+
+
+
+log qθ (a)
+
+p(a) + 1 
+
+
+
+(15) 
+
+= Ea∼qθ
+
+
+
+log qθ (a)
+
+p(a) ∇θ log qθ (a)
+
+
+
+. (16) The second equality uses P 
+
+> a
+
+∇θ qθ (a) = 0 . Negating, averaging over the stopped state distribution, and evaluating at θ = ¯θ proves Eq. (3). The detached surrogate in Eq. (4) reproduces this gradient at the on-policy point. Differentiating through state occupancy would introduce additional terms and is outside this conditional objective. A.2 TV DESCENT WITH BOUNDED TEACHER INFLUENCE 
+
+Proposition 1 (TV descent with bounded teacher influence) . At a fixed state s, with a fixed teacher and positive token probabilities, 
+
+Ea∼qθ [sign(∆( s, a )) ∇θ log qθ (a | s)] = −2∇θ DTV (p, q θ )
+
+where TV is differentiable and θ = ¯θ. At equality coordinates, sign(0) = 0 selects a generalized subgradient. For any shared c ≥ 0, the token signal gc = c sign(∆) ∇θ log qθ satisfies 
+
+|c sign(∆) | ≤ c, ∥gc∥ ≤ c∥∇ θ log qθ (a | s)∥. (17) 
+
+TV gradient identity. At a differentiable point, 
+
+∇θ DTV (p, q θ ) = 12
+
+X
+
+> a
+
+sign( qθ (a) − p(a)) ∇θ qθ (a) (18) 
+
+= − 12 Ea∼qθ [sign(∆( a)) ∇θ log qθ (a)] . (19) Here ∆( a) = log p(a)−log qθ (a), and monotonicity of log identifies its sign with that of p(a)−qθ (a).The teacher is fixed; no gradient is taken through its probabilities or the coefficient. At qθ (a) = p(a), the subdifferential of |q(a) − p(a)| with respect to q(a) is [−1, 1] . Choosing zero on equality coordinates and the ordinary sign elsewhere gives a valid subgradient in probability space. Composing with the differentiable probability map yields a generalized subgradient in parameter space. The resulting identity is a subgradient identity at such points, not a claim of strict decrease for every finite step. Averaging over fixed states gives the corresponding stopped-occupancy statement. A.3 BOUNDED TEACHER -INDUCED INFLUENCE AND PERTURBATIONS 
+
+Write h(a) = ∇θ log qθ (a | s). For ∆( a)̸ = 0 ,
+
+gTV (a) = sign(∆( a)) h(a) = gRaw (a)
+
+|∆( a)| . (20) Thus every nonzero token direction is preserved, although their weighted sum can change direction. Since | sign(∆) | ≤ 1, multiplying by any c ≥ 0 proves Eq. (17). In comparison, | log( p(a)/q θ (a)) |
+
+has no uniform bound over positive distributions. 12 Preprint For two teachers p1, p 2, hold the student, state, token, and global scalar c fixed. Their TV token signals obey 
+
+∥gc(p1) − gc(p2)∥ ≤ 2c∥h(a)∥. (21) The teacher may flip a token’s direction but cannot induce arbitrarily large relative weight at fixed 
+
+c. This is a bounded-change statement, not Lipschitz continuity in teacher probabilities: the sign can jump near agreement. The bound concerns the multiplicative teacher coefficient; the score norm remains a separate factor. A.4 BEHAVIORAL PRESERVATION UNDER TV CLOSENESS 
+
+Proposition 2 (Behavioral preservation under TV closeness) . For distributions u, v at a common state and any statistic f ∈ [m, M ],
+
+|Euf − Ev f | ≤ (M − m)DTV (u, v ). (22) 
+
+In particular, the bound is 2∥f ∥∞DTV (u, v ) for bounded f . If the current student’s task advantage obeys |Aqθ (s, a )| ≤ Amax (s) and the teacher has positive local margin ∆T (s) = Ea∼pAqθ (s, a ) >
+
+0, then 
+
+Ea∼˜π Aqθ (s, a ) ≥ ∆T (s) − 2Amax (s)DTV (˜ π, p ). (23) 
+
+Thus DTV (˜ π, p ) < ∆T (s)/(2 Amax (s)) preserves positive expected advantage at this state. 
+
+Bounded statistics and the metric property. Let P = {a : u(a) ≥ v(a)}. Because total signed mass is zero, P 
+
+> a∈P
+
+(u(a) − v(a)) = DTV (u, v ). For f ∈ [m, M ], centering by m gives 
+
+Euf − Ev f = X
+
+> a
+
+(u(a) − v(a))( f (a) − m) (24) 
+
+≤ (M − m) X
+
+> a∈P
+
+(u(a) − v(a)) = ( M − m)DTV (u, v ). (25) Swapping u, v gives the absolute-value bound. Taking m = −∥ f ∥∞ and M = ∥f ∥∞ yields its norm form. The ℓ1 triangle inequality also gives, at the same state, 
+
+DTV (qθ , π ⋆) ≤ DTV (qθ , p ) + DTV (p, π ⋆). (26) These statements concern bounded next-action statistics at a common state. A whole-response statistic instead requires a distance between whole-response distributions; Appendix B.5 relates the two quantities. A.5 CONDITIONAL TEACHER -GUIDED IMPROVEMENT 
+
+Fix the current student’s task advantage Aqθ (s, a ) = Qqθ (s, a ) − V qθ (s), under a specified bounded-return task. This is an analysis quantity; TV-OPD does not estimate it or use a task reward in its coefficient. Define 
+
+Is(π) = Ea∼π(·| s)Aqθ (s, a ), ∆T (s) = Is(p) > 0. (27) With Amax (s) = ∥Aqθ (s, ·)∥∞, the norm form of Eq. (22) implies 
+
+Is(˜ π) ≥ ∆T (s) − 2Amax (s)DTV (˜ π, p ). (28) A positive teacher margin implies Amax (s) > 0, so the strict neighborhood condition in Proposition 2 ensures Is(˜ π) > 0.For comparison, the ideal mixture πλ = (1 − λ)qθ + λp with 0 < λ ≤ 1 satisfies 
+
+Is(πλ) = λ∆T (s) > 0, DTV (πλ, p ) = (1 − λ)DTV (qθ , p ). (29) This follows from Is(qθ ) = 0 and linearity. A neural-network TV gradient step need not follow this mixture. Positive advantage at one state is not a global return guarantee; extending it requires conditions across visited states and control of occupancy shift. The teacher need not be optimal, but a teacher-quality assumption is necessary for improvement. 13 Preprint A.6 SUPPORT AND TAIL BEHAVIOR 
+
+TV is finite and lies in [0 , 1] even under support mismatch. Reverse KL is infinite if q(a) > 0 where 
+
+p(a) = 0 . Under positive softmax probabilities, arbitrarily small p(a) still allows arbitrarily negative raw coefficients. TV coefficients stay in [−1, 1] . The sampled log-ratio identities assume positive probabilities; changing the sampling distribution by top-k or nucleus truncation requires a separate support and importance-weighting analysis. Bounded coefficients alone do not solve missing token coverage. A.7 CONTINUOUS -TIME SCHEDULING 
+
+For a differentiable fixed objective F (θ), suppose ˙θ(t) = −c(t)∇F (θ(t)) with c(t) > 0. The increasing time change τ (t) = R t 
+
+> 0
+
+c(u) d u yields 
+
+dθ
+
+dτ = dθ/ dt
+
+dτ / dt = −∇ F (θ). (30) Where the gradient flow is well-defined and unique, the scaled flow follows the same path with a different speed. This ideal statement does not imply path equivalence for changing rollout occupancy, stochastic updates, or nonsmooth points, and does not assert equivalence of discrete updates. 
+
+# B ON-P OLICY TV E STIMATION AND REGULATION 
+
+B.1 STATEWISE ESTIMATOR AND EXACT VARIANCE 
+
+Proposition 3 (Bounded on-policy TV estimation) . Fix s and normalized distributions with positive probabilities on the shared vocabulary. For a ∼ q¯θ (· | s), define 
+
+bd(s, a ) = 
+
+
+
+1 − p(a | s)
+
+q¯θ (a | s)
+
+
+
+> +
+
+= [1 − e∆( s,a )]+.
+
+Writing d(s) = DTV (q¯θ (· | s), p (· | s)) ,
+
+E[ bd | s] = d(s), 0 ≤ bd ≤ 1, Var( bd | s) ≤ d(s)(1 − d(s)) ≤ 14 . (31) 
+
+Proof and equivalent estimators. Fix a state s and abbreviate the rollout student q¯θ (· | s) by q
+
+and the teacher p(· | s) by p. Both are normalized and positive on the finite shared vocabulary. All expectations below use the same student that supplies the denominator of the likelihood ratio. Define 
+
+X = bd(s, a ) = [1 − p(a)/q (a)] +, a ∼ q, d = d(s) = DTV (q, p ). (32) Normalization implies P
+
+> a
+
+(q(a) − p(a)) = 0 , hence the total positive and negative masses of q − p
+
+agree. Therefore 
+
+E[X | s] = X
+
+> a:q(a)>p (a)
+
+q(a)
+
+
+
+1 − p(a)
+
+q(a)
+
+
+
+= X
+
+> a:q(a)>p (a)
+
+(q(a) − p(a)) = d, (33) 
+
+E[X2 | s] = X
+
+> a:q(a)>p (a)
+
+(q(a) − p(a)) 2
+
+q(a) , (34) 
+
+Var( X | s) = X
+
+> a:q(a)>p (a)
+
+(q(a) − p(a)) 2
+
+q(a) − d2 ≤ d(1 − d) ≤ 14 . (35) The variance bound follows from 0 ≤ X ≤ 1, so X2 ≤ X. This proves Proposition 3. Positivity is a convenient sufficient assumption for the log-ratio representation. The one-sided ratio identity itself also holds when q has zeros: sum only over q(a) > 0, since any coordinate with q(a) > p (a)
+
+necessarily belongs to that support. Under positive support, the alternatives [p(a)/q (a) − 1] + and 12 |1 − p(a)/q (a)| also have mean d.Their expectations follow from the negative mass of q − p and the sum of its positive and negative 14 Preprint masses, respectively. They can be arbitrarily large when p(a)/q (a) ≫ 1; X cannot. If q has zeros where p has mass, those two alternative identities need not hold, even though the one-sided identity for X still does. The equivalent evaluation X = − expm1(min {∆, 0}) avoids exponentiating large positive log-ratios and reduces cancellation near zero. This algebraic form is distinct from the direct exponential expression used by the current implementation. B.2 AUTOREGRESSIVE SAMPLING AND THE ESTIMAND 
+
+Fix an optimizer step and condition on its pre-sampling history, so the rollout policy q = q¯θ is fixed. For b = 1 , . . . , B , draw independent prompts xb ∼ ρ and independent rollout randomness, set sb,t = ( xb, a b,<t ), and sample ab,t ∼ q(· | sb,t ). The teacher evaluates these same states. Training-history conditioning is suppressed throughout the rollout calculations. Write 
+
+Xb,t = bd(sb,t , a b,t ) = [1 − e∆b,t ]+, (36) 
+
+db,t = d(sb,t ) = DTV (q(· | sb,t ), p (· | sb,t )) , Dpos  
+
+> t
+
+= E[db,t ]. (37) Here Dpos  
+
+> t
+
+is the population TV at token position t; bDk later denotes a batch statistic at optimizer step k. By the tower property, EXb,t = Edb,t = Dpos  
+
+> t
+
+. For a deterministic horizon H,
+
+bDB,H = 1
+
+BH 
+
+> B
+
+X
+
+> b=1
+> H
+
+X
+
+> t=1
+
+Xb,t , E bDB,H = 1
+
+H
+
+> H
+
+X
+
+> t=1
+
+Dpos  
+
+> t
+
+= Docc  
+
+> H
+
+. (38) Equivalently, writing ν tq for the rollout student’s state distribution at token position t, the target is 
+
+Docc  
+
+> H
+
+= 1
+
+H
+
+> H
+
+X
+
+> t=1
+
+Est∼ν tq DTV (q(· | st), p (· | st)) . (39) This is the fixed-horizon on-policy average TV described in the main text. Token independence is unnecessary for this expectation. Fixed-horizon results assume exactly H defined positions; they do not treat a random EOS length as a fixed normalizer. The i.i.d. rollout assumption also excludes dependent prompt sampling; with fixed or dependent prompts, the target and variance must be interpreted under that actual sampling design. B.3 ACTION -SAMPLING NOISE AND STATE -VISITATION NOISE 
+
+Define the pre-action filtration Fb,t = σ(xb, a b, 1, . . . , a b,t −1), with the fixed policy and teacher understood. Then db,t is Fb,t -measurable and the residual εb,t = Xb,t − db,t obeys E[εb,t | F b,t ] = 0 .Thus 
+
+Xb,t − Dpos  
+
+> t
+
+= εb,t 
+
+|{z} 
+
+> action sampling
+
++ ( db,t − Dpos  
+
+> t
+
+)
+
+| {z }
+
+> state visitation
+
+. (40) For t < u , εb,t is measurable with respect to Fb,u , so E[εb,t εb,u ] = E[εb,t E(εb,u | F b,u )] = 0 .Independence across rollouts gives orthogonality across b. Consequently, 
+
+Var 
+
+ 1
+
+BH 
+
+X
+
+> b,t
+
+εb,t 
+
+ = 1
+
+B2H2
+
+X
+
+> b,t
+
+E Var( Xb,t | F b,t ) ≤ 14BH . (41) This is only the action-noise variance. An early action residual can correlate with future db,u , so the total variance includes covariance between the action and visitation components. No universal 
+
+O(1 /(BH )) bound follows for bDB,H . Instead, each rollout mean Zb = H−1 P 
+
+> t
+
+Xb,t lies in [0 , 1] .Since the Zb are independent, 
+
+Var( bDB,H ) = 1
+
+B2
+
+X
+
+> b
+
+Var( Zb) ≤ 14B . (42) A concentration bound follows directly from the conditional range of the action residual. Given 
+
+Fb,t , it has mean zero and lies in [−db,t , 1 − db,t ], an interval of length one. The bounded-variable exponential-moment inequality gives E[eλε b,t | F b,t ] ≤ eλ2/8. Expose rollouts consecutively, adding 15 Preprint each prompt before its actions; the same conditional bound holds with previous rollouts included in the history. Iterating it over BH actions gives an exponential moment of at most eBHλ 2/8. Markov’s inequality, optimized at λ = 4 u and applied to both signs, yields 
+
+Pr 
+
+ 1
+
+BH 
+
+X
+
+> b,t
+
+(Xb,t − db,t ) ≥ u
+
+ ≤ 2e−2BHu 2
+
+, u > 0. (43) This controls deviation from realized conditional TV, not from its population mean Docc  
+
+> H
+
+. For that target, applying the same bounded-variable argument to the independent Zb gives only Pr( | bDB,H −
+
+Docc  
+
+> H
+
+| ≥ u) ≤ 2e−2Bu 2
+
+without additional temporal assumptions. B.4 VARIABLE LENGTH , EOS MASKS , AND RATIO ESTIMATION 
+
+For rollouts capped at Hmax , let ωb,t ∈ { 0, 1} indicate an active token. Assume ωb,t is Fb,t -measurable, as when the EOS token itself is included and only subsequent positions are excluded. For formal convenience, extend each terminated trajectory with arbitrary samples from q up to the cap; their zero mask makes them irrelevant. Then 
+
+E[ωb,t Xb,t ] = E[ωb,t E(Xb,t | F b,t )] = E[ωb,t db,t ]. (44) Define Ub = P 
+
+> t
+
+ωb,t Xb,t and Vb = P 
+
+> t
+
+ωb,t . For i.i.d. rollouts and EVb > 0, the target is 
+
+Dactive = EUb
+
+EVb
+
+=
+
+P 
+
+> t
+
+E[ωb,t db,t ]
+
+P 
+
+> t
+
+E[ωb,t ] , bDactive  
+
+> B
+
+=
+
+P 
+
+> b
+
+Ub
+
+P 
+
+> b
+
+Vb
+
+. (45) The ratio is defined on batches with P 
+
+> b
+
+Vb > 0. Its numerator has the correct expectation, but its random denominator prevents general finite-sample unbiasedness. For example, suppose at the first position the student assigns probability 1/2 to EOS and 1/2 to continuation, while the teacher assigns 1/4 and 3/4. After continuation the two distributions agree, and the cap is two. For one rollout, (U, V ) equals (1 /2, 1) or (0 , 2) , each with probability 1/2. Hence E[U/V ] = 1 /4, whereas 
+
+Dactive = (1 /4) /(3 /2) = 1 /6.Since Ub, V b are bounded, the law of large numbers gives bDactive 
+
+> Bp
+
+−→ Dactive as B → ∞ at a fixed policy. The event of an empty batch has probability tending to zero when EVb > 0; assigning any fixed bounded value on that event does not change consistency. It can change finite-batch averages. The exact expansion 
+
+√B( bDactive  
+
+> B
+
+− Dactive ) = B−1/2 P
+
+> b
+
+(Ub − Dactive Vb)
+
+B−1 P 
+
+> b
+
+Vb
+
+(46) and the central limit theorem with Slutsky’s theorem yield 
+
+√B( bDactive  
+
+> B
+
+− Dactive ) ⇒ N 
+
+
+
+0, Var( Ub − Dactive Vb)(EVb)2
+
+
+
+. (47) A zero asymptotic variance is interpreted as a degenerate limit. Thus conditional token estimates and fixed-horizon averages are exactly unbiased; variable-length pooling is consistent under these assumptions. Equal weighting of sequence means targets E[Ub/V b] when Vb > 0 almost surely, a different quantity from pooled active-token TV. B.5 RELATION TO SEQUENCE -LEVEL TV For deterministic H, define the conditional sequence distributions Qx(τ ) = Q 
+
+> t
+
+q(at | st) and 
+
+Px(τ ) = Q 
+
+> t
+
+p(at | st). Let Q, P be the joint prompt–response laws with common prompt marginal 
+
+ρ. The marginal cancels in their likelihood ratio. The statewise one-sided argument, now on sequences, gives 
+
+DTV (Q, P ) = Ex∼ρ, τ ∼Qx
+
+"
+
+1 − exp 
+
+> H
+
+X
+
+> t=1
+
+∆t
+
+!# 
+
+> +
+
+. (48) 16 Preprint For a fixed prompt, the same identity holds for Qx, P x without averaging x. This bounded unbiased sequence-TV estimator differs from the average of conditional token estimates. For rt = p(at |
+
+st)/q (at | st), "
+
+1 − Y
+
+> t
+
+rt
+
+#
+
+> +
+
+≤ X
+
+> t
+
+[1 − rt]+. (49) Indeed, replace rt by min {rt, 1} to decrease the product, then use 1 − Q
+
+> t
+
+(1 − ut) ≤ P 
+
+> t
+
+ut for 
+
+ut ∈ [0 , 1] . Taking expectation under Q, with the same prompt distribution as in Dpos  
+
+> t
+
+, gives 
+
+DTV (Q, P ) ≤ min 
+
+(
+
+1, X
+
+> t
+
+Dpos 
+
+> t
+
+)
+
+= min {1, HD occ  
+
+> H
+
+}. (50) Persistent local discrepancies can cause sequence TV to approach one as length grows. For example, two distinct i.i.d. Bernoulli token policies have constant local TV, while an event separating their empirical token frequencies has probabilities approaching one and zero under the two laws. On-policy average TV measures local mismatch without summing it over length. B.6 EMA AND SCHEDULER PREDICTABILITY 
+
+The per-step statistic bDk is the pooled active-token ratio above, computed using logged rollout probabilities, even if student parameters subsequently change during optimization. At the start of step 
+
+k, the stored ck is frozen for all microbatches. TV numerators and token counts accumulate across microbatches and are summed across data-parallel workers before taking their ratio. This reproduces token pooling, not an unweighted average of microbatch means. The scheduler uses one EMA with retention β = 0 .95 : ¯Dk = β ¯Dk−1 + (1 − β) bDk on accepted steps. The first accepted step k0 initializes ¯Dk0 = Dref = bDk0 ; the reference then stays fixed. Initially 
+
+ck = 1 , and the first computed ratio is one as well. The ϵ > 0 in Eq. (11) keeps the ratio defined even if the empirical reference is zero. The new EMA sets only ck+1 . A nonfinite gradient norm freezes the scheduler state. For the statistical effect of smoothing, first consider an ideal sequence without rejected steps, indexed from an initialized ¯D0. Iteration gives 
+
+¯Dk = βk ¯D0 + (1 − β)
+
+> k
+
+X
+
+> j=1
+
+βk−j bDj . (51) Thus, with μj = E bDj , its expectation is the same weighted sum of E ¯D0 and μj ; independence is not required for this linear expectation. If the estimates are independent with constant mean D and variance σ2, and independent of a finite-variance initial value, summing the geometric variance series gives 
+
+E ¯Dk −→ D, Var( ¯Dk) −→ 1 − β
+
+1 + β σ2. (52) The input mean is the mean of the batch estimator, which can itself carry finite-batch ratio bias. These limits do not assert stationarity or independence during adaptive training. To describe skipped steps exactly after initialization, let Jk ∈ { 0, 1} be the scheduler acceptance indicator and ηk = (1 − β)Jk. Then 
+
+¯Dk = (1 − ηk) ¯Dk−1 + ηk bDk. (53) If Jk depends on current gradients, it can depend on the current data. The weights are then random and correlated with the observations; the fixed-weight expectation and stationary variance formulas cannot simply be applied at the original optimizer-step indices. Let Hk−1 contain everything available before sampling step k, including its rollout parameters and initialized reference. Since ck > 0 is measurable with respect to this history, for integrable gradient signals 
+
+E[ck bgTV  
+
+> k
+
+| H k−1] = ckE[bgTV  
+
+> k
+
+| H k−1]. (54) 17 Preprint When the base signal unbiasedly estimates the conditional-TV descent direction under the chosen token weighting, this preserves its expected direction. Fixed-horizon normalization provides such a setting; random-denominator pooling retains its finite-sample qualification. The identity concerns the sampled gradient signal before any current-gradient-dependent rejection. A same-batch coefficient would instead introduce a componentwise conditional covariance between ck and the unscaled signal. Detaching it in autodifferentiation would not remove that statistical dependence; historical scaling avoids it. B.7 IMPLEMENTATION SCOPE : PREPROCESSING AND SELECTION 
+
+The implementation evaluates [1 −exp( advantages i)] + before magnitude ablations, after optional chunk credit assignment and clamping. The initial advantage is the teacher log-probability minus the rollout student’s log-probability. The effective mask is the response mask with sentinel positions excluded. Its sum/count implementation divides by max {Nk, 1}, where Nk is the effective token count; an empty batch therefore supplies zero, not a defined estimate of active-token TV. The nonempty-batch assumption is needed when identifying a scheduler input with that TV target. Including such zeros in the EMA changes its input mean. Let T (∆) denote optional preprocessing. Exact tokenwise agreement with the TV estimator requires 
+
+[1 − eT (∆) ]+ = [1 − e∆]+ on sampled tokens. Equivalently, T (∆) = ∆ for ∆ < 0 and T (∆) ≥ 0
+
+for ∆ ≥ 0. For example, capping positive log-ratios at a nonnegative threshold preserves the statistic; changing the negative branch generally does not. These are conditions for equality of the estimator itself, not a claim that all other transformations must have biased expectation for every possible policy pair. For token-dependent selection, consider a deterministic mask w(s, a ) ∈ { 0, 1} at an otherwise active state. Its exact conditional numerator and count are 
+
+E[w(s, a )X | s] = X
+
+> a
+
+w(s, a )[ q(a | s) − p(a | s)] +, E[w(s, a ) | s] = X
+
+> a
+
+w(s, a )q(a | s).
+
+(55) The first expression is generally not d(s)E[w(s, a ) | s]. Pooling such selected tokens targets the ratio of expected selected positive mass to expected selected token count, not necessarily active-state TV or TV of renormalized selected policies. Thus predictable exclusions admit the occupancy proof above; current-token sentinel exclusions require this selection-aware interpretation unless additional properties establish equality. Finally, if generation uses a sampling law different from the denominator distribution, the one-sided proof must be rederived using that actual law or appropriate weighting. 
+
+# C FULL EXPERIMENTAL SETUP 
+
+Training. The loader shuffles the full OPD prompt split and uses batches of 64. Prompts are left-truncated at 1,024 tokens. One on-policy response of at most 16,384 tokens is sampled per prompt at temperature 1.0 and top-p = 1 .0. Training uses AdamW with learning rate 10 −6, weight decay 0.01, gradient clipping at 1.0, a constant base schedule with warmup. Runs use bfloat16, gradient checkpointing, fully sharded data parallelism, and sequence parallelism on eight GPUs. 
+
+Evaluation. We periodically evaluate the full AIME 2024 and AIME 2025 validation sets. Four responses are sampled per problem at temperature 0.6, top-p = 0 .95 , top-k = 20 , and maximum length 31,744. We report mean@4 and then aggregate across two paired seeds per model pair. The formal JustRL comparison includes Raw, Sign-TV, and TV-OPD. The separate magnitude diagnostic also uses two seeds and is described in Appendix D. 
+
+Method controls. Raw and TV differ only by replacing ∆i with sign(∆ i). TV-OPD retains exactly the TV token signs and changes a single shared pre-optimizer scale ck using the global-scale form in Eq. (11); the completed Qwen and JustRL runs reported in the main table both use α = 0 .5. No task reward or verifier is mixed into these OPD coefficients. The advantage-scaling scheduler configuration uses EMA retention β = 0 .95 , cmin = 0 .1, and a reference frozen at the first valid optimizer step. The coefficient is fixed at step entry and refreshed only for the following step. It multiplies the policy-gradient loss uniformly across microbatches 18 Preprint before AdamW. All reported Qwen TV-OPD results use α = 0 .5. Appendix B.6 describes the update order, and Appendix B.7 states the assumptions needed after masking and optional preprocessing. C.1 HYPERPARAMETERS 
+
+Table 4: Training and evaluation hyperparameters. 
+
+Hyperparameter Qwen3-8B pair JustRL-1.5B pair 
+
+OPD prompt set DeepMath-103K DAPO-Math-17K Prompt subset Full training split Full training split Formal comparison seeds 2 2TV-OPD α 0.5 0.5 Training rollouts per prompt 1 1Training temperature / top-p 1.0 / 1.0 1.0 / 1.0 Maximum prompt / response length 1,024 / 16,384 1,024 / 16,384 Prompt batch size 64 64 Optimizer AdamW AdamW Learning rate 1 × 10 −6 1 × 10 −6
+
+Base LR schedule / warmup Constant / linear Constant / linear Weight decay / gradient clipping 0.01 / 1.0 0.01 / 1.0 Precision bfloat16 bfloat16 Hardware 8 GPUs 8 GPUs Evaluation interval Periodic Periodic Evaluation samples per problem 4 4Evaluation temperature / top-p 0.6 / 0.95 0.6 / 0.95 
+
+# D FULL MAGNITUDE ABLATIONS 
+
+All interventions write the raw coefficient as ∆i = zimi, where zi = sign(∆ i) and mi = |∆i|, and preserve the teacher-relative sign. Raw retains mi; Sign sets every nonzero magnitude to one. For 
+
+G+ = {i : ∆ i > 0} and G− = {i : ∆ i < 0}, Group-Constant replaces each coefficient in G+ by the mean positive advantage and each coefficient in G− by the mean negative advantage. Thus, each sign group retains its raw total mass but distributes that mass uniformly over its tokens. Permuted reassigns magnitudes only among tokens in the same sign group, so signs and the within-sign magnitude distributions are preserved while token–magnitude correspondence is corrupted. D.1 JUST RL DIAGNOSTIC 
+
+The main diagnostic uses the JustRL-DeepSeek-1.5B teacher and DeepSeek-R1-Distill-Qwen-1.5B student on AIME 2024 and 2025. It uses two seeds, but run lengths differ. We therefore compute comparative summaries over the jointly complete evaluation horizon and draw later reduced-coverage observations as dashed segments in Figure 1. Table 5: Per-seed best-over-training accuracy within the common evaluation horizon (mean ± sample standard deviation across two seeds). Sign is highest on both benchmarks.                             
+
+> Benchmark Raw Sign Group-Constant Permuted
+> AIME 2024 47.50 ±0.00 50.00 ±1.18 47.50 ±1.18 46.67 ±2.36 AIME 2025 35.83 ±1.18 37.50 ±0.00 36.25 ±5.30 35.00 ±0.00
+
+For a trajectory-level summary, we first average AIME 2024 and AIME 2025 at each checkpoint, average checkpoints within each seed, and then average the two seeds. This gives 36 .29 ± 0.15 for Sign, 35 .40 ± 0.11 for Raw, 34 .67 ± 1.47 for Group-Constant, and 34 .35 ± 0.13 for Permuted. With two seeds, these values are diagnostic rather than a basis for significance claims; their role is to motivate the magnitude-free objective analyzed in Section 5. 19 Preprint D.2 ADDITIONAL ALLOCATION AND SIGN -GROUP CONTROLS 
+
+Sign-Mass/Raw-Allocation is the complementary control to Group-Constant. For i ∈ Gg , it sets the coefficient magnitude to 
+
+emi = mi
+
+|Gg |−1 P 
+
+> j∈Gg
+
+mj
+
+, g ∈ { +, −} . (56) The total magnitude of each sign group is therefore |Gg |, as under Sign, while normalized raw magnitudes determine allocation within that group. The run configuration records this control as 
+
+opd adv mode=sign mass raw alloc .We compare this control with Raw on the JustRL pair using two paired random seeds. Both runs have complete AIME 2024 and AIME 2025 evaluations through step 425, so all summaries use the common 0–425 horizon. Training uses DAPO-Math-17K, batches of 64 prompts, one rollout per prompt, AdamW with learning rate 10 −6, and the evaluation protocol in Appendix C. Table 6: Per-seed best-over-training accuracy within the common 0–425 evaluation horizon (mean ±
+
+sample standard deviation across two seeds). Bold marks the higher mean in each row.               
+
+> Benchmark Raw Sign-Mass/Raw-Allocation
+> AIME 2024 50.83 ±1.18 48.33 ±1.18 AIME 2025 40.42 ±1.77 37.08 ±1.77
+
+For the trajectory-level summary used in the main diagnostic, the two-benchmark mean is 37 .00 ±0.28 
+
+for Sign-Mass/Raw-Allocation and 36 .94 ± 0.00 for Raw. The control slightly improves the average trajectory but not the per-benchmark best-over-training values in Table 6. D.3 REGULATOR SWEEP 
+
+For TV-OPD, the α sweep changes only the global feedback sensitivity in Eq. (11). The tested values and common-horizon results are reported in Table 3. 
+
+# E ADDITIONAL TRAINING -C URVE DETAILS 
+
+Figure 3 reports the available JustRL AIME trajectories over steps 0–625. Each method has two seeds, but some runs end earlier than others. Consequently, uncertainty bands stop when paired coverage ends, and reduced-coverage tails are dashed. Stage-level benchmark averages are reported in Table 2; the Qwen comparison remains summarized in Table 1 rather than repeated as training curves. For the matched late-training window W = {500 , 525 , . . . , 625 }, the aggregate retention statistics are:               
+
+> Method LateMean PeakDrop
+> Raw OPD 40.87 ±0.83 3.51 ±1.13 TV-OPD 43.06 ±0.10 2.36 ±0.49
+
+Values are means ± sample standard deviations across two seeds. Each seed contributes six evalua-tions to LateMean. PeakDrop uses the highest aggregate score observed over steps 0–625. Run- or rollout-level uncertainty should be used for token-level diagnostics because autoregressive tokens are not independent. 20

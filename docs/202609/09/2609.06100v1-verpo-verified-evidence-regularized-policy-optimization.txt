@@ -1,0 +1,1945 @@
+Title: VERPO: Verified Evidence Regularized Policy Optimization
+
+URL Source: https://arxiv.org/pdf/2609.06100v1
+
+Published Time: Wed, 09 Sep 2026 00:57:13 GMT
+
+Number of Pages: 38
+
+Markdown Content:
+# VERPO: Verified Evidence Regularized Policy Optimization 
+
+Haijiang Li 1, Chengyu Lv 2, Yi Zhang 1, Zhibing Zhang 3, Rui Qian 4, Yuchen Zhang 5,
+
+Xiaofan Zhang 6, Mingshan Wang 6, Xiaofei Jing 6, Yu Tong 6, Cangqi Zhou 51Independent 
+
+> 2
+
+Tongji University 
+
+> 3
+
+Nanjing University 
+
+> 4
+
+Fudan University 
+
+> 5
+
+Nanjing University of Science and Technology 
+
+> 6
+
+Xiaohongshu        
+
+> Email: hj523hj@163.com ,2532065@tongji.edu.cn ,myjoeycheung@gmail.com ,
+> 602026710049@smail.nju.edu.cn ,qianruii@gmail.com ,zhangyc811@njust.edu.cn ,
+> fantasyjxf@gmail.com ,yutchina02@gmail.com ,cqzhou@njust.edu.cn .
+
+## Abstract 
+
+Verifiable outcome rewards guide language-model post-training, but sequence-level advantages do not identify which token-level decisions should be preserved or revised. Evidence-conditioned Teachers provide denser supervision by replaying sampled trajectories with privileged feedback. Yet indiscriminate imitation risks transferring formatting or reasoning-style shifts that do not support task success. We introduce VERPO , a Verified Evidence Regularized Policy Optimization framework that treats evidence as a proposal for policy correction while retaining the outcome objective. It separates evidence-free reference restoration from signed token-level evidence corrections. Fisher Evidence Contrast attenuates corrections along an estimated evidence-presence direction. A stopped token-wise ZPD controller scales acceptance according to local reward alignment and Fisher movement cost, while the reference channel remains independent of acceptance. Across five scientific-reasoning and tool-use tasks, the best variant on each backbone exceeds the strongest compared baseline in average score. The averages rise from 0.6826 to 0.6857 on Qwen3-4B, from 0.6895 to 0.7058 on Qwen3-8B, and from 0.4751 to 0.5657 on Llama-3.2-1B. 
+
+## 1 Introduction 
+
+Outcome-based policy optimization with verifiable rewards has become a central approach for improving the reasoning behavior of language models (Shao et al., 2024; DeepSeek-AI, 2025; Yu et al., 2025). In reinforcement learning with verifiable rewards (RLVR), task success can be checked automatically, allowing policy updates to be grounded in reliable outcome-level feedback. Group Relative Policy Optimization (GRPO) (Shao et al., 2024) derives group-relative advantages from multiple on-policy rollouts and uses them to reinforce or suppress complete responses. This signal is attractive because it is directly tied to final task success. However, GRPO-style methods apply the resulting sequence-level advantage uniformly across all response tokens. This coarse credit assignment reinforces or penalizes an entire response without identifying which local decisions should be preserved, reinforced, or revised. Evidence-conditioned self-distillation offers a complementary source of supervision. By replaying sampled trajectories with privileged feedback, a self-Teacher can provide dense token-level guidance without requiring the deployed Student to access that evidence (H¨ ubotter et al., 2026). This addresses the sparsity of outcome rewards, but it introduces a different problem: a Teacher–Student discrepancy is not automatically a task-improving correction. Naively imitating the evidence-conditioned Teacher distribution can transfer evidence-induced artifacts, including formatting, confidence, verbosity, or reasoning-style preferences, rather than only task-relevant improvements (Lazaridis et al., 2026; Harne 1arXiv:2609.06100v1 [cs.LG] 5 Sep 2026 et al., 2026). Such shifts can destabilize learning when they are not aligned with verifiable task success (Kaur et al., 2026; Harne et al., 2026). These observations suggest that the central challenge is not simply how to combine an RL loss with a distillation loss. Rather, a useful method must separate three roles that are usually entangled: the outcome-based criterion that defines task improvement, the evidence-induced direction that proposes a local policy change, and the decision of whether that change is worth accepting at a particular token. This leads to the question: 
+
+Can evidence provide dense guidance for outcome-based optimization while remaining subordinate to the verifiable reward objective? 
+
+We introduce VERPO , a Verified Evidence-Regularized Policy Optimization framework that treats evidence as a proposal for policy correction rather than as a replacement for the outcome objective. VERPO decomposes Teacher guidance into an evidence-free reference term, which preserves reference behavior, and a signed evidence-induced correction, which proposes how the policy should move at each token. After this decomposition, VERPO uses a stopped token-wise controller to decide how much of each correction to accept. The controller compares the correction’s alignment with the local GRPO update direction against its Fisher movement cost, so evidence guidance is strongest where it is reward-aligned and inexpensive to incorporate. 
+
+Figure 1: Left: Verifiable RL relies on sparse outcome rewards, requiring trial-and-error explo-ration with many failed attempts. Right: VERPO augments the outcome signal with selective lo-cal corrections and adaptive guidance, providing targeted supervision along the trajectory while preserving reward-based improvement. Figure 1 illustrates this motivation. The left panel depicts standard verifiable RL as trial-and-error exploration driven by sparse outcome rewards: the model receives reliable feedback only after a full response is generated, leaving many interme-diate reasoning decisions unsupported. The right panel shows the VERPO view: evidence supplies local correction proposals along the trajectory, while the controller adaptively scales those pro-posals instead of applying them uniformly. Thus, VERPO retains reward-based optimization as the anchor but adds targeted supervision at positions where evidence is justified. Table 1 further summarizes the distinction be-tween VERPO and representative alternatives. GRPO (Shao et al., 2024) uses outcome re-wards and requires no external Teacher, but lacks dense token guidance and token-wise selectivity. SDPO (H¨ ubotter et al., 2026) provides dense self-distillation guidance without an external Teacher, but does not anchor corrections to verifiable rewards and applies Teacher preferences without reward-verified token-level acceptance. VERPO combines the strengths of both: it preserves the outcome reward signal, obtains dense token-level evidence guidance, and introduces reward-verified, token-wise selective corrections. This comparison highlights that VERPO is not merely a weighted sum of GRPO and self-distillation; it changes the role of evidence from a supervision target into a locally controlled correction proposal. Table 1: GRPO, SDPO, VERPO Comparison                  
+
+> GRPO SDPO VERPO
+> Outcome Reward ✓×✓
+> Dense Token Guidance ×✓✓
+> No External Teacher ✓✓✓
+> Reward-Verified Correction ××✓
+> Token-Wise Selectivity ××✓
+
+We instantiate VERPO with multiple evidence-direction constructions. The Fix construc-tion (H¨ ubotter et al., 2026) compares an evidence-conditioned Teacher with an evidence-free Teacher, while the Contrastive (CTR) con-struction (Pan et al., 2026) compares Teacher distributions under correct and incorrect evi-dence. We further introduce Fisher Evidence Contrast (FEC), which projects out nuisance shifts associated with the mere presence of priv-ileged evidence. The resulting correction can be used through two update paths: it can scale the 2evidence-distillation loss, modulate the token-level policy advantage, or enter both paths through the same stopped controller. We evaluate VERPO on five scientific-reasoning and tool-use tasks with Qwen3-4B (Yang et al., 2025), Qwen3-8B (Yang et al., 2025), and Llama-3.2-1B (Meta, 2024). The best VERPO variant on each backbone exceeds the strongest baseline with complete noncollapsed results in five-task average. The averages rise from 0.6826 to 0.6857 on Qwen3-4B, from 0.6895 to 0.7058 on Qwen3-8B, and from 0.4751 to 0.5657 on Llama-3.2-1B. These are point estimates without uncertainty across seeds. Diagnostic analyses describe task-dependent acceptance consistent with the controller’s use of local reward alignment and Fisher movement cost. Our contributions are as follows: 
+
+• We formulate evidence-conditioned self-distillation for RLVR as a separation problem, distinguishing evidence-free reference preservation from signed evidence-induced policy correction. 
+
+• We propose a stopped token-wise controller that accepts and scales each evidence correction according to local reward alignment and Fisher movement cost. 
+
+• We instantiate multiple evidence-direction constructions, including Fisher Evidence Contrast, which removes nuisance shifts caused by evidence presence. 
+
+• We report higher five-task averages than GRPO (Shao et al., 2024), SDPO (H¨ ubotter et al., 2026), and SRPO (Li et al., 2026) on three backbones, and analyze when and where token-level corrections are applied. 
+
+## 2 Related Work 
+
+RLVR and fine-grained credit assignment. Reinforcement learning with verifiable rewards (RLVR) optimizes language models using automatically checkable outcome rewards. Critic-free methods such as GRPO (Shao et al., 2024) replace traditional actor–critic value estimates with group-relative advantages computed from multiple on-policy responses. DeepSeek-R1 (DeepSeek-AI, 2025) and DAPO (Yu et al., 2025) use related group-relative updates for scalable RLVR. These sequence-level advantages are shared across response tokens, obscuring which local decisions caused the outcome. Process supervision obtains finer-grained signals through human-annotated step verification in Let’s Verify Step by Step (Lightman et al., 2024), automatically constructed labels in Math-Shepherd (Wang et al., 2024), and outcome-derived progress estimates in Rewarding Progress (Setlur et al., 2025). Such approaches require human annotations or automatically generated process targets together with a learned verifier, whose local preferences need not match the verifiable sequence-level objective. VERPO retains the outcome-derived GRPO advantage as the task-level anchor and uses privileged Teacher replay to propose token-level corrections, accepting them only when they align with the local reward direction at justified Fisher movement cost. 
+
+On-policy distillation and self-distillation. Knowledge distillation transfers a teacher’s predictive distribution to a student (Hinton et al., 2015). On-policy distillation reduces off-policy distribution shift by supervising student-generated trajectories with an external teacher (Agarwal et al., 2023). MiniLLM develops a related distribution-matching formulation for language-model distillation (Gu et al., 2023). OPSD removes the external teacher by conditioning the same model on privileged solutions (Zhao et al., 2026a), and SDPO constructs a feedback-conditioned self-teacher for dense token-level supervision (H¨ ubotter et al., 2026). SRPO (Li et al., 2026) anchors self-distillation to verifiable outcomes through sample-level routing. EviSD (Xie et al., 2026) applies reward-anchored modulation to evidence-conditioned search actions. These methods do not jointly separate evidence-free reference retention from signed evidence-induced change, and they do not decide whether an individual correction is worth applying at its local policy cost. VERPO addresses this control gap with a stopped token-wise ZPD controller that accepts and scales each correction according to its alignment with the local GRPO direction and its Fisher movement cost. 
+
+Selective and contrastive privileged supervision. Empirical studies show that privileged super-vision is not uniformly reliable across rollouts or tokens (Armandpour et al., 2026; Harne et al., 2026; Lazaridis et al., 2026; Zhao et al., 2026b; Kaur et al., 2026; Jiang et al., 2026). Teacher 3guidance is better aligned on incorrect than on already-correct trajectories (Armandpour et al., 2026), while privileged conditioning can bias the Teacher toward a particular reference trajectory rather than toward correctness in general (Harne et al., 2026), induce behavior unrelated to the intended correction (Lazaridis et al., 2026), overwrite valid reasoning prefixes (Zhao et al., 2026b), suppress verification and backtracking in thinking models (Kaur et al., 2026), or amplify weakly input-grounded signals (Jiang et al., 2026). CEPO (Heakl et al., 2026) exploits correct-wrong evidence for contrastive token credit, while OCSD (Yang et al., 2026) uses structurally matched privileged and ablated replay views to remove replay-scaffold effects in agentic RL. These contrastive constructions reduce shared effects between privileged branches, but a Teacher difference can still contain a component caused by the mere presence of privileged evidence. Such a component can leak evidence-specific style, confidence, or formatting into the Student without improving task success. VERPO’s Fisher Evidence Contrast (FEC) estimates this evidence-presence direction and projects it out of the task contrast under the local Fisher metric, reducing privileged-context leakage before the resulting correction is applied. 
+
+## 3 Method 
+
+VERPO separates reference restoration, evidence correction, and token-wise acceptance. An evidence-free Teacher anchors the Actor’s behavior, Teacher comparisons propose a signed correction, and a stopped ZPD weight controls its contribution to training. The weight scales an evidence correction derived from OPSD (Zhao et al., 2026a) or modulates the GRPO (Shao et al., 2024) advantage. We develop the method under forward-KL geometry, denoted FKL. Appendix C.3 derives the reverse-KL counterpart, denoted RKL. 3.1 Overview of VERPO VERPO separates evidence correction from token-wise acceptance. Teacher comparisons propose a signed correction, and ZPD controls its strength using local reward alignment and Fisher movement cost. A separate evidence-free reference channel anchors the Actor’s behavior. Figure 2 summarizes the four-stage training pipeline: 
+
+• Stage 1: Rollout Sampling and Outcome Signal. The Actor samples response groups. Verifier rewards determine the group-relative advantage b𝐴 𝑖 used by GRPO (Shao et al., 2024). 
+
+• Stage 2: Token-Level Evidence Correction. The frozen Teacher replays sampled prefixes under different evidence contexts. Fix (H¨ ubotter et al., 2026), Contrastive (Pan et al., 2026), or FEC constructs the signed correction, as defined in Section 3.4. 
+
+• Stage 3: ZPD Weight Estimation. Reward alignment and Fisher movement cost determine the stopped acceptance weight 𝑤 ∗ 
+
+> 𝑖,𝑡
+
+for each eligible token, as derived in Section 3.3. 
+
+• Stage 4: Two-Path Policy Update. The weight either scales the evidence correction or modulates the GRPO (Shao et al., 2024) advantage. Section 3.5 defines both update paths. 3.2 FKL Evidence Direction and OPSD Decomposition To control reference restoration and evidence correction separately, we decompose the forward-KL Teacher objective along a path between two Teacher endpoints. In particular, we isolate the signed evidence correction from the base restoration term, allowing ZPD to scale the correction independently of the reference channel. Let 𝑞 𝑏 and 𝑞 𝑒 denote the base and evidence-enriched Teacher distributions, respectively. The base endpoint uses no evidence or incorrect evidence, while the enriched endpoint uses correct evidence in our experiments. The Actor distribution 𝑝 𝑖,𝑡 = 𝜋 𝜃 (· | 𝑥 𝑖 , 𝑦 𝑖,<𝑡 ) uses the original prompt and sampled prefix. We suppress the response and token indices when describing a single Teacher comparison. Section 3.4 specifies the endpoint constructions. We hold the Teacher distributions and 𝑤 fixed during Actor differentiation and assume positive probability support over the vocabulary V. To vary the 4Update Policy Policy 
+
+model 𝐀 𝐀 
+
+Question 𝐀 
+
+> Model Outputs
+> 𝐀 1
+> ... ...
+
+✓
+
+×  
+
+> Student Model 𝐀 𝐀 ∙ |𝐀, 𝐀 ≤ 𝐀 Teacher Model 𝐀 𝐀 ∙ |𝐀, 𝐀, 𝐀 ≤ 𝐀
+
+Correctness from environment     
+
+> Verifier 𝐀 𝐀, 𝐀 Advantage 𝐀 𝐀 =𝐀 𝐀 − 𝐀 /𝐀 GRPO’s Core Practice Control the magnitude Path1 : Token-Level Advantages Teacher Evidence Correction : 𝐀 𝐀,𝐀
+> Alignment Benefit
+
+ℎ𝐀,𝐀 
+
+> Movement Cost
+
+𝐀 𝐀,𝐀 𝐀 
+
+> ZPD Weight
+
+ℎ𝐀,𝐀 
+
+ℎ𝐀,𝐀 + 𝐀𝐀 𝐀,𝐀 𝐀 + 𝐀                            
+
+> 𝐀 2
+> 𝐀 𝐀
+> 𝐀 𝐀−1
+> 𝐀 11... 𝐀 12𝐀 1|𝐀|
+> 𝐀 21...
+> 𝐀 22𝐀 2|𝐀|
+> 𝐀 𝐀−1 1... 𝐀 𝐀−1 2𝐀 𝐀−1 |𝐀|
+> 𝐀 𝐀 1... 𝐀 𝐀 2𝐀 𝐀 |𝐀|
+> RL Direction Signal
+> Teacher supports Teacher Disagree
+> Token-Level Correction Signal
+> Input Modulation Output
+> Path2 : Weighted Correction
+> 𝐀 1
+> 𝐀 𝐀
+> 𝐀 𝐀
+> 𝐀 1,𝐀
+> 𝐀 𝐀,𝐀
+> 𝐀 𝐀,𝐀
+> 𝐀 𝐀,𝐀 =𝐀 𝐀 1 + 𝐀 𝐀𝐀𝐀 𝐀𨀀 𝐀 𝐀,𝐀
+> Input Weighting Output
+> 𝐀 1
+> 𝐀 𝐀
+> 𝐀 𝐀
+> 𝐀 1
+> 𝐀 𝐀
+> 𝐀 𝐀
+> 𝐀 𝐀 ,𝐀 = 𝐀 𝐀 ,𝐀 𝐀 𝐀 ,𝐀 log 𝐀 𝐀 𝐀 𝐀 ,𝐀 ∣𝐀 𝐀 , 𝐀 𝐀 ,<𝐀
+> 𝐀 𝐀 = 𝐀 𝐀,𝐀 𝐀 𝐀
+> 1𝐀 1𝐀
+> 1𝐀 1𝐀
+> 𝐀 𝐀 𝐀 𝐀,𝐀
+> 𝐀 𝐀 𝐀 𝐀
+
+𝐀 𝐀,𝐀    
+
+> 𝐀 1
+> 𝐀 2
+> ... ...
+> 𝐀 𝐀 1... 𝐀 𝐀 2𝐀 𝐀 |𝐀|
+> 𝐀 𝐀−1
+> 𝐀 𝐀
+> 𝐀 𝐀
+> 𝐀 : Privileged Context
+
+Figure 2: Overview of VERPO. The policy samples response groups and receives outcome-based feedback from the verifier. The Teacher provides a token-level evidence correction, whose alignment benefit and Fisher movement cost determine the stopped ZPD weight. This shared weight controls token-level advantage modulation in Path 1 or weighted evidence correction in Path 2. strength of the evidence-induced change, we define the signed probability displacement and arithmetic path as 
+
+Δ = 𝑞 𝑒 − 𝑞 𝑏 , 𝑞 FKL 
+
+𝑤 = 𝑞 𝑏 + 𝑤 Δ, 0 ≤ 𝑤 ≤ 1. (1) The displacement Δ records which vocabulary items gain or lose probability under the enriched Teacher. The path interpolates from 𝑞 𝑏 at 𝑤 = 0 to 𝑞 𝑒 at 𝑤 = 1, preserving a normalized distribution throughout. Expanding the forward-KL objective along this path separates base restoration from the evidence-induced correction: KL (𝑞 FKL 
+
+𝑤 ∥ 𝑝 ) = KL (𝑞 𝑏 ∥ 𝑝 ) − 𝑤 ∑︁ 
+
+𝑣 ∈ V 
+
+Δ(𝑣 ) log 𝑝 (𝑣 ) + 𝐶 (𝑞 FKL 
+
+𝑤 , 𝑞 𝑏 ), (2) The first term pulls the Actor toward 𝑞 𝑏 . The second term contributes the signed correction 𝑤 Δ to the negative logit gradient, while the remainder 𝐶 depends only on the fixed Teacher path and contributes no Actor gradient. Appendix C.2 derives the identity and exact logit gradient in Equations (C.5) and (C.6). This separation lets us choose the reference anchor independently of the evidence endpoints. In the training objective, we use the evidence-free Teacher 𝑞 ref 
+
+𝑖,𝑡 for restoration, even when the correction uses an incorrect-evidence base. Averaging over valid response tokens gives 
+
+LFKL ref = 1
+
+𝑁 ∑︁ 𝑖,𝑡 
+
+𝑎 𝑖,𝑡 KL (𝑞 ref 
+
+𝑖,𝑡 ∥ 𝑝 𝑖,𝑡 ), (3) Here 𝑎 𝑖,𝑡 selects valid response tokens and 𝑁 counts them. This reference loss remains active independently of evidence acceptance. We then apply the signed correction only to tokens selected by the evidence mask 𝑚 𝑖,𝑡 and scale each contribution by its stopped weight 𝑤 𝑖,𝑡 :
+
+LFKL OPSD (𝑤 ) = − 1
+
+𝑍 evi ∑︁ 𝑖,𝑡 
+
+𝑚 𝑖,𝑡 𝑤 𝑖,𝑡 ∑︁ 
+
+𝑣 ∈ V 
+
+Δ𝑖,𝑡 (𝑣 ) log 𝑝 𝑖,𝑡 (𝑣 ). (4) The normalizer 𝑍 evi counts eligible tokens with a floor of one, so reducing acceptance weights reduces the correction strength without renormalizing it away. A zero weight removes that token’s evidence correction while retaining its reference loss. The resulting objective therefore controls reference retention and evidence acceptance through separate channels. These definitions use full-vocabulary distributions. The implementation uses a finite-support approxi-mation for the Teacher evidence terms. Appendix F.4 specifies support construction, normalization, and the approximation boundary. With the correction defined, Section 3.3 determines its token-wise weight from local reward alignment and policy movement cost. 53.3 Token-Wise ZPD Controller To determine how strongly to apply each evidence correction, we compare its local reward alignment with its Fisher movement cost. In particular, we construct a stopped token-wise weight 𝑤 ∗ 
+
+> 𝑖,𝑡
+
+that rejects corrections opposing the local GRPO (Shao et al., 2024) direction and is nonincreasing with movement cost at fixed alignment benefit. To derive a practical acceptance rule, we first consider the ideal improvement in the RL objective 
+
+𝐽 RL from applying a fraction 𝑤 of one token’s correction. Let 𝜃 base denote a hypothetical Actor state after the GRPO (Shao et al., 2024) and reference updates. This state serves only as a reference for the derivation. The training algorithm updates the Actor through a joint loss and reserves ¯ 𝜃 for the EMA Teacher. For Actor logits 𝑧 𝑖,𝑡 , define the logit Jacobian 𝐺 𝑖,𝑡 = 𝜕𝑧 𝑖,𝑡 /𝜕𝜃 and the FKL logit descent direction 𝑢 𝑖,𝑡 = Δ 𝑖,𝑡 . The corresponding parameter direction 𝑑 𝑖,𝑡 = 𝐺 ⊤ 
+
+> 𝑖,𝑡
+
+𝑢 𝑖,𝑡 gives the ideal acceptance at local step size 𝜂 > 0: 
+
+𝑤 ideal  
+
+> 𝑖,𝑡
+
+= arg max   
+
+> 0≤𝑤 ≤1
+
+𝐽 RL 
+
+ 𝜃 base + 𝜂𝑤𝑑 𝑖,𝑡 
+
+ . (5) This ideal rule requires evaluating how the correction affects reward. For a twice-differentiable objective, a second-order Taylor expansion around 𝜃 base exposes the local gradient and curvature terms: 𝐽 RL (𝜃 base + 𝜂𝑤𝑑 𝑖,𝑡 ) − 𝐽 RL (𝜃 base )≈ 𝜂𝑤 ∇𝐽 RL (𝜃 base )⊤ 𝑑 𝑖,𝑡 + 12 𝜂 2𝑤 2 𝑑 ⊤ 
+
+> 𝑖,𝑡
+
+∇2 𝐽 RL (𝜃 base )𝑑 𝑖,𝑡 . (6) The linear term measures local reward alignment, while the quadratic term captures curvature along the correction. The latter penalizes movement only under negative directional curvature, which the reward objective does not guarantee. We therefore use a local alignment proxy and a nonnegative Fisher movement proxy. Let 𝑒 𝑦 𝑖,𝑡 denote the one-hot vector for the sampled token, let [𝑥 ]+ = max (𝑥, 0), and define the categorical Fisher matrix 𝐹 ( 𝑝 ) = diag ( 𝑝 ) − 𝑝 𝑝 ⊤. The two proxies are 
+
+ℎ𝑖,𝑡 =
+
+h b𝐴 𝑖 (𝑒 𝑦 𝑖,𝑡 − 𝑝 𝑖,𝑡 )⊤𝑢 𝑖,𝑡 
+
+i 
+
+> +
+
+, 𝑐 𝑖,𝑡 = 𝑢 ⊤ 
+
+> 𝑖,𝑡
+
+𝐹 ( 𝑝 𝑖,𝑡 )𝑢 𝑖,𝑡 . (7) The benefit ℎ𝑖,𝑡 retains only positive alignment with the unclipped local GRPO (Shao et al., 2024) score direction. It estimates compatibility with the reward signal rather than verified reward improvement. The cost 𝑐 𝑖,𝑡 measures local KL movement through the second-order term 12 𝛿 2𝑐 𝑖,𝑡 for a small logit step 
+
+𝛿𝑢 𝑖,𝑡 . Relating these quantities to parameter-space benefit and curvature uses the local approximation 
+
+𝐺 𝑖,𝑡 𝐺 ⊤ 
+
+> 𝑖,𝑡
+
+≈ 𝜅 𝑖,𝑡 𝐼 with 𝜅 𝑖,𝑡 > 0. Appendix C.6 derives this approximation and the Fisher replacement for reward curvature. To convert these proxies into a bounded acceptance weight, we choose the following surrogate objective: 
+
+Λ𝑖,𝑡 = 𝛼 cost 𝑐 𝑖,𝑡 + 𝜖 cost > 0, 𝑓 𝑖,𝑡 (𝑤 ) = ℎ𝑖,𝑡 log 𝑤 + Λ𝑖,𝑡 log (1 − 𝑤 ), 0 < 𝑤 < 1. (8) Here 𝛼 cost ≥ 0 scales the Fisher movement cost and 𝜖 cost > 0 provides the positive denominator floor. The implementation uses these two controller hyperparameters directly. For positive benefit, ℎ𝑖,𝑡 log 𝑤 
+
+penalizes rejecting the direction entirely, while Λ𝑖,𝑡 log (1 − 𝑤 ) penalizes full acceptance in proportion to movement cost and the positive floor. This surrogate retains the benefit-versus-cost structure of the local analysis but does not solve the ideal RL optimization. For ℎ𝑖,𝑡 > 0, strict concavity gives 
+
+𝑓 ′ 
+
+> 𝑖,𝑡
+
+(𝑤 ) = ℎ𝑖,𝑡 
+
+𝑤 − Λ𝑖,𝑡 
+
+1 − 𝑤 , 𝑓 ′′  
+
+> 𝑖,𝑡
+
+(𝑤 ) < 0,
+
+so the surrogate has a unique interior maximizer. For ℎ𝑖,𝑡 = 0, we extend the solution continuously to 
+
+𝑤 ∗ 
+
+> 𝑖,𝑡
+
+= 0. Applying stop-gradient gives 
+
+𝑤 ∗ 
+
+> 𝑖,𝑡
+
+= sg 
+
+ ℎ𝑖,𝑡 
+
+ℎ𝑖,𝑡 + Λ𝑖,𝑡 
+
+
+
+= sg 
+
+ ℎ𝑖,𝑡 
+
+ℎ𝑖,𝑡 + 𝛼 cost 𝑐 𝑖,𝑡 + 𝜖 cost 
+
+
+
+. (9) The weight lies in [0, 1), rejects nonpositive alignment, and increases with benefit at fixed cost. It is nonincreasing with cost at fixed benefit, with a strict decrease when both benefit and 𝛼 cost are positive. Stopping the weight blocks backpropagation through the controller during the Actor update. Appendix C.7 proves these surrogate properties and states the zero-benefit boundary convention. 63.4 Fix, Contrastive, and Fisher Evidence Contrast To reduce evidence-presence effects in the correction direction, we construct Fisher Evidence Contrast, abbreviated FEC, from a task contrast and a nuisance direction estimated through Teacher comparisons. In particular, FEC subtracts a regularized Fisher projection of the task contrast onto the nuisance direction. The frozen-Teacher Biology audit in Figure 3 shows that incorrect and shuffled evidence also shift the Teacher distribution. This observation motivates measuring evidence-presence variation separately from the correct-versus-incorrect task contrast. The measured presence direction serves as a nuisance proxy, without assuming that it contains only task-irrelevant information. 
+
+Evidence contexts. Let 𝑞 0, 𝑞 +, and 𝑞 − denote the Teacher distributions conditioned on no evidence, correct evidence, and incorrect evidence, respectively. Correct evidence supplies the ground-truth answer, while incorrect evidence supplies a wrong answer. All branches score the same sampled prefix and remain fixed during the Actor update. 
+
+Figure 3: Evidence-presence shifts moti-vate FEC. Correct, incorrect, and shuffled evidence all shift the frozen Biology Teacher from its evidence-free distribution. The full-vocabulary Jensen-Shannon divergence and the task and evidence-presence displacement norms motivate estimating evidence-presence variation separately. FEC attenuates the task contrast along this estimated direction. Small points represent prompts and large markers indicate means. 
+
+Endpoint comparisons. Fix (H¨ ubotter et al., 2026) uses Δfix = 𝑞 𝑒 − 𝑞 0, comparing an evidence-conditioned Teacher with the evidence-free branch. Our experiments use 𝑞 𝑒 = 𝑞 +. The Contrastive con-struction, denoted CTR, follows RLCSD (Pan et al., 2026) and contrasts symmetric evidence branches: 
+
+ΔCTR = 𝑞 + − 𝑞 − . Subtraction cancels additive shifts shared by both branches. Differences in verbosity or formatting that affect the branches unequally remain in the contrast. 
+
+FEC refinement. To attenuate the contrast along the measured evidence-presence direction, we average the correct and incorrect Teacher branches and compare this midpoint with the evidence-free branch. We then measure the task contrast’s component along this direction under the Fisher metric, with 𝜖 proj > 0stabilizing the coefficient: 
+
+Δnuis = 12
+
+ 𝑞 + + 𝑞 −  − 𝑞 0,𝛼 FEC = (ΔCTR )⊤ 𝐹 ( 𝑝 )Δnuis 
+
+(Δnuis )⊤ 𝐹 ( 𝑝 )Δnuis + 𝜖 proj 
+
+. (10) The midpoint gives equal weight to both evidence conditions. The numerator of 𝛼 FEC measures the task contrast’s Fisher inner product with the presence proxy, and the denominator normalizes by the proxy’s squared Fisher length plus regularization. Subtracting this scaled direction gives 
+
+ΔFEC = Δ CTR − 𝛼 FEC Δnuis . (11) Positive regularization attenuates the residual’s Fisher inner product with the nuisance proxy without guaranteeing exact orthogonality. Appendix C.4 derives the residual inner product. We stop gradients through the entire FEC direction, including its Actor-dependent projection coefficient, and substitute it for Δ𝑖,𝑡 in the evidence loss and ZPD controller. The residual sums to zero, preserving the signed logit correction. It need not define a normalized Teacher endpoint, so FEC operates through the signed loss rather than a guaranteed arithmetic Teacher path. Table 2 summarizes the variants. Appendix C.4 also derives the RKL FEC construction. 7Table 2: FKL evidence-direction constructions.                         
+
+> Variant Teacher branches FKL correction Fix (H¨ ubotter et al., 2026) 𝑞 0→𝑞 𝑒 Δfix =𝑞 𝑒 −𝑞 0
+> CTR (Pan et al., 2026) 𝑞 −→𝑞 +ΔCTR =𝑞 +−𝑞 −
+> FEC 𝑞 0, 𝑞 −, 𝑞 +ΔFEC = Δ CTR −𝛼 FEC Δnuis
+
+3.5 Two Actor-Update Paths To incorporate token-wise acceptance into training, we insert the stopped weight 𝑤 ∗ 
+
+> 𝑖,𝑡
+
+into two Actor-update paths. Path 1 modulates the GRPO (Shao et al., 2024) advantage, while Path 2 directly scales the signed evidence correction. Both paths share the controller in Figure 2 and are evaluated separately in the main comparison. For Path 1, we first mask the acceptance weight and use it to rescale the sequence-level advantage at each token: 
+
+e𝑤 𝑖,𝑡 = 𝑚 𝑖,𝑡 𝑤 ∗ 
+
+> 𝑖,𝑡
+
+, b𝐴 ′ 
+
+> 𝑖,𝑡
+
+= b𝐴 𝑖 
+
+1 + 𝜒 adv 𝜆 adv sg ( e𝑤 𝑖,𝑡 ) , 𝜆 adv ≥ 0. (12) The multiplier remains positive and therefore preserves the advantage’s sign. An ineligible token or a zero acceptance weight leaves the original advantage unchanged. When Path 1 is enabled and 
+
+𝜆 adv > 0, positive acceptance scales up nonzero advantages without changing the clipping decision. The stopped multiplier contributes no gradient of its own. With path switches 𝜒 OPSD , 𝜒 adv ∈ { 0, 1},the unified FKL objective is 
+
+LFKL total = LGRPO ( b𝐴 ′) + 𝜆 ref LFKL ref + 𝜒 OPSD 𝜆 evi LFKL OPSD (𝑤 ∗). (13) The outcome loss supplies the task signal, the reference loss anchors evidence-free behavior, and the signed evidence loss applies the accepted correction. The coefficients 𝜆 ref and 𝜆 evi control the last two contributions. Path 1 sets 𝜒 adv = 1 and 𝜒 OPSD = 0. Path 2 sets 𝜒 adv = 0 and 𝜒 OPSD = 1. Thus Path 1 uses evidence to scale the outcome update, while Path 2 adds the accepted Teacher direction directly. Algorithm 1 specifies the masks, normalization, and joint Actor update. 
+
+## 4 Experiments 
+
+Models and Implementation Details. We used the instruction-tuned Qwen3-4B (Yang et al., 2025), Qwen3-8B (Yang et al., 2025), and Llama-3.2-1B-Instruct (Meta, 2024) checkpoints. The main benchmark profile used 200 optimizer steps on 8 × NVIDIA A800 GPUs. The separate Llama compute study used two A800 GPUs, as specified in Appendix G. Appendix F provides the training stack, shared hyperparameters, decoding settings, settings for the baselines and VERPO, and prompt templates. 
+
+Datasets. We follow the evaluation setup of SDPO (H¨ ubotter et al., 2026) and consider five benchmarks: Chemistry, Physics, Biology, Materials, and Tool Use. The first four are science question-answering tasks built from the reasoning subsets of SciKnowEval (Feng et al., 2024) and target undergraduate-level scientific reasoning in different domains. Tool Use evaluates whether the model can map a user request and a tool specification to the correct tool call, using ToolAlpaca (Tang et al., 2023). 
+
+Baselines. We compare against GRPO (Shao et al., 2024), which learns from group-relative outcome rewards, and SDPO (H¨ ubotter et al., 2026), which obtains dense token supervision from a feedback-conditioned Teacher. SRPO (Li et al., 2026) routes successful samples to the former objective and unsuccessful samples to the latter. The main table reports two VERPO variants. VERPO-LW applies the ZPD weights to the evidence loss, while VERPO-AM uses them to modulate the GRPO (Shao et al., 2024) advantages. Appendix D.1 reports VERPO-LW+AM, which activates both paths. We report acc/mean@16 for each task and use the unweighted mean across the five tasks as Average. 8Algorithm 1 VERPO Actor Update 
+
+Require: Current Actor 𝜋 𝜃 , frozen behavior Actor 𝜋 𝜃 old , EMA Teacher 𝜋 ¯𝜃 , dataset D, direction variant 
+
+𝑠 ∈ { Fix , CTR , FEC }, path switches 𝜒 OPSD , 𝜒 adv 
+
+Ensure: Updated Actor 𝜋 𝜃 
+
+1: repeat 
+
+2: Stage 1: Rollout Sampling and Outcome Signal 
+
+3: Sample a prompt batch from D and freeze 𝜃 old ← 𝜃 .4: {𝑦 𝑖 }𝑖 ∈ G ( 𝑥 ) ∼ 𝜋 𝜃 old (· | 𝑥 ) for each prompt 𝑥 .5: Obtain verifier rewards 𝑅 𝑖 and set b𝐴 𝑖 ← 𝑅 𝑖 − |G( 𝑖 )| −1 Í 𝑗 ∈ G ( 𝑖 ) 𝑅 𝑗 .6: Stage 2: Token-Level Evidence Correction 
+
+7: Score sampled prefixes with the Actor under the original prompt. 8: Replay the same prefixes with the frozen Teacher under the selected evidence contexts. 9: 𝑝 𝑖,𝑡 ← 𝜋 𝜃 (· | 𝑥 𝑖 , 𝑦 𝑖,<𝑡 )
+
+10: {𝑞 ref  
+
+> 𝑖,𝑡
+
+, 𝑞 0 
+
+> 𝑖,𝑡
+
+, 𝑞 + 
+
+> 𝑖,𝑡
+
+, 𝑞 − 
+
+> 𝑖,𝑡
+
+} ← sg [𝜋 ¯𝜃 ] using the replay operator in Equation (B.6). 11: Δ𝑖,𝑡 ←
+
+
+
+𝑞 + 
+
+> 𝑖,𝑡
+
+− 𝑞 0 
+
+> 𝑖,𝑡
+
+, 𝑠 = Fix ,𝑞 + 
+
+> 𝑖,𝑡
+
+− 𝑞 − 
+
+> 𝑖,𝑡
+
+, 𝑠 = CTR ,
+
+ΔFEC  
+
+> 𝑖,𝑡
+
+, 𝑠 = FEC .
+
+with ΔFEC  
+
+> 𝑖,𝑡
+
+from Equation (11). 12: Stage 3: ZPD Weight Estimation 
+
+13: Δ𝑖,𝑡 ← sg [Δ𝑖,𝑡 ], 𝑢 𝑖,𝑡 ← Δ𝑖,𝑡 , ℎ𝑖,𝑡 ← [ b𝐴 𝑖 (𝑒 𝑦 𝑖,𝑡 − 𝑝 𝑖,𝑡 )⊤𝑢 𝑖,𝑡 ]+.14: 𝑐 𝑖,𝑡 ← 𝑢 ⊤ 
+
+> 𝑖,𝑡
+
+𝐹 ( 𝑝 𝑖,𝑡 )𝑢 𝑖,𝑡 .15: Form valid-token mask 𝑎 𝑖,𝑡 and evidence mask 𝑚 𝑖,𝑡 ≤ 𝑎 𝑖,𝑡 .16: 𝑤 ∗ 
+
+> 𝑖,𝑡
+
+← sg 
+
+h ℎ𝑖,𝑡    
+
+> ℎ𝑖,𝑡 +𝛼 cost 𝑐 𝑖,𝑡 +𝜖 cost
+
+i
+
+, e𝑤 𝑖,𝑡 ← 𝑚 𝑖,𝑡 𝑤 ∗
+
+> 𝑖,𝑡
+
+17: Stage 4: Two-Path Policy Update 
+
+18: Set b𝐴 ′ 
+
+> 𝑖,𝑡
+
+← b𝐴 𝑖 [1 + 𝜒 adv 𝜆 adv sg ( e𝑤 𝑖,𝑡 )] .19: Set 𝑁 ← Í𝑖,𝑡 𝑎 𝑖,𝑡 and 𝑍 evi ← max  1, Í𝑖,𝑡 𝑎 𝑖,𝑡 𝑚 𝑖,𝑡 
+
+.20: Compute reference and evidence losses using Equations (3) and (4). 21: LFKL total ← L GRPO ( b𝐴 ′) + 𝜆 ref LFKL ref + 𝜒 OPSD 𝜆 evi LFKL OPSD (𝑤 ∗)
+
+22: 𝜃 ← 𝜃 − 𝜂 𝜃 ∇𝜃 LFKL total 
+
+23: Update the EMA Teacher using Equation (B.7). 24: until stopping criterion reached 25: return 𝜋 𝜃 
+
+## 5 Experiment Results 
+
+We evaluate whether VERPO improves task performance, how its components affect the reported outcomes, and where the controller assigns evidence weight. 5.1 Main Results Table 3 reports a higher five-task average for a VERPO variant than for each baseline with complete noncollapsed numeric results. On Qwen3-4B, VERPO-LW reaches 0.6857 compared with 0.6826 for SRPO (Li et al., 2026), a difference of 0.0031. On Qwen3-8B, VERPO-AM reaches 0.7058 compared with 0.6895 for SDPO (H¨ ubotter et al., 2026), a difference of 0.0162. On Llama-3.2-1B, VERPO-LW reaches 0.5657 compared with 0.4751 for GRPO (Shao et al., 2024), a difference of 0.0905. Differences are calculated before rounding. The preferred update path varies across backbones and tasks. VERPO-LW gives the higher average on Qwen3-4B and Llama-3.2-1B, while VERPO-AM leads on Qwen3-8B. The average gains do not imply improvement on every task. For example, on Qwen3-8B Physics, VERPO-LW scores 0.6085 compared with 0.6687 for GRPO (Shao et al., 2024), while VERPO-AM reaches 0.6909. The table reports point estimates without uncertainty across seeds, so the small average gap on Qwen3-4B does not establish statistical significance. The separate compute-matched Llama-3.2-1B comparison in Appendix G.2 also favors VERPO among the reported methods. Its mean validation accuracy reaches 0.5026 at an average of 94 optimizer steps, compared with 0.4791 at 200 steps for GRPO (Shao et al., 2024). The appendix matches each task to the estimated GPU-hour budget of that baseline using the nearest available 9Table 3: Main acc/mean@16 results across three model backbones. VERPO variants are defined in Section 4. The Llama VERPO rows use all-trajectory correction. Average is the unweighted mean of the five task scores. Means and differences use source precision before rounding to four decimals. Higher is better. Bold and underline mark the best and second-best scores within each model block.                                                                                                       
+
+> Method Biology Chemistry Materials Physics Tool Use Average
+> Qwen3-4B
+> GRPO (Shao et al., 2024) 0.5225 0.7000 0.8018 0.6742 0.6056 0.6608 SRPO (Li et al., 2026) 0.6012 0.7247 0.7878 0.6789 0.6204 0.6826 SDPO (H¨ ubotter et al., 2026) 0.4787 0.6979 0.7240 0.6289 0.5772 0.6213 VERPO-LW 0.6200 0.6917 0.7972 0.7055 0.6140 0.6857
+> VERPO-AM 0.5537 0.7285 0.7544 0.7078 0.5909 0.6671
+> Qwen3-8B
+> GRPO (Shao et al., 2024) 0.6175 0.7038 0.7666 0.6687 0.6718 0.6857 SDPO (H¨ ubotter et al., 2026) 0.6075 0.7794 0.7493 0.6406 0.6709 0.6895 SRPO (Li et al., 2026) 0.6000 0.7351 0.7327 0.6851 0.6636 0.6833 VERPO-LW 0.6237 0.8026 0.7762 0.6085 0.6815 0.6985 VERPO-AM 0.5913 0.7846 0.7679 0.6909 0.6942 0.7058 Llama-3.2-1B
+> Base 0.1062 0.0741 0.0559 0.0555 0.0147 0.0613 GRPO (Shao et al., 2024) 0.4238 0.5227 0.4293 0.5247 0.4751 0.4751 SDPO (H¨ ubotter et al., 2026) 0.3150 0.3047 0.2938 0.4015 0.4385 0.3507 SRPO (Li et al., 2026) 0.3187 0.6711 0.3191 0.4445 0.4215 0.4350 VERPO-LW 0.6015 0.6657 0.5226 0.5422 0.4963 0.5657
+> VERPO-AM 0.5550 0.6369 0.5506 0.5070 0.5101 0.5519
+
+validation checkpoint. This result concerns an approximate compute match on one backbone, rather than equal per-step cost. 5.2 Ablation Study To examine the contribution of each component, Table 4 compares Teacher sources, evidence directions, and KL geometries on Llama-3.2-1B. The EMA Teacher with decay 0.95 reaches an average of 0.5657, compared with 0.4906 at decay 0.99 and 0.3219 for the fixed Teacher. The differences of 0.0750 and 0.2438 favor the more responsive Teacher among the tested settings. They do not establish the same ordering for other decay rates or backbones. FEC reaches 0.5657 compared with 0.5356 for CTR (Pan et al., 2026), an average difference of 0.0301. FEC scores higher on each of the five tasks, with the largest difference of 0.0737 on Materials. These point estimates favor FEC in this configuration, without establishing significance across repeated runs. In our Fixed-direction experiments, we observed reward hacking on Biology and Chemistry. Table 4 marks these observations and leaves the other task scores unavailable. This failure observation concerns the tested configuration and does not establish that every use of a fixed evidence endpoint produces reward hacking. The geometry comparison contains FKL results for all five tasks, while the RKL runs on Biology and Chemistry are marked as collapsed and the remaining entries are unavailable. This favors FKL in the reported configuration but does not establish that RKL is unsuitable for evidence correction in general. The table alone also cannot attribute the observed failures to its probability-weighted direction or distinguish that explanation from optimization and hyperparameter effects. 5.3 Further Analysis 
+
+Training Dynamics. To assess how performance develops during training, Figure 4 tracks the 200-step Physics runs on Llama-3.2-1B. VERPO finishes with slightly higher validation accuracy than 10 Table 4: Teacher, evidence-direction, and KL-geometry ablations on Llama-3.2-1B using ac-c/mean@16. Teacher comparisons use FEC with FKL. Direction comparisons use EMA decay 0.95 with FKL, and geometry comparisons use EMA decay 0.95 with FEC. Average is the unweighted five-task mean, with higher values indicating better performance. RH denotes observed reward hacking, † marks collapse, and unfilled entries indicate unavailable scores. Incomplete rows have no average.                                                       
+
+> Setting Biology Chemistry Materials Physics Tool Use Average
+> Teacher source
+> Fixed Teacher 0.2850 0.4693 0.2007 0.2382 0.4162 0.3219 EMA-0.99 0.4975 0.6241 0.3803 0.4632 0.4880 0.4906 EMA-0.95 0.6015 0.6657 0.5226 0.5422 0.4963 0.5657
+> Evidence direction
+> Fixed (H¨ ubotter et al., 2026) RH RH ––––CTR (Pan et al., 2026) 0.5775 0.6586 0.4489 0.5209 0.4719 0.5356 FEC 0.6015 0.6657 0.5226 0.5422 0.4963 0.5657
+> KL geometry
+> FKL 0.6015 0.6657 0.5226 0.5422 0.4963 0.5657 RKL 0.2087 †0.3110 †––––
+
+GRPO (Shao et al., 2024), although their accuracy curves cross during training. The SDPO (H¨ ubotter et al., 2026) run reaches zero validation accuracy at the displayed checkpoints from step 160 onward, alongside near-zero reward. VERPO retains longer responses late in training than the plotted baselines, while its Actor entropy remains low. These traces describe the displayed runs. They do not show that response length or entropy caused the accuracy differences, or establish stability across seeds. 
+
+Figure 4: Training dynamics on the Physics benchmark for Llama-3.2-1B over 200 optimizer steps. The panels report validation accuracy, reward mean, response length in tokens, and Actor entropy for GRPO (Shao et al., 2024), SDPO (H¨ ubotter et al., 2026), SRPO (Li et al., 2026), and VERPO. Validation accuracy averages 16 sampled responses per prompt. Higher validation accuracy indicates better task performance. Reward, length, and entropy describe the training behavior. 
+
+FEC Diagnostics. To examine how acceptance varies across tasks, Figure 5 reports effective weight coverage, mean signed benefit, mean Fisher cost, and residual nuisance covariance. Coverage counts routed tokens with stopped weights above 10 −3. The benefit diagnostic averages signed alignment before the positive-part operation. The controller assigns zero weight to individual tokens with nonpositive alignment, but a negative mean does not imply that every token is rejected. The cost curve reports the unscaled Fisher term. Appendix E defines the aggregation and smoothing procedures. The coverage curves follow different trajectories across the five tasks. Near the final displayed step, Materials has coverage of roughly 0.24, while Tool Use has coverage near 0.04. This contrast describes how broadly the controller accepts evidence, not which task benefits more from it. Acceptance depends on each token’s benefit and cost, so aggregate means cannot reconstruct the coverage curve. The plotted mean signed residual covariance remains at a scale of 10 −9. This provides an aggregate check of the regularized projection, but a small signed mean can also conceal cancellation across 11 Figure 5: Training-rollout FEC and ZPD diagnostics for Llama-3.2-1B across the five benchmarks. From left to right, the panels show the fraction of diagnostic tokens with 𝑤 𝑖,𝑡 > 10 −3, the mean raw signed controller benefit before the positive-part operation, the mean Fisher movement cost, and the mean signed covariance between the FEC residual and nuisance direction in the local Fisher geometry. Means are globally token-weighted. Curves use centered moving averages over 31 steps for benefit and 15 steps for the other panels. Appendix E gives the exact definitions and interpretation limits. A small signed covariance mean does not establish orthogonality at every token. 0 10 20        
+
+> Relative increase (%)
+> Effective rate High-weight rate Mean weight Weight sum
+> +19.0% 43.3/36.4
+> +13.5% 24.4/21.5
+> +14.9% 0.234/0.203
+> +15.0% 117.5/102.2
+> Reasoning Final answer 0.2 110 100
+> Mean within-region weight sum (log scale)
+> 117.2 0.33 101.9 0.29
+> Correct Incorrect
+> 0.50 0.55 0.60 0.65 0.70
+> Mean controller weight
+> analyze Given select therm compound without compute indicates actually these
+> 0.685 0.614 0.612 0.607 0.606 0.579 0.547 0.545 0.540 0.523
+> Correct Incorrect
+> (a) Trajectory-level weight comparison. (b) Region-level weight allocation. (c) Token-level weight ranking.
+
+Figure 6: FEC and ZPD weight allocation across trajectories, regions, and token types. Panel a compares aggregate acceptance statistics for correct and incorrect rollouts. Bar labels report the values for each class. Panel b shows mean weight sums for reasoning and final-answer regions on a logarithmic scale. Panel c ranks token types by mean controller weight, with marker size indicating occurrence count. Statistics use 100 matched Materials pairs from the step-100 Llama-3.2-1B FEC-FKL checkpoint and include zero-weight occurrences. Effective weights exceed 10 −3 and high weights are at least 0.5. Token rankings require at least 20 occurrences. Larger weights indicate greater acceptance, not verified causal contributions to correctness. tokens. It therefore does not establish token-wise orthogonality or show that the retained direction improves task performance. The residual identity in Appendix C.4 supplies the corresponding mathematical statement for an individual direction. 
+
+Token-Level FEC Weight Analysis. To locate the accepted evidence within responses, Figure 6 analyzes 100 matched Materials pairs using the step-100 Llama-3.2-1B checkpoint. Under replay of both trajectory classes, correct responses have an effective-weight fraction of 43.3%, compared with 36.4% for incorrect responses. Their mean weights are 0.2337 and 0.2034, respectively. These measurements show broader acceptance for correct responses in this replay sample. The region statistics place the weight primarily in intermediate reasoning. For correct responses, the mean weight sum is 117.22 in reasoning and 0.33 in the final answer. For incorrect responses, the corresponding values are 101.92 and 0.29. Region length contributes to this difference in total mass. The per-token means also differ, reaching 0.2369 versus 0.0406 for correct responses and 0.2062 versus 0.0359 for incorrect responses. Thus the reported concentration reflects both region size and higher average reasoning-token weights. The token rankings provide lexical examples of this allocation. Correct responses include analyze 
+
+and reference among the high-weight types, while incorrect responses include without ,
+
+compute , and Therefore . Rankings include zero-weight occurrences and require at least 20 12 occurrences per token type. These patterns describe acceptance rather than identify causal error tokens. Appendix D.3 reports the complete statistics, and Appendix H provides a rollout-level example. 
+
+## 6 Conclusion 
+
+In this work, we introduced VERPO, a framework for combining verifiable outcome rewards with dense evidence-conditioned supervision without treating every Teacher proposal as uniformly reliable. VERPO separates evidence-free reference restoration from signed evidence-induced correction, uses FEC to remove the measured evidence-presence component, and applies a token-wise ZPD controller to accept corrections according to their alignment with the local GRPO direction and their Fisher movement cost. Across five benchmarks and three model backbones, VERPO achieves the best average performance within each model block. The ablations further show that stability depends on the Teacher update rule, evidence construction, and KL geometry, while the fine-grained analysis indicates that accepted corrections are concentrated primarily in intermediate reasoning rather than final-answer tokens. Overall, these results support treating privileged evidence as a selective proposal for policy improvement, with verifiable outcomes remaining the optimization anchor. 
+
+## References 
+
+Rishabh Agarwal, Nino Vieillard, Yongchao Zhou, Piotr Stanczyk, Sabela Ramos, Matthieu Geist, and Olivier Bachem. On-policy distillation of language models: Learning from self-generated mistakes. arXiv preprint arXiv:2306.13649 , 2023. Shun-ichi Amari. Natural gradient works efficiently in learning. Neural Computation , 10(2):251–276, 1998. Mohammadreza Armandpour, Fatih Ilhan, David Harrison, Ajay Jaiswal, Duc N. M. Hoang, Fartash Faghri, Yizhe Zhang, Minsik Cho, and Mehrdad Farajtabar. Unmasking on-policy distillation: Where it helps, where it hurts, and why. arXiv preprint arXiv:2605.10889 , 2026. DeepSeek-AI. DeepSeek-R1: Incentivizing reasoning capability in LLMs via reinforcement learning. 
+
+arXiv preprint arXiv:2501.12948 , 2025. Kehua Feng, Keyan Ding, Weijie Wang, Xiang Zhuang, Zeyuan Wang, Ming Qin, Yu Zhao, Jianhua Yao, Qiang Zhang, and Huajun Chen. SciKnowEval: Evaluating multi-level scientific knowledge of large language models. arXiv preprint arXiv:2406.09098 , 2024. Wei Feng, Will Constable, and Yifan Mao. Getting started with fully sharded data parallel (FSDP2). PyTorch Tutorials, 2025. URL https://docs.pytorch.org/tutorials/ intermediate/FSDP_tutorial.html . Updated September 2, 2025. Accessed September 5, 2026. Yuxian Gu, Li Dong, Furu Wei, and Minlie Huang. MiniLLM: Knowledge distillation of large language models. arXiv preprint arXiv:2306.08543 , 2023. Sarthak Harne, Chinmay Karkar, Yash Pandya, Ahmed Awadallah, and Akshay Nambi. Privileged, but biased: How PI-conditioned teachers break self-distillation. arXiv preprint arXiv:2608.04794 ,2026. doi: 10.48550/arXiv.2608.04794. Ahmed Heakl, Abdelrahman M. Shaker, Youssef Mohamed, Rania Elbadry, Omar Fetouh, Fahad Shah-baz Khan, and Salman Khan. CEPO: RLVR self-distillation using contrastive evidence policy optimization. arXiv preprint arXiv:2605.19436 , 2026. Geoffrey Hinton, Oriol Vinyals, and Jeff Dean. Distilling the knowledge in a neural network. arXiv preprint arXiv:1503.02531 , 2015. Jonas H¨ ubotter, Frederike L¨ ubeck, Lejs Behric, Anton Baumann, Marco Bagatella, Daniel Marta, Ido Hakimi, Idan Shenfeld, Thomas Kleine Buening, Carlos Guestrin, and Andreas Krause. Reinforcement learning via self-distillation. arXiv preprint arXiv:2601.20802 , 2026. 13 Yinuo Jiang, Yongjie Ye, Zhou Tao, Xiang Zhuang, Qiang Zhang, Huajun Chen, and Tiankai Li. When teachers mislead: Spurious-signal-aware on-policy distillation. arXiv preprint arXiv:2608.03632 ,2026. Simran Kaur, Narutatsu Ri, Yinghui He, Liam Fowl, and Sanjeev Arora. Rethinking on-policy self-distillation for thinking models. arXiv preprint arXiv:2607.05184 , 2026. Solomon Kullback and Richard A. Leibler. On information and sufficiency. The Annals of Mathematical Statistics , 22(1):79–86, 1951. Woosuk Kwon, Zhuohan Li, Siyuan Zhuang, Ying Sheng, Lianmin Zheng, Cody Hao Yu, Joseph E. Gonzalez, Hao Zhang, and Ion Stoica. Efficient memory management for large language model serving with PagedAttention. In Proceedings of the 29th Symposium on Operating Systems Principles , pp. 611–626, 2023. Aristotelis Lazaridis, Dylan Bates, Aman Sharma, Brian King, Vincent Lu, and Jack FitzGerald. EDGE-OPD: Internalizing privileged context with evidence guided on-policy distillation. arXiv preprint arXiv:2605.23493 , 2026. Gengsheng Li, Tianyu Yang, Junfeng Fang, Mingyang Song, Mao Zheng, Haiyun Guo, Dan Zhang, Jinqiao Wang, and Tat-Seng Chua. Unifying group-relative and self-distillation policy optimization via sample routing. arXiv preprint arXiv:2604.02288 , 2026. Hunter Lightman, Vineet Kosaraju, Yuri Burda, Harrison Edwards, Bowen Baker, Teddy Lee, Jan Leike, John Schulman, Ilya Sutskever, and Karl Cobbe. Let’s verify step by step. In International Conference on Learning Representations , volume 2024, pp. 39578–39601, 2024. Jianhua Lin. Divergence measures based on the Shannon entropy. IEEE Transactions on Information Theory , 37(1):145–151, 1991. doi: 10.1109/18.61115. Ilya Loshchilov and Frank Hutter. Decoupled weight decay regularization. International Conference on Learning Representations , 2019. doi: 10.48550/arXiv.1711.05101. Meta. Llama-3.2-1B-Instruct model card. Hugging Face, 2024. URL https://huggingface. co/meta-llama/Llama-3.2-1B-Instruct . Released September 25, 2024. Accessed September 5, 2026. Leyi Pan, Shuchang Tao, Yunpeng Zhai, Lingzhe Zhang, Zhaoyang Liu, Bolin Ding, Aiwei Liu, and Lijie Wen. RLCSD: Reinforcement learning with contrastive on-policy self-distillation. arXiv preprint arXiv:2606.11709 , 2026. John Schulman, Filip Wolski, Prafulla Dhariwal, Alec Radford, and Oleg Klimov. Proximal policy optimization algorithms. arXiv preprint arXiv:1707.06347 , 2017. doi: 10.48550/arXiv.1707.06347. Amrith Setlur, Chirag Nagpal, Adam Fisch, Xinyang Geng, Jacob Eisenstein, Rishabh Agarwal, Alekh Agarwal, Jonathan Berant, and Aviral Kumar. Rewarding progress: Scaling automated process verifiers for llm reasoning. In International Conference on Learning Representations , volume 2025, pp. 60808–60838, 2025. Zhihong Shao, Peiyi Wang, Qihao Zhu, Runxin Xu, Junxiao Song, Xiao Bi, Haowei Zhang, Mingchuan Zhang, Y. K. Li, Yang Wu, et al. DeepSeekMath: Pushing the limits of mathematical reasoning in open language models. arXiv preprint arXiv:2402.03300 , 2024. Guangming Sheng, Chi Zhang, Zilingfeng Ye, Xibin Wu, Wang Zhang, Ru Zhang, Yanghua Peng, Haibin Lin, and Chuan Wu. HybridFlow: A flexible and efficient RLHF framework. In Proceedings of the Twentieth European Conference on Computer Systems , 2025. Qiaoyu Tang, Ziliang Deng, Hongyu Lin, Xianpei Han, Qiao Liang, Boxi Cao, and Le Sun. ToolAlpaca: Generalized tool learning for language models with 3000 simulated cases. arXiv preprint arXiv:2306.05301 , 2023. Peiyi Wang, Lei Li, Zhihong Shao, Runxin Xu, Damai Dai, Yifei Li, Deli Chen, Yu Wu, and Zhifang Sui. Math-shepherd: Verify and reinforce llms step-by-step without human annotations. In 
+
+Proceedings of the 62nd Annual Meeting of the Association for Computational Linguistics (Volume 1: Long Papers) , pp. 9426–9439, 2024. 14 Jianan Xie, Xin Sun, Zhongqi Chen, Xing Zheng, Shu Wu, Bowen Song, and Liang Wang. EviSD: Evidence-conditioned self-distillation for search-augmented agents. arXiv preprint arXiv:2608.01359 , 2026. An Yang, Anfeng Li, Baosong Yang, Beichen Zhang, Binyuan Hui, Bo Zheng, Bowen Yu, Chang Gao, Chengen Huang, Chenxu Lv, et al. Qwen3 technical report. arXiv preprint arXiv:2505.09388 ,2025. Yi Yang, Cong Qin, Xiaodan Liu, Chishui Chen, Qing Dong, Yan Zhang, Cao Liu, Zhao Yang, Lu Pan, Jiaye Lin, and Yi Feng. Agentic reinforcement learning with observation-calibrated self-distillation. 
+
+arXiv preprint arXiv:2608.04788 , 2026. Qiying Yu, Zheng Zhang, Ruofei Zhu, Yufeng Yuan, Xiaochen Zuo, Yu Yue, Tiantian Fan, Gaohong Liu, Lingjun Liu, Haibin Lin, et al. DAPO: An open-source LLM reinforcement learning system at scale. arXiv preprint arXiv:2503.14476 , 2025. Siyan Zhao, Zhihui Xie, Mengchen Liu, Jing Huang, Guan Pang, Feiyu Chen, and Aditya Grover. Self-distilled reasoner: On-policy self-distillation for large language models. arXiv preprint arXiv:2601.18734 , 2026a. Ziqi Zhao, Xinyu Ma, Liu Yang, Yujie Feng, Daiting Shi, Jingzhou He, Xin Xin, Zhaochun Ren, and Xiao-Ming Wu. ROSD: Reflective on-policy self-distillation for language model reasoning across domains. arXiv preprint arXiv:2605.28014 , 2026b. 15 Appendix Contents 
+
+A Notation . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 17 
+
+B Preliminaries . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 17 B.1 Autoregressive Policy . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 18 B.2 RLVR and Group-Relative Policy Optimization . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 18 B.3 Feedback-Conditioned Teacher Replay . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 18 B.4 Divergence and Local Information Geometry . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 19 
+
+C Theoretical Analysis . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 19 C.1 Teacher Paths . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 20 C.2 Exact Forward-KL Decomposition . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 20 C.3 Reverse-KL Counterpart . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 21 C.4 Fixed, Contrastive, and Fisher Evidence Contrast . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 21 C.5 Ideal Token-Wise Controller . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 23 C.6 Benefit and Local-KL Cost Proxies . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 24 C.7 Surrogate Acceptance Optimization and Properties . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 24 C.8 Multiplicative Advantage Modulation . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 25 C.9 Complete Objective and Exact Logit Gradients . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 25 
+
+D Additional Results . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 26 D.1 Joint Loss Weighting and Advantage Modulation . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 26 D.2 Trajectory-Level Correction Scope . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 27 D.3 Token-Level FEC and ZPD Weight Analysis . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 27 D.4 Hyperparameter Sensitivity . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 29 D.5 Probability Mass Retention under Top-K Truncation . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 29 
+
+E Diagnostic Metrics . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 31 E.1 ZPD Effective Weight Coverage . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 31 E.2 Mean Signed Benefit and Fisher Cost . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 31 E.3 FEC Residual Nuisance Fisher Covariance . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 32 
+
+F Experimental Details . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 32 F.1 Datasets and Data Processing . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 32 F.2 Models, Baselines, and Runtime . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 32 F.3 Shared Training Setup . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 33 F.4 Method-Specific Hyperparameters . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 33 F.5 Prompt Templates. . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .35 
+
+G Computational Analysis . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 36 G.1 Per-Step Cost . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 36 G.2 Compute-Matched Performance. . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .37 
+
+H Case Study . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 38 16 A Notation 
+
+Table 5 aligns the notation in Section 3, Algorithm 1, and the derivations. Symbols are grouped by their operational role. Algebraic dummy variables are defined locally. Table 5: Notation used throughout the method and appendices. 
+
+Symbol Definition 
+
+Data, policies, and rollout quantities 
+
+𝑥 𝑖 , 𝑦 𝑖 , 𝑦 𝑖,<𝑡 , 𝑡 , 𝑣, V Prompt, sampled response, response prefix, token position, vocabulary item, and vocabulary. 
+
+G ( 𝑖 ) Rollout group containing responses for the same prompt as 𝑖 .
+
+𝑅 𝑖 , b𝐴 𝑖 Scalar outcome reward and group-relative sequence advantage. 
+
+𝜃 , 𝜃 old , ¯𝜃 Current Actor, frozen behavior Actor, and exponential-moving-average Teacher parameters. 
+
+𝑝 𝑖,𝑡 , 𝑝 old  
+
+> 𝑖,𝑡
+
+, 𝑧 𝑖,𝑡 Current/behavior token distributions and current Actor logits at prefix 𝑦 𝑖,<𝑡 .
+
+𝜌 𝑖,𝑡 ( 𝜃 ) Token-level importance ratio in GRPO (Shao et al., 2024). 
+
+Teacher branches and evidence paths 
+
+𝑞 (𝑐 ) 
+
+> 𝑖,𝑡
+
+, 𝑐 Frozen Teacher distribution and its replay/context condition. 
+
+𝑞 ref  
+
+> 𝑖,𝑡
+
+Evidence-free reference Teacher used for policy restoration. 
+
+𝑞 0 
+
+> 𝑖,𝑡
+
+, 𝑞 𝑒 𝑖,𝑡 Teacher distributions without and with task evidence. 
+
+𝑞 + 
+
+> 𝑖,𝑡
+
+, 𝑞 −,𝑘 𝑖,𝑡 , 𝑞 − 
+
+> 𝑖,𝑡
+
+Correct-evidence Teacher, 𝑘 -th incorrect-evidence Teacher, and arithmetic average of incorrect-evidence Teachers. 
+
+𝑞 𝑏,𝑖,𝑡 , 𝑞 𝑒,𝑖,𝑡 Base and target endpoints of a selected evidence comparison. 
+
+𝑞 FKL  
+
+> 𝑤,𝑡
+
+, 𝑞 RKL  
+
+> 𝑤,𝑡
+
+, 𝑍 𝑡 (𝑤 ) Arithmetic/geometric Teacher path and its RKL partition function. 
+
+Δ𝑖,𝑡 , 𝑟 𝑖,𝑡 Probability displacement 𝑞 𝑒,𝑖,𝑡 − 𝑞 𝑏,𝑖,𝑡 and log-density contrast log 𝑞 𝑒,𝑖,𝑡 − log 𝑞 𝑏,𝑖,𝑡 .
+
+𝐹 ( 𝑝 𝑖,𝑡 ), 𝐺 𝑖,𝑡 Categorical Fisher matrix diag ( 𝑝 𝑖,𝑡 ) − 𝑝 𝑖,𝑡 𝑝 ⊤ 
+
+> 𝑖,𝑡
+
+and logit Jacobian 𝜕𝑧 𝑖,𝑡 /𝜕𝜃 .
+
+𝑢 𝑖,𝑡 Evidence logit direction: Δ𝑖,𝑡 for FKL and 𝐹 ( 𝑝 𝑖,𝑡 )𝑟 𝑖,𝑡 for RKL. 
+
+Direction constructions and FEC 
+
+Δtask  
+
+> 𝑡
+
+, Δnuis  
+
+> 𝑡
+
+, ΔFEC  
+
+> 𝑡
+
+Zero-sum FKL task, nuisance, and residual directions. The task direction equals ΔCTR  
+
+> 𝑡
+
+.
+
+𝑟 task  
+
+> 𝑡
+
+, 𝑟 nuis  
+
+> 𝑡
+
+, 𝑟 FEC  
+
+> 𝑡
+
+RKL task, nuisance, and Fisher-residual log-density contrasts. 
+
+𝑢 task  
+
+> 𝑡
+
+, 𝑢 nuis  
+
+> 𝑡
+
+, 𝑢 FEC  
+
+> 𝑡
+
+Fisher-mapped task, nuisance, and residual logit directions. 
+
+𝑞 pres ,RKL  
+
+> 𝑡
+
+, 𝛼 FKL  
+
+> 𝑡
+
+, 𝛼 RKL  
+
+> 𝑡
+
+RKL evidence-presence midpoint and geometry-specific FEC coefficients. The main text writes 𝛼 FEC for the FKL coefficient. 
+
+𝜖 proj Ridge used in the Fisher projection denominator. 
+
+Masks, objectives, and normalization 
+
+𝑎 𝑖,𝑡 , 𝑚 𝑖,𝑡 Binary valid-response-token and admissible evidence masks, with 𝑚 𝑖,𝑡 ≤ 𝑎 𝑖,𝑡 .
+
+𝑁 , 𝑍 evi Response-token count and masked evidence-term normalizer. 
+
+LGRPO , Lref , Levi , LVERPO Outcome, reference, evidence, and complete losses. The main text writes LOPSD for Levi and 
+
+Ltotal for LVERPO .
+
+𝜒 OPSD , 𝜒 adv Binary switches for signed evidence correction and advantage modulation. 
+
+𝜆 ref , 𝜆 evi Coefficients for reference restoration and evidence correction. FKL , RKL , FEC Forward-KL geometry, reverse-KL geometry, and Fisher Evidence Contrast. 
+
+ZPD controller and derivation quantities 
+
+𝑑 𝑖,𝑡 , 𝜂, 𝐽 RL Parameter-space evidence direction, local step size, and RL objective used by the ideal controller. 
+
+𝜃 base Hypothetical Actor state after the outcome and reference updates, used only in the local controller derivation. 
+
+𝐵 𝑖,𝑡 , 𝐶 𝑖,𝑡 , 𝑤 ideal  
+
+> 𝑖,𝑡
+
+Directional benefit, curvature cost, and ideal token-wise acceptance. 
+
+ℎ𝑖,𝑡 , 𝑐 𝑖,𝑡 , 𝑤 𝑖,𝑡 Alignment proxy, local-KL movement proxy, and stopped acceptance weight. The main text also denotes this weight by 𝑤 ∗ 
+
+> 𝑖,𝑡
+
+.
+
+𝛼 cost , 𝜖 cost Fisher-cost coefficient and positive denominator floor used by the ZPD controller. 
+
+## B Preliminaries 
+
+To specify the quantities used by Algorithm 1, this appendix defines rollout normalization, the outcome objective, frozen Teacher replay, and local KL geometry. These conventions support the loss decompositions and controller approximations in Appendix C. 17 B.1 Autoregressive Policy To compare Actor and Teacher predictions at the same positions, we index both distributions by the sampled response prefix. For each prompt, the frozen behavior Actor 𝜋 𝜃 old samples a group of responses. Index 𝑖 ranges over responses, and G( 𝑖 ) denotes the responses generated for the same prompt as response 𝑖 . The current Actor factorizes as 
+
+𝜋 𝜃 (𝑦 𝑖 | 𝑥 𝑖 ) =
+
+> 𝑇 𝑖
+
+Ö
+
+> 𝑡 =1
+
+𝑝 𝑖,𝑡 (𝑦 𝑖,𝑡 ), 𝑝 𝑖,𝑡 = 𝜋 𝜃 (· | 𝑥 𝑖 , 𝑦 𝑖,<𝑡 ). (B.1) Each factor scores one observed token rather than a new Teacher completion. When padded tensors are used, 𝑎 𝑖,𝑡 ∈ { 0, 1} is the valid-response-token mask. Analytic sums over 𝑡 ≤ 𝑇 𝑖 are equivalently restricted to 𝑎 𝑖,𝑡 = 1. The binary evidence mask satisfies 𝑚 𝑖,𝑡 ≤ 𝑎 𝑖,𝑡 , and the normalizers are 
+
+𝑁 =∑︁ 
+
+> 𝑖,𝑡
+
+𝑎 𝑖,𝑡 =∑︁ 
+
+> 𝑖
+
+𝑇 𝑖 , 𝑍 evi = max 1,∑︁ 
+
+> 𝑖,𝑡
+
+𝑎 𝑖,𝑡 𝑚 𝑖,𝑡 
+
+!
+
+. (B.2) We assume a batch contains at least one valid response token, so 𝑁 > 0. The reference and outcome losses average over these tokens. The evidence loss averages over eligible tokens without renormalizing by acceptance weight. If none are eligible, its numerator vanishes and the floor keeps its normalizer defined. To measure reward alignment, we use the unclipped local GRPO (Shao et al., 2024) score direction. For Actor logits 𝑧 𝑖,𝑡 and sampled-token one-hot vector 𝑒 𝑦 𝑖,𝑡 , this direction is 
+
+𝑔 RL  
+
+> 𝑖,𝑡
+
+:= b𝐴 𝑖 ∇𝑧 𝑖,𝑡 log 𝑝 𝑖,𝑡 (𝑦 𝑖,𝑡 ) = b𝐴 𝑖 (𝑒 𝑦 𝑖,𝑡 − 𝑝 𝑖,𝑡 ). (B.3) This vector converts the sequence advantage into a token-local comparison direction for ZPD. It is not the gradient of the full clipped training loss, which also depends on importance ratios and clipping. B.2 RLVR and Group-Relative Policy Optimization To obtain the outcome signal used in Section 3.1, we evaluate each sampled response with a scalar verifier reward 𝑅 𝑖 . Our GRPO (Shao et al., 2024) variant centers this reward within its prompt group without dividing by the within-group standard deviation: 
+
+b𝐴 𝑖 = 𝑅 𝑖 − 1
+
+|G( 𝑖 )| ∑︁ 𝑗 ∈ G ( 𝑖 )
+
+𝑅 𝑗 . (B.4) The advantage measures performance relative to responses to the same prompt and is broadcast across the response tokens. A group with identical rewards has zero advantage for every response. To account for the difference between the current and behavior policies, define the sampled-token importance ratio as 
+
+𝜌 𝑖,𝑡 (𝜃 ) = 𝑝 𝑖,𝑡 (𝑦 𝑖,𝑡 )
+
+𝑝 old  
+
+> 𝑖,𝑡
+
+(𝑦 𝑖,𝑡 )
+
+The denominator remains fixed during the Actor update. With asymmetric clipping radii 𝜖 low , 𝜖 high > 0, the outcome loss is 
+
+LGRPO = − 1
+
+𝑁 ∑︁ 𝑖,𝑡 
+
+𝑎 𝑖,𝑡 min 
+
+n
+
+𝜌 𝑖,𝑡 (𝜃 ) b𝐴 𝑖 , clip  𝜌 𝑖,𝑡 (𝜃 ), 1 − 𝜖 low , 1 + 𝜖 high 
+
+ b𝐴 𝑖 
+
+o
+
+. (B.5) The minimum limits the incentive to move a sampled-token ratio farther in the advantage-favored direction after crossing its clipping threshold. The valid-token mask excludes padding, and 𝑁 fixes the averaging scale. Section 3.5 changes the token advantage in this loss while retaining the same ratio and clipping rule. B.3 Feedback-Conditioned Teacher Replay To construct evidence comparisons without changing the sampled trajectory, we replay its prefixes under different Teacher contexts. SDPO (H¨ ubotter et al., 2026) and SRPO (Li et al., 2026) also 18 use feedback-conditioned replay for dense supervision. VERPO represents each context condition 𝑐 
+
+through the stopped replay operator 
+
+𝑞 (𝑐 ) 
+
+> 𝑖,𝑡
+
+= sg 𝜋 ¯𝜃 
+
+ · | reprompt (𝑥 𝑖 , 𝑐 ), 𝑦 𝑖,<𝑡 
+
+ . (B.6) The reprompt changes the Teacher’s evidence context, while the Actor prefix 𝑦 𝑖,<𝑡 stays fixed. Teacher forcing therefore scores the original trajectory without generating a replacement completion. The stop-gradient operator prevents this supervision branch from receiving Actor-loss gradients. The Teacher parameters ¯ 𝜃 are an exponential-moving-average copy of the Actor across optimizer steps, ¯𝜃 ← 𝛾 ¯𝜃 + ( 1 − 𝛾 )𝜃, 0 < 𝛾 < 1, (B.7) Here 𝛾 retains the previous Teacher parameters and 1 − 𝛾 weights the newly updated Actor. The Teacher changes between optimizer steps but remains frozen within each Actor update. Its parameters ¯𝜃 are distinct from the hypothetical Actor state 𝜃 base used only in the controller derivation. B.4 Divergence and Local Information Geometry To distinguish the two loss geometries, we fix the argument order of the KL divergence (Kullback & Leibler, 1951). For positive, normalized distributions over the vocabulary, our conventions are KL (𝑞 ∥ 𝑝 ) =∑︁ 
+
+> 𝑣 ∈ V
+
+𝑞 (𝑣 ) log 𝑞 (𝑣 )
+
+𝑝 (𝑣 ) ,𝐷 FKL (𝑞, 𝑝 ) = KL (𝑞 ∥ 𝑝 ), 𝐷 RKL ( 𝑝, 𝑞 ) = KL ( 𝑝 ∥𝑞 ).
+
+(B.8) FKL averages the log-density ratio under the Teacher, whereas RKL averages it under the Actor. We require positive support wherever these logarithms are evaluated. Finite-logit softmax distribu-tions satisfy this assumption in exact arithmetic. The finite-support implementation is a separate approximation described in Appendix F.4. Let 𝑧 𝑖,𝑡 ∈ R| V | be the Actor logits and 𝑝 𝑖,𝑡 = softmax (𝑧 𝑖,𝑡 ). For vocabulary items 𝑢, 𝑣 ∈ V , the softmax score identity is 
+
+𝜕 log 𝑝 𝑖,𝑡 (𝑢 )
+
+𝜕𝑧 𝑖,𝑡 (𝑣 ) = 1[𝑢 = 𝑣 ] − 𝑝 𝑖,𝑡 (𝑣 ). (B.9) The Jacobian of the probabilities 𝑝 𝑖,𝑡 with respect to the logits, not the Jacobian of their logarithms, gives the categorical Fisher matrix. For an arbitrary vocabulary vector 𝑏 ,
+
+𝐹 ( 𝑝 𝑖,𝑡 ) = diag ( 𝑝 𝑖,𝑡 )− 𝑝 𝑖,𝑡 𝑝 ⊤ 
+
+> 𝑖,𝑡
+
+, 𝐹 ( 𝑝 𝑖,𝑡 )1 = 0, 𝑏 ⊤ 𝐹 ( 𝑝 𝑖,𝑡 )𝑏 = Var 𝑉 ∼ 𝑝 𝑖,𝑡 [𝑏 (𝑉 )] ≥ 0. (B.10) Thus constant shifts of a log-density contrast do not change its induced logit direction. A small logit displacement 𝑧 𝑖,𝑡 ↦ → 𝑧 𝑖,𝑡 + 𝜖 𝑏 induces the local policy movement KL  𝑝 𝑖,𝑡 ∥ softmax (𝑧 𝑖,𝑡 + 𝜖 𝑏 ) = 12 𝜖 2𝑏 ⊤ 𝐹 ( 𝑝 𝑖,𝑡 )𝑏 + 𝑂 (𝜖 3). (B.11) For fixed finite logits and direction 𝑏 , the quadratic term measures movement of the Actor distribution to second order as 𝜖 tends to zero. It supplies the controller’s nonnegative movement proxy, not a guarantee of reward improvement for a finite optimizer step. 
+
+## C Theoretical Analysis 
+
+This appendix provides the complete derivations behind the signed evidence directions and token-wise controller in Section 3, using the RLVR, Teacher-replay, and local-geometric conventions collected in Appendix B. We first establish exact loss identities, then distinguish the local approximations and chosen surrogate used to construct the controller. Teacher distributions, evidence masks, acceptance weights, and constructed FKL directions or RKL contrasts are stopped during Actor differentiation. This includes the Actor-dependent FEC projection coefficients. 19 C.1 Teacher Paths To vary evidence strength while preserving a distribution, we connect two Teacher endpoints at the same rollout prefix 𝑦 <𝑡 . Only the evidence condition changes. We assume normalized distributions on a finite vocabulary and positive Actor probability on the Teacher support. For FKL, normalized endpoints imply 1⊤Δ𝑡 = 0 for Δ𝑡 = 𝑞 𝑒,𝑡 − 𝑞 𝑏,𝑡 . The arithmetic path is 
+
+𝑞 FKL  
+
+> 𝑤,𝑡
+
+= (1 − 𝑤 )𝑞 𝑏,𝑡 + 𝑤𝑞 𝑒,𝑡 = 𝑞 𝑏,𝑡 + 𝑤 Δ𝑡 , 0 ≤ 𝑤 ≤ 1. (C.1) The weight interpolates from the base endpoint to the enriched endpoint. Convex mixing preserves normalization and nonnegativity for 0 ≤ 𝑤 ≤ 1, while Δ𝑡 records a signed probability displacement. For RKL, assume positive support for both endpoints and define 
+
+𝑟 𝑡 (𝑣 ) = log 𝑞 𝑒,𝑡 (𝑣 )
+
+𝑞 𝑏,𝑡 (𝑣 ) . (C.2) This contrast measures relative density rather than an additive probability change. To interpolate in these log-density coordinates, define 
+
+𝑞 RKL  
+
+> 𝑤,𝑡
+
+(𝑣 ) = 𝑞 𝑏,𝑡 (𝑣 )1−𝑤 𝑞 𝑒,𝑡 (𝑣 )𝑤 
+
+𝑍 𝑡 (𝑤 ) = 𝑞 𝑏,𝑡 (𝑣 )𝑒 𝑤𝑟 𝑡 (𝑣 )
+
+𝑍 𝑡 (𝑤 ) , 𝑍 𝑡 (𝑤 ) =∑︁ 
+
+> 𝑢 ∈ V
+
+𝑞 𝑏,𝑡 (𝑢 )𝑒 𝑤𝑟 𝑡 (𝑢 ) . (C.3) The partition function 𝑍 𝑡 (𝑤 ) normalizes the exponentially tilted base. Both endpoints are recovered at 𝑤 = 0 and 𝑤 = 1. Unlike the arithmetic path, the intermediate distributions mix log densities before normalization. C.2 Exact Forward-KL Decomposition To recover the separation in Equation (2), we expand the FKL objective with the Teacher endpoints and 𝑤 held fixed. We suppress the token index and assume positive Actor probability wherever the Teacher assigns mass. The loss for this single prefix is 
+
+LFKL (𝜃 ; 𝑤 ) = KL (𝑞 FKL  
+
+> 𝑤
+
+∥ 𝑝 𝜃 ). (C.4) Only its cross-entropy term depends on the Actor. Substituting 𝑞 FKL  
+
+> 𝑤
+
+= 𝑞 𝑏 + 𝑤 Δ into that term gives 
+
+LFKL (𝜃 ; 𝑤 ) =∑︁ 
+
+> 𝑣 ∈ V
+
+𝑞 FKL  
+
+> 𝑤
+
+(𝑣 ) log 𝑞 FKL  
+
+> 𝑤
+
+(𝑣 ) − ∑︁ 
+
+> 𝑣 ∈ V
+
+𝑞 FKL  
+
+> 𝑤
+
+(𝑣 ) log 𝑝 𝜃 (𝑣 )
+
+= KL (𝑞 𝑏 ∥ 𝑝 𝜃 ) − 𝑤 ∑︁ 
+
+> 𝑣 ∈ V
+
+Δ(𝑣 ) log 𝑝 𝜃 (𝑣 ) + 𝐶 (𝑞 FKL  
+
+> 𝑤
+
+, 𝑞 𝑏 ),
+
+where 
+
+𝐶 (𝑞 FKL  
+
+> 𝑤
+
+, 𝑞 𝑏 ) =∑︁ 
+
+> 𝑣
+
+𝑞 FKL  
+
+> 𝑤
+
+(𝑣 ) log 𝑞 FKL  
+
+> 𝑤
+
+(𝑣 ) − ∑︁ 
+
+> 𝑣
+
+𝑞 𝑏 (𝑣 ) log 𝑞 𝑏 (𝑣 ).
+
+Thus the exact decomposition is KL (𝑞 FKL  
+
+> 𝑤
+
+∥ 𝑝 ) = KL (𝑞 𝑏 ∥ 𝑝 ) − 𝑤 ∑︁ 
+
+> 𝑣 ∈ V
+
+Δ(𝑣 ) log 𝑝 (𝑣 ) + 𝐶 (𝑞 FKL  
+
+> 𝑤
+
+, 𝑞 𝑏 ). (C.5) The first term restores the base distribution, and the second isolates the signed evidence correction. The remainder 𝐶 contains only Teacher entropy terms and has zero Actor gradient under the stated stop-gradient convention. This is an exact identity, without a small-step approximation. To verify the correction sign, differentiate with respect to the logits of 𝑝 = softmax (𝑧 ) using 
+
+𝜕 log 𝑝 (𝑢 )
+
+𝜕𝑧 (𝑣 ) = 1[𝑢 = 𝑣 ] − 𝑝 (𝑣 ).
+
+Therefore 
+
+𝜕 LFKL 
+
+𝜕𝑧 (𝑣 ) = −∑︁ 
+
+> 𝑢 ∈ V
+
+𝑞 FKL  
+
+> 𝑤
+
+(𝑢 )  1[𝑢 = 𝑣 ] − 𝑝 (𝑣 )
+
+= 𝑝 (𝑣 ) − 𝑞 FKL  
+
+> 𝑤
+
+(𝑣 ),
+
+20 and the exact logit descent direction decomposes as 
+
+−∇ 𝑧 LFKL = 𝑞 𝑏 − 𝑝 
+
+| {z }
+
+> base restoration
+
++ 𝑤 Δ
+
+|{z} 
+
+> evidence correction
+
+. (C.6) The base contribution points from the Actor toward 𝑞 𝑏 , while 𝑤 Δ adds the accepted Teacher displacement. Retaining only this second channel gives the signed evidence loss derived from OPSD (Zhao et al., 2026a): 
+
+LFKL evi (𝑤 ) = −𝑤 ∑︁ 
+
+> 𝑣 ∈ V
+
+Δ(𝑣 ) log 𝑝 (𝑣 ), −∇ 𝑧 LFKL evi = 𝑤 Δ. (C.7) The zero-sum property of Δ cancels the softmax normalization term in the gradient. A separate reference loss can therefore use 𝑞 ref even when the evidence comparison starts at a different base 𝑞 𝑏 .C.3 Reverse-KL Counterpart To obtain the counterpart of the FKL separation, we substitute the geometric Teacher path into RKL. Assume positive Actor and Teacher distributions on the vocabulary, with 𝑟 and 𝑤 stopped. The logarithm of the normalized path separates into a base density, a weighted contrast, and a scalar normalizer: 
+
+LRKL (𝜃 ; 𝑤 ) = KL ( 𝑝 𝜃 ∥𝑞 RKL  
+
+> 𝑤
+
+)
+
+=∑︁ 
+
+> 𝑣 ∈ V
+
+𝑝 (𝑣 ) [ log 𝑝 (𝑣 ) − log 𝑞 𝑏 (𝑣 ) − 𝑤𝑟 (𝑣 ) + log 𝑍 (𝑤 )] 
+
+= KL ( 𝑝 ∥𝑞 𝑏 ) − 𝑤 E𝑣 ∼ 𝑝 [𝑟 (𝑣 )] + log 𝑍 (𝑤 ).
+
+Hence KL ( 𝑝 ∥𝑞 RKL  
+
+> 𝑤
+
+) = KL ( 𝑝 ∥𝑞 𝑏 ) − 𝑤 E𝑣 ∼ 𝑝 [𝑟 (𝑣 )] + log 𝑍 (𝑤 ). (C.8) The base term retains the original Teacher anchor. The contrast term changes the Actor’s expected log-density preference, and log 𝑍 (𝑤 ) completes the loss identity without contributing an Actor gradient. To identify the resulting logit direction, apply the probability Jacobian 𝐹 ( 𝑝 ) to the derivative of RKL. For a fixed positive Teacher 𝑞 ,
+
+∇𝑧 KL ( 𝑝 ∥𝑞 ) = 𝐹 ( 𝑝 )  log 𝑝 − log 𝑞 + 1
+
+= 𝐹 ( 𝑝 )( log 𝑝 − log 𝑞 ),
+
+because 𝐹 ( 𝑝 )1 = 0. Substituting log 𝑞 RKL  
+
+> 𝑤
+
+= log 𝑞 𝑏 + 𝑤𝑟 − log 𝑍 (𝑤 ) yields 
+
+−∇ 𝑧 LRKL = 𝐹 ( 𝑝 )( log 𝑞 𝑏 − log 𝑝 )
+
+| {z }
+
+> base restoration
+
++ 𝑤𝜉 
+
+|{z} 
+
+> evidence correction
+
+, 𝜉 = 𝐹 ( 𝑝 )𝑟. (C.9) Here 𝜉 denotes the RKL evidence direction, written as 𝑢 in the unified controller. Unlike the FKL displacement, it depends on the Actor through 𝐹 ( 𝑝 ). Writing ¯ 𝑟 = E𝑣 ∼ 𝑝 [𝑟 (𝑣 )] exposes this dependence: 
+
+𝜉 (𝑣 ) = 𝑝 (𝑣 )  𝑟 (𝑣 ) − ¯𝑟 , 1⊤𝜉 = 0. (C.10) The Fisher map centers the log contrast under the Actor and weights each coordinate by its current probability. Thus 𝜉 sums to zero but is not the probability displacement 𝑞 𝑒 − 𝑞 𝑏 . Its signed loss is 
+
+LRKL evi (𝑤 ) = log 𝑍 (𝑤 ) − 𝑤 E𝑣 ∼ 𝑝 [𝑟 (𝑣 )] , −∇ 𝑧 LRKL evi = 𝑤𝐹 ( 𝑝 )𝑟. (C.11) Differentiation acts through the expectation under 𝑝 , not through the stopped contrast. The resulting 
+
+𝐹 ( 𝑝 )𝑟 supplies the direction used by the RKL controller and the complete gradient in Appendix C.9. C.4 Fixed, Contrastive, and Fisher Evidence Contrast To instantiate the evidence channel in Section 3.4, we specify the endpoints and the FEC residual in both geometries. All branches replay the same prefix. The RKL constructions require positive Teacher support, and every projection is computed at the current Actor distribution before its coefficient is stopped. 21 Fixed evidence. The Fixed construction uses the evidence-conditioned replay of SDPO (H¨ ubotter et al., 2026) to define the endpoints 𝑞 𝑏 = 𝑞 0 and 𝑞 𝑒 = 𝑞 𝑒 :
+
+Δfix  
+
+> 𝑡
+
+= 𝑞 𝑒 𝑡 − 𝑞 0 
+
+> 𝑡
+
+, 𝑟 fix  
+
+> 𝑡
+
+= log 𝑞 𝑒 𝑡 − log 𝑞 0 
+
+> 𝑡
+
+, 𝑢 fix ,RKL  
+
+> 𝑡
+
+= 𝐹 ( 𝑝 𝑡 )𝑟 fix  
+
+> 𝑡
+
+. (C.12) Our experiments set 𝑞 𝑒 = 𝑞 +. This comparison includes both the change associated with correct evidence and the change associated with presenting evidence at all. The observed reward hacking for this tested direction is reported with Table 4, not implied by this identity. 
+
+Contrastive evidence. The endpoint comparison follows RLCSD (Pan et al., 2026). For 𝐾 ≥ 1incorrect-evidence Teachers, define 𝑞 − 
+
+> 𝑡
+
+= 𝐾 −1 Í𝐾 𝑘 =1 𝑞 −,𝑘 𝑡 . The construction uses 𝑞 𝑏 = 𝑞 − and 
+
+𝑞 𝑒 = 𝑞 +, so 
+
+ΔCTR  
+
+> 𝑡
+
+= 𝑞 + 
+
+> 𝑡
+
+− 𝑞 − 
+
+> 𝑡
+
+, 𝑟 CTR  
+
+> 𝑡
+
+= log 𝑞 + 
+
+> 𝑡
+
+− log 𝑞 − 
+
+> 𝑡
+
+, 𝑢 CTR ,RKL  
+
+> 𝑡
+
+= 𝐹 ( 𝑝 𝑡 )𝑟 CTR  
+
+> 𝑡
+
+. (C.13) The incorrect branches are averaged in probability space before taking a logarithm for RKL. Subtraction cancels additive shifts shared by the two endpoints, but it retains context effects that differ between them. 
+
+Forward-KL FEC. For normalized Teacher branches and a fixed Actor Fisher matrix, define the task contrast and evidence-presence proxy. The target claim concerns the residual Fisher inner product, without assuming that the proxy contains only task-irrelevant information. In probability coordinates, the directions are 
+
+Δtask  
+
+> 𝑡
+
+= 𝑞 + 
+
+> 𝑡
+
+− 𝑞 − 
+
+> 𝑡
+
+, Δnuis  
+
+> 𝑡
+
+= 12 (𝑞 + 
+
+> 𝑡
+
++ 𝑞 − 
+
+> 𝑡
+
+) − 𝑞 0 
+
+> 𝑡
+
+.
+
+Both vectors sum to zero. The task vector equals ΔCTR  
+
+> 𝑡
+
+in the main text, while the midpoint comparison measures evidence presence. For the Fisher inner product ⟨𝑎, 𝑏 ⟩𝐹 ( 𝑝 𝑡 ) = 𝑎 ⊤ 𝐹 ( 𝑝 𝑡 )𝑏 , the projection coefficient and residual are 
+
+𝛼 FKL  
+
+> 𝑡
+
+= ⟨Δtask  
+
+> 𝑡
+
+, Δnuis  
+
+> 𝑡
+
+⟩𝐹 ( 𝑝 𝑡 )
+
+⟨Δnuis  
+
+> 𝑡
+
+, Δnuis  
+
+> 𝑡
+
+⟩𝐹 ( 𝑝 𝑡 ) + 𝜖 proj 
+
+, ΔFEC  
+
+> 𝑡
+
+= Δ task  
+
+> 𝑡
+
+− 𝛼 FKL  
+
+> 𝑡
+
+Δnuis  
+
+> 𝑡
+
+. (C.14) The coefficient 𝛼 FKL  
+
+> 𝑡
+
+is the FKL coefficient denoted 𝛼 FEC in Section 3.4. It subtracts a component along the measured nuisance direction. To determine what regularization leaves behind, substitute this coefficient into the residual inner product: 
+
+ΔFEC  
+
+> 𝑡
+
+, Δnuis      
+
+> 𝑡 𝐹 (𝑝 𝑡 )
+
+= 𝜖 proj 
+
+⟨Δnuis  
+
+> 𝑡
+
+, Δnuis  
+
+> 𝑡
+
+⟩𝐹 ( 𝑝 𝑡 ) + 𝜖 proj 
+
+Δtask  
+
+> 𝑡
+
+, Δnuis      
+
+> 𝑡 𝐹 (𝑝 𝑡 )
+
+. (C.15) For 𝜖 proj > 0, the remaining inner product equals the original one times a factor in (0, 1]. Exact orthogonality follows in the unregularized case only when the denominator is nonzero. The residual still sums to zero, but adding it to a base distribution need not preserve nonnegativity. We therefore use the stopped residual directly in the signed loss: 
+
+LFKL FEC ,𝑡 = −𝑤 𝑡 ∑︁ 
+
+> 𝑣 ∈ V
+
+ΔFEC  
+
+> 𝑡
+
+(𝑣 ) log 𝑝 𝑡 (𝑣 ), −∇ 𝑧 𝑡 LFKL FEC ,𝑡 = 𝑤 𝑡 ΔFEC  
+
+> 𝑡
+
+. (C.16) The stated gradient requires stopping the entire residual, including its Actor-dependent coefficient. It recovers the direction in Equation (11) without claiming a valid arithmetic Teacher endpoint for FEC. 
+
+Reverse-KL FEC. To apply the same projection idea in RKL geometry, first measure evidence presence using positive Teacher branches and the normalized geometric midpoint 
+
+𝑞 pres ,RKL  
+
+> 𝑡
+
+(𝑣 ) =√︁ 𝑞 + 
+
+> 𝑡
+
+(𝑣 )𝑞 − 
+
+> 𝑡
+
+(𝑣 )
+
+Í𝑢 ∈ V √︁ 𝑞 + 
+
+> 𝑡
+
+(𝑢 )𝑞 − 
+
+> 𝑡
+
+(𝑢 )
+
+to measure evidence presence in log-density coordinates. Define 
+
+𝑟 task  
+
+> 𝑡
+
+= log 𝑞 + 
+
+> 𝑡
+
+− log 𝑞 − 
+
+> 𝑡
+
+, 𝑢 task  
+
+> 𝑡
+
+= 𝐹 ( 𝑝 𝑡 )𝑟 task  
+
+> 𝑡
+
+,𝑟 nuis  
+
+> 𝑡
+
+= log 𝑞 pres ,RKL  
+
+> 𝑡
+
+− log 𝑞 0 
+
+> 𝑡
+
+, 𝑢 nuis  
+
+> 𝑡
+
+= 𝐹 ( 𝑝 𝑡 )𝑟 nuis  
+
+> 𝑡
+
+.
+
+22 These log contrasts are mapped into logit directions before projection. The midpoint normalization does not change 𝑢 nuis  
+
+> 𝑡
+
+because 𝐹 ( 𝑝 𝑡 )1 = 0. Projecting in the same Fisher inner product gives 
+
+𝛼 RKL  
+
+> 𝑡
+
+= (𝑢 task  
+
+> 𝑡
+
+)⊤ 𝐹 ( 𝑝 𝑡 )𝑢 nuis 
+
+> 𝑡
+
+(𝑢 nuis  
+
+> 𝑡
+
+)⊤ 𝐹 ( 𝑝 𝑡 )𝑢 nuis  
+
+> 𝑡
+
++ 𝜖 proj 
+
+, 𝑟 FEC  
+
+> 𝑡
+
+= 𝑟 task  
+
+> 𝑡
+
+− 𝛼 RKL  
+
+> 𝑡
+
+𝑟 nuis  
+
+> 𝑡
+
+, 𝑢 FEC  
+
+> 𝑡
+
+= 𝐹 ( 𝑝 𝑡 )𝑟 FEC  
+
+> 𝑡
+
+. (C.17) Linearity of 𝐹 ( 𝑝 𝑡 ) gives 𝑢 FEC  
+
+> 𝑡
+
+= 𝑢 task  
+
+> 𝑡
+
+− 𝛼 RKL  
+
+> 𝑡
+
+𝑢 nuis  
+
+> 𝑡
+
+. Its residual Fisher inner product has the same ridge-dependent form as Equation (C.15), with 𝑢 replacing Δ. We stop the constructed contrast 𝑟 FEC  
+
+> 𝑡
+
+,including 𝛼 RKL  
+
+> 𝑡
+
+, before Actor differentiation. Using 𝑞 − 
+
+> 𝑡
+
+as the base then defines 
+
+𝑞 RKL ,FEC  
+
+> 𝑤,𝑡
+
+(𝑣 ) = 𝑞 − 
+
+> 𝑡
+
+(𝑣 )𝑒 𝑤 𝑡 𝑟 FEC  
+
+> 𝑡 (𝑣 )
+
+𝑍 FEC  
+
+> 𝑡
+
+(𝑤 𝑡 ) , 𝑍 FEC  
+
+> 𝑡
+
+(𝑤 ) =∑︁ 
+
+> 𝑢 ∈ V
+
+𝑞 − 
+
+> 𝑡
+
+(𝑢 )𝑒 𝑤𝑟 FEC   
+
+> 𝑡 (𝑢 )
+
+. (C.18) Exponential tilting preserves a positive normalized distribution for finite contrasts. Its endpoint at 
+
+𝑤 = 1 need not equal 𝑞 + 
+
+> 𝑡
+
+after projection. The corresponding signed correction is 
+
+LRKL FEC ,𝑡 = log 𝑍 FEC  
+
+> 𝑡
+
+(𝑤 𝑡 ) − 𝑤 𝑡 E𝑣 ∼ 𝑝 𝑡 [𝑟 FEC  
+
+> 𝑡
+
+(𝑣 )] , −∇ 𝑧 𝑡 LRKL FEC ,𝑡 = 𝑤 𝑡 𝑢 FEC  
+
+> 𝑡
+
+. (C.19) The Fisher map in this gradient comes from differentiating the Actor expectation. No gradient flows through the projection construction. For controller evaluation, the resulting direction and acceptance weight are treated as fixed inputs to the Actor update. C.5 Ideal Token-Wise Controller To connect acceptance to local reward improvement, we analyze one fixed evidence direction at a time. Let 𝐺 𝑖,𝑡 = 𝜕𝑧 𝑖,𝑡 /𝜕𝜃 and 𝑑 𝑖,𝑡 = 𝐺 ⊤ 
+
+> 𝑖,𝑡
+
+𝑢 𝑖,𝑡 be its parameter-space descent direction. The hypothetical Actor state 𝜃 base absorbs the outcome and reference updates for this local analysis. It differs from the EMA Teacher state ¯ 𝜃 and does not require separate optimizer steps. At a fixed local step size 𝜂 > 0, applying the correction with strength 𝑤 produces 
+
+𝜃 + (𝑤 ) = 𝜃 base + 𝜂𝑤𝑑 𝑖,𝑡 . (C.20) This defines a one-dimensional family of candidate Actor states rather than an additional training loop. The ideal weight selects the state with the largest RL objective: 
+
+𝑤 ideal  
+
+> 𝑖,𝑡
+
+= arg max   
+
+> 0≤𝑤 ≤1
+
+𝐽 RL (𝜃 base + 𝜂𝑤𝑑 𝑖,𝑡 ). (C.21) Evaluating this objective for each token is not the deployed controller. To expose its local benefit and cost, assume that 𝐽 RL has locally bounded third derivatives along the fixed direction. Taylor expansion for a sufficiently small step gives 
+
+𝐽 RL (𝜃 base + 𝜂𝑤𝑑 𝑖,𝑡 ) − 𝐽 RL (𝜃 base ) = 𝜂𝑤 ∇𝐽 RL (𝜃 base )⊤ 𝑑 𝑖,𝑡 
+
++ 12 𝜂 2𝑤 2 𝑑 ⊤ 
+
+> 𝑖,𝑡
+
+∇2 𝐽 RL (𝜃 base )𝑑 𝑖,𝑡 + 𝑂 (( 𝜂𝑤 )3).
+
+Define the directional benefit and curvature cost 
+
+𝐵 𝑖,𝑡 = ∇𝐽 RL (𝜃 base )⊤ 𝑑 𝑖,𝑡 , 𝐶 𝑖,𝑡 = −𝑑 ⊤ 
+
+> 𝑖,𝑡
+
+∇2 𝐽 RL (𝜃 base )𝑑 𝑖,𝑡 . (C.22) The sign of 𝐵 𝑖,𝑡 determines first-order improvement, while positive 𝐶 𝑖,𝑡 denotes negative reward curvature along the direction. Under this additional condition, the quadratic model is 𝜂𝑤𝐵 𝑖,𝑡 − 
+
+> 12
+
+𝜂 2𝑤 2𝐶 𝑖,𝑡 . Its constrained optimum is 
+
+𝑤 quad  
+
+> 𝑖,𝑡
+
+= clip 
+
+ [𝐵 𝑖,𝑡 ]+
+
+𝜂𝐶 𝑖,𝑡 
+
+, 0, 1
+
+
+
+. (C.23) This maximizes the truncated quadratic, not the original RL objective. When 𝐶 𝑖,𝑡 ≤ 0, the diminishing-return argument does not apply. The practical controller therefore replaces both quantities with computable proxies and uses a separately chosen bounded surrogate. 23 C.6 Benefit and Local-KL Cost Proxies To avoid computing the true reward gradient and Hessian, we construct the proxies in Equation (7). At sampled token 𝑦 𝑖,𝑡 , the unclipped local GRPO (Shao et al., 2024) score gives the estimator 
+
+∇𝜃 𝐽 𝑖,𝑡 ≈ 𝐺 ⊤ 
+
+> 𝑖,𝑡
+
+b𝐴 𝑖 (𝑒 𝑦 𝑖,𝑡 − 𝑝 𝑖,𝑡 ).
+
+This is the parameter-space pullback of the local logit direction in Equation (B.3). It supplies a comparison direction without replacing the clipped training objective. Substituting 𝑑 𝑖,𝑡 = 𝐺 ⊤ 
+
+> 𝑖,𝑡
+
+𝑢 𝑖,𝑡 
+
+into the exact directional benefit gives 
+
+𝐵 𝑖,𝑡 ≈ b𝐴 𝑖 (𝑒 𝑦 𝑖,𝑡 − 𝑝 𝑖,𝑡 )⊤𝐺 𝑖,𝑡 𝐺 ⊤ 
+
+> 𝑖,𝑡
+
+𝑢 𝑖,𝑡 
+
+≈ 𝜅 𝑖,𝑡 b𝐴 𝑖 (𝑒 𝑦 𝑖,𝑡 − 𝑝 𝑖,𝑡 )⊤𝑢 𝑖,𝑡 , 𝜅 𝑖,𝑡 > 0,
+
+where the second line uses the local isotropic approximation 𝐺 𝑖,𝑡 𝐺 ⊤ 
+
+> 𝑖,𝑡
+
+≈ 𝜅 𝑖,𝑡 𝐼 . Absorbing the unknown positive scale and rejecting negative alignment yields 
+
+ℎ𝑖,𝑡 =
+
+h b𝐴 𝑖 (𝑒 𝑦 𝑖,𝑡 − 𝑝 𝑖,𝑡 )⊤𝑢 𝑖,𝑡 
+
+i 
+
+> +
+
+. (C.24) The isotropic approximation discards anisotropy in the logit Jacobian and the score estimator discards interactions with other tokens. Consequently, ℎ𝑖,𝑡 measures local alignment rather than verified reward improvement. Its positive part rejects nonpositive alignment under this proxy. The reward Hessian is generally indefinite, so 𝐶 𝑖,𝑡 > 0 need not hold for the exact quadratic. Replace the negative Hessian along this update by a positive-semidefinite Fisher surrogate, using the local information geometry underlying natural-gradient methods (Amari, 1998): 
+
+−∇ 2 
+
+> 𝜃
+
+𝐽 RL (𝜃 base ) ≈ 𝛽 curv 𝐹 𝜃 , 𝐹 𝜃 = 𝐺 ⊤ 
+
+> 𝑖,𝑡
+
+𝐹 ( 𝑝 𝑖,𝑡 )𝐺 𝑖,𝑡 , 𝛽 curv > 0. (C.25) The positive scale 𝛽 curv belongs only to this curvature approximation and differs from the EMA decay 𝛾 . This replacement is a modeling choice, not an identity for the reward Hessian. Reusing the isotropic approximation gives 
+
+𝐶 𝑖,𝑡 ≈ 𝛽 curv 𝑑 ⊤ 
+
+> 𝑖,𝑡
+
+𝐹 𝜃 𝑑 𝑖,𝑡 
+
+= 𝛽 curv (𝐺 𝑖,𝑡 𝑑 𝑖,𝑡 )⊤ 𝐹 ( 𝑝 𝑖,𝑡 )( 𝐺 𝑖,𝑡 𝑑 𝑖,𝑡 )≈ 𝛽 curv 𝜅 2 
+
+> 𝑖,𝑡
+
+𝑢 ⊤ 
+
+> 𝑖,𝑡
+
+𝐹 ( 𝑝 𝑖,𝑡 )𝑢 𝑖,𝑡 .
+
+This quadratic form is the leading policy movement by Equation (B.11) with 𝑏 = 𝑢 𝑖,𝑡 . Define the Fisher movement term and absorb the unknown positive curvature scale into the active cost coefficient: 
+
+𝑐 𝑖,𝑡 = 𝑢 ⊤ 
+
+> 𝑖,𝑡
+
+𝐹 ( 𝑝 𝑖,𝑡 )𝑢 𝑖,𝑡 , 𝑢 ⊤ 
+
+> 𝑖,𝑡
+
+𝐹 ( 𝑝 𝑖,𝑡 )𝑢 𝑖,𝑡 = Var 𝑉 ∼ 𝑝 𝑖,𝑡 [𝑢 𝑖,𝑡 (𝑉 )] ≥ 0. (C.26) The variance identity establishes nonnegativity without assumptions on the reward Hessian. For a small logit step 𝛿𝑢 𝑖,𝑡 , the leading KL movement is 12 𝛿 2𝑐 𝑖,𝑡 . The coefficient 𝛼 cost controls this proxy’s influence in the deployed weight, without estimating the omitted curvature scale. C.7 Surrogate Acceptance Optimization and Properties To turn the two proxies into acceptance, we choose the surrogate in Equation (8). Suppress token indices and assume finite ℎ ≥ 0, 𝑐 ≥ 0, 𝛼 cost ≥ 0, and 𝜖 cost > 0. With Λ = 𝛼 cost 𝑐 + 𝜖 cost , define 
+
+𝑓 (𝑤 ) = ℎ log 𝑤 + Λ log (1 − 𝑤 ), 𝑤 ∈ ( 0, 1). (C.27) For positive benefit, the first term penalizes zero acceptance and the second penalizes full acceptance. This choice retains a benefit-versus-cost tradeoff but is not derived as an exact reward objective. For 
+
+ℎ > 0, 𝑓 ′′ (𝑤 ) = −ℎ/𝑤 2 − Λ/( 1 − 𝑤 )2 < 0, so 𝑓 is strictly concave. The first-order condition is 
+
+ℎ𝑤 − Λ
+
+1 − 𝑤 = 0,
+
+whose unique global maximizer is 
+
+𝑤 ★ = ℎℎ + Λ = ℎℎ + 𝛼 cost 𝑐 + 𝜖 cost 
+
+∈ [ 0, 1). (C.28) 24 For ℎ = 0, the function reduces to Λ log (1 − 𝑤 ) and has no maximizer in the open interval. Its supremum occurs as 𝑤 tends to zero, so we extend the solution continuously to 𝑤 ★ = 0. The deployed controller sets 𝑤 𝑖,𝑡 = sg [𝑤 ★𝑖,𝑡 ], using 𝑤 ∗ 
+
+> 𝑖,𝑡
+
+for the same stopped weight in the main text. These bounds require the default positive-part benefit. They do not apply to an ablation that inserts an unclamped signed benefit into the same fraction. For ℎ > 0, the acceptance odds provide another interpretation of this solution: 
+
+𝑤 
+
+1 − 𝑤 = ℎ𝛼 cost 𝑐 + 𝜖 cost 
+
+, logit (𝑤 ) = log ℎ − log (𝛼 cost 𝑐 + 𝜖 cost ). (C.29) The log-odds expression requires positive benefit, whereas the rational rule also covers the zero-benefit boundary. To verify monotonicity before stopping the weight, differentiate the rational expression: 
+
+𝜕𝑤 ★
+
+𝜕ℎ = Λ
+
+(ℎ + Λ)2 > 0, 𝜕𝑤 ★
+
+𝜕𝑐 = − 𝛼 cost ℎ
+
+(ℎ + Λ)2 ≤ 0, 𝜕𝑤 ★
+
+𝜕𝛼 cost 
+
+= − ℎ𝑐 
+
+(ℎ + Λ)2 ≤ 0.
+
+Cost strictly reduces acceptance when ℎ > 0 and 𝛼 cost > 0. At ℎ = 0, the controller rejects the direction regardless of cost. The positive floor keeps acceptance below one for finite inputs. PPO (Schulman et al., 2017) clips a policy probability ratio, whereas ZPD computes a stopped scale from evidence alignment and movement cost. Neither these monotonicity properties nor the local proxies guarantee a reward increase. Reference restoration remains ungated in both update paths. C.8 Multiplicative Advantage Modulation To verify Path 1 in Section 3.5, we insert acceptance into the outcome advantage instead of adding an evidence gradient. With the path enabled, define 
+
+e𝑤 𝑖,𝑡 = 𝑚 𝑖,𝑡 𝑤 𝑖,𝑡 , 𝑠 𝑖,𝑡 = 1 + 𝜆 adv sg  e𝑤 𝑖,𝑡 
+
+ , 𝜆 adv ≥ 0, (C.30) and define the token-level advantage override 
+
+b𝐴 ′ 
+
+> 𝑖,𝑡
+
+= 𝑠 𝑖,𝑡 b𝐴 𝑖 = b𝐴 𝑖 
+
+1 + 𝜆 adv sg  e𝑤 𝑖,𝑡 
+
+ . (C.31) Here b𝐴 𝑖 is the original group-relative sequence advantage, repeated over valid response tokens, while 
+
+𝑠 𝑖,𝑡 is token dependent. The stop-gradient prevents the current loss from differentiating through the controller to change this scale. The scale can still change when it is recomputed at a later Actor state. To check its interaction with clipping, write the token-level loss inherited from PPO (Schulman et al., 2017) using the same importance ratio and asymmetric radii as Equation (B.5): 
+
+ℓPPO  
+
+> 𝑖,𝑡
+
+( 𝐴 ) = − min  𝜌 𝑖,𝑡 (𝜃 ) 𝐴, clip (𝜌 𝑖,𝑡 (𝜃 ), 1 − 𝜖 low , 1 + 𝜖 high ) 𝐴  . (C.32) For the default nonnegative controller, 𝑠 𝑖,𝑡 > 0 is fixed during the update, so positive scaling factors out of both branches: 
+
+ℓPPO  
+
+> 𝑖,𝑡
+
+( b𝐴 ′ 
+
+> 𝑖,𝑡
+
+) = 𝑠 𝑖,𝑡 ℓPPO  
+
+> 𝑖,𝑡
+
+( b𝐴 𝑖 ), ∇𝜃 ℓPPO  
+
+> 𝑖,𝑡
+
+( b𝐴 ′ 
+
+> 𝑖,𝑡
+
+) = 𝑠 𝑖,𝑡 ∇𝜃 ℓPPO  
+
+> 𝑖,𝑡
+
+( b𝐴 𝑖 ). (C.33) Thus positive scaling preserves the advantage sign and the selected clipping branch, while scaling its gradient wherever the loss is differentiable. At a clipping boundary, the same relation holds for a consistently chosen subgradient. Ineligible tokens and zero acceptance both give 𝑠 𝑖,𝑡 = 1. The mask therefore limits modulation without changing the reference loss. C.9 Complete Objective and Exact Logit Gradients To assemble the training update, we combine the two channels with the normalizers in Equation (B.2). Assume 𝑁 > 0, binary 𝑚 𝑖,𝑡 ≤ 𝑎 𝑖,𝑡 , and stopped Teacher distributions, constructed directions, masks, and acceptance weights. Here Levi denotes the signed evidence loss written as LOPSD in the main text. The FKL terms are 
+
+LFKL ref = 1
+
+𝑁 ∑︁ 𝑖,𝑡 
+
+𝑎 𝑖,𝑡 KL (𝑞 ref  
+
+> 𝑖,𝑡
+
+∥ 𝑝 𝑖,𝑡 ),
+
+LFKL evi = − 1
+
+𝑍 evi ∑︁ 𝑖,𝑡 
+
+𝑚 𝑖,𝑡 𝑤 𝑖,𝑡 ∑︁ 
+
+> 𝑣 ∈ V
+
+Δ𝑖,𝑡 (𝑣 ) log 𝑝 𝑖,𝑡 (𝑣 ). (C.34) 25 The reference channel averages over valid response tokens, while the evidence channel averages over the eligible subset. Because 𝑚 𝑖,𝑡 ≤ 𝑎 𝑖,𝑡 , an additional factor 𝑎 𝑖,𝑡 in the evidence numerator would be redundant. For RKL, assume positive support and use the selected stopped log contrast 𝑟 𝑖,𝑡 , including the residual contrast when FEC is enabled: 
+
+LRKL ref = 1
+
+𝑁 ∑︁ 𝑖,𝑡 
+
+𝑎 𝑖,𝑡 KL ( 𝑝 𝑖,𝑡 ∥𝑞 ref  
+
+> 𝑖,𝑡
+
+),
+
+LRKL evi = 1
+
+𝑍 evi ∑︁ 𝑖,𝑡 
+
+𝑚 𝑖,𝑡 
+
+log 𝑍 𝑖,𝑡 (𝑤 𝑖,𝑡 ) − 𝑤 𝑖,𝑡 E𝑣 ∼ 𝑝 𝑖,𝑡 [𝑟 𝑖,𝑡 (𝑣 )]  . (C.35) The RKL partition term preserves the loss identity but contributes no Actor gradient. The reference Teacher remains evidence-free even when the selected contrast uses 𝑞 − as its base. For binary path switches 𝜒 OPSD , 𝜒 adv , define e𝑤 𝑖,𝑡 = 𝑚 𝑖,𝑡 𝑤 𝑖,𝑡 and b𝐴 ′ 
+
+> 𝑖,𝑡
+
+= b𝐴 𝑖 [1 + 𝜒 adv 𝜆 adv sg ( e𝑤 𝑖,𝑡 )] . Combining these terms with GRPO (Shao et al., 2024) gives Equation (13) under FKL and its geometry-matched RKL counterpart. Enabling only 𝜒 adv gives Path 1, enabling only 𝜒 OPSD gives Path 2, and enabling both gives the joint setting. Write LVERPO for the complete loss denoted Ltotal in the main text. Differentiating the three terms separately gives the following token-logit descent directions, with the outcome loss evaluated using the stopped modulated advantage. For compactness, write 𝜆 ★ 
+
+> evi
+
+= 𝜒 OPSD 𝜆 evi :
+
+−∇ 𝑧 𝑖,𝑡 LFKL VERPO = −∇ 𝑧 𝑖,𝑡 LGRPO ( b𝐴 ′) + 𝜆 ref 𝑎 𝑖,𝑡 
+
+𝑁 (𝑞 ref  
+
+> 𝑖,𝑡
+
+− 𝑝 𝑖,𝑡 ) + 𝜆 ★
+
+> evi
+
+𝑍 evi 
+
+𝑚 𝑖,𝑡 𝑤 𝑖,𝑡 Δ𝑖,𝑡 ,
+
+−∇ 𝑧 𝑖,𝑡 LRKL VERPO = −∇ 𝑧 𝑖,𝑡 LGRPO ( b𝐴 ′) + 𝜆 ref 𝑎 𝑖,𝑡 
+
+𝑁 𝐹 ( 𝑝 𝑖,𝑡 )( log 𝑞 ref  
+
+> 𝑖,𝑡
+
+− log 𝑝 𝑖,𝑡 ) + 𝜆 ★
+
+> evi
+
+𝑍 evi 
+
+𝑚 𝑖,𝑡 𝑤 𝑖,𝑡 𝐹 ( 𝑝 𝑖,𝑡 )𝑟 𝑖,𝑡 .
+
+(C.36) These exact logit gradients recover the main-text FKL update and its RKL counterpart under the stated stop-gradient and support assumptions. The reference term contains neither acceptance weights nor path switches. ZPD scales the outcome gradient through the advantage in Path 1 and the signed evidence direction directly in Path 2. The two routes therefore share acceptance without sharing a gradient channel. 
+
+## D Additional Results 
+
+To examine the scope of the main results, this appendix reports joint-path performance, trajectory routing, offline token weights, and evidence-loss sensitivity, followed by a support-mass audit of vocabulary truncation. The comparisons extend Table 3 and the controller analysis in Section 5.3. The reported point estimates describe the tested runs and replay samples, without uncertainty estimates across seeds. D.1 Joint Loss Weighting and Advantage Modulation To test whether the two update paths provide additive gains, we enable both switches from Section 3.5. The paths use independent switches and can therefore be enabled simultaneously. We denote this joint setting as VERPO-LW+AM. Table 6 reports its performance under the same evaluation protocol as the main results. Table 6: Acc/mean@16 of VERPO-LW+AM across three model backbones. The Llama row uses all-trajectory correction. Average is the unweighted five-task mean. Higher is better. 
+
+Model Biology Chemistry Materials Physics Tool Use Average Qwen3-4B 0.6016 0.7017 0.7726 0.6898 0.6256 0.6783 Qwen3-8B 0.6178 0.7562 0.7462 0.6882 0.6715 0.6960 Llama-3.2-1B 0.5538 0.7041 0.5638 0.4429 0.4926 0.5514 
+
+The joint setting reaches averages of 0.6783, 0.6960, and 0.5514 for the three listed backbones. These values fall below the stronger single-path averages in Table 3 by 0.0074, 0.0098, and 0.0142, respectively. Joint activation is defined by the objective, but this comparison does not show additive average gains under the reported settings. 26 D.2 Trajectory-Level Correction Scope To examine the role of the evidence mask, Table 7 compares routing only incorrect trajectories with routing both outcome classes for each of the three update configurations. All six rows use Llama-3.2-1B on the same five tasks. The comparison concerns trajectory eligibility, which precedes token-wise acceptance. An eligible token still receives no evidence weight when its local alignment is nonpositive. Table 7: Acc/mean@16 by evidence-correction scope on Llama-3.2-1B. Wrong-only makes only incorrect trajectories eligible, whereas All makes both outcome classes eligible. Average is the unweighted five-task mean. Bold marks the higher score within each update-path pair.                                           
+
+> Scope Biology Chemistry Materials Physics Tool Use Average
+> VERPO-LW
+> Wrong-only 0.5632 0.6440 0.4401 0.4820 0.4549 0.5168 All 0.6015 0.6657 0.5226 0.5422 0.4963 0.5657
+> VERPO-AM
+> Wrong-only 0.5765 0.6335 0.6030 0.4867 0.4637 0.5527
+> All 0.5550 0.6369 0.5506 0.5070 0.5101 0.5519
+> VERPO-LW+AM
+> Wrong-only 0.5366 0.6351 0.4840 0.4554 0.4586 0.5139 All 0.5538 0.7041 0.5638 0.4429 0.4926 0.5514
+
+For VERPO-LW, All reaches 0.5657 compared with 0.5168 for Wrong-only and scores higher on every task. For VERPO-LW+AM, the corresponding averages are 0.5514 and 0.5139. All leads on four tasks, while Wrong-only leads on Physics. VERPO-AM instead gives a slightly higher average with Wrong-only, 0.5527 compared with 0.5519. Wrong-only leads on Biology and Materials, while All leads on Chemistry, Physics, and Tool Use. Thus the preferred scope depends on the update path and task. The 0.0008 average gap for VERPO-AM does not establish significance across seeds. This training comparison differs from the offline analysis below, which evaluates acceptance on both classes without changing the training mask. D.3 Token-Level FEC and ZPD Weight Analysis To locate acceptance within a response, we analyze 100 matched Materials pairs using the Llama-3.2-1B FEC-FKL checkpoint at step 100 with EMA decay 0.95. Each pair contains one format-valid correct rollout and one format-valid incorrect rollout from the same prompt group. The collection used seed 42, eight responses per prompt, temperature 1.0, top-𝑝 1.0, no top-𝑘 sampling restriction, and a maximum of 8,192 new tokens. No optimizer update was performed during replay. The offline scope-all calculation includes both outcome classes, so these statistics describe candidate acceptance rather than the training-time frequency of applying a correction. The export contains 50,292 correct-side and 50,241 incorrect-side token events. Effective weights exceed 10 −3, and high weights are at least 0.5. Both thresholds summarize acceptance without changing the controller. 
+
+Trajectory-level acceptance. Table 8 summarizes the aggregate weight statistics in Figure 6. Correct rollouts have an effective-weight fraction of 43.3% compared with 36.4% for incorrect rollouts, and their mean weights are 0.2337 and 0.2034. The mean therefore supports broader acceptance in this sample without implying that every correct rollout receives more weight. 
+
+Weight by response region. We partition each trajectory at its <answer> opening tag. Tokens before that tag form the reasoning region, and the remaining tokens form the final-answer region. Table 9 shows that the mean reasoning-region weight sums are 117.22 and 101.92 for the two classes, compared with 0.33 and 0.29 in their final answers. Region length contributes to these totals. The higher per-token means in reasoning show that the difference also reflects weight allocation, not only the number of tokens. 27 Table 8: Token-level FEC and ZPD weight statistics for 100 matched Materials pairs from the step-100 Llama-3.2-1B checkpoint. Effective denotes 𝑤 > 10 −3 and High-weight denotes 𝑤 ≥ 0.5. Rates and means include zero weights. The final column reports the mean trajectory-level sum of controller weights.             
+
+> Trajectory Effective % High-weight % Mean Weight Mean Sum/Pair Correct 43.3 24.4 0.2337 117.55 Incorrect 36.4 21.5 0.2034 102.21
+
+Table 9: FEC and ZPD weight statistics by response region under the same matched offline replay protocol and thresholds as Table 8. The final column reports the mean within-region sum of controller weights.                        
+
+> Trajectory Region Effective % High-weight % Mean Weight Mean Sum/Pair Correct Reasoning 43.5 24.7 0.2369 117.22 Final answer 30.7 4.5 0.0406 0.33 Incorrect Reasoning 36.3 21.8 0.2062 101.92 Final answer 40.6 3.0 0.0359 0.29
+
+High-weight token types. To examine the lexical content of highly weighted positions, we aggregate weights by token identity. Token types are retained only when they occur at least 20 times, and their mean weights include zero-weight occurrences rather than conditioning on controller acceptance. Table 10 reports high-ranking lexical or subword types for each trajectory class and provides the statistics summarized in Figure 6. Table 10: High-ranking token types in the Materials replay sample. Rankings require at least 20 occurrences and include zero-weight occurrences. Effective and High-weight use the thresholds in Table 8.                                                                        
+
+> Trajectory Token Occurrences Effective % High-weight % Mean Weight Correct analyze 23 73.9 73.9 0.685
+> Given 61 68.9 67.2 0.614
+> select 25 68.0 64.0 0.612
+> therm 23 65.2 65.2 0.607
+> compound 20 80.0 65.0 0.606
+> greater 30 66.7 63.3 0.597
+> one 30 73.3 60.0 0.596
+> reference 140 64.3 62.9 0.589 Incorrect without 24 62.5 62.5 0.579
+> compute 24 62.5 58.3 0.547
+> indicates 35 60.0 57.1 0.545
+> actually 20 60.0 60.0 0.540
+> these 54 64.8 55.6 0.523
+> Therefore 34 67.6 52.9 0.515
+> find 49 59.2 57.1 0.515
+> will 28 53.6 53.6 0.506
+
+The correct-side ranking includes analyze , select , and reference , alongside domain-related types such as therm . The incorrect-side ranking includes compute , without , and Therefore .These examples describe lexical associations with acceptance. A token-type mean merges different contexts and does not identify a causal reasoning operation or an error location. 
+
+Matched token types. The previous ranking can partly reflect differences in which words are used by the two classes. To make the comparison more direct, we next restrict attention to token types 28 occurring at least 20 times in both classes and compare their mean weights. Table 11 reports the largest differences in each direction. Table 11: Largest differences in mean controller weight between correct and incorrect rollouts among token types occurring at least 20 times in both classes. For the left pair of columns, the gap is ¯𝑤 correct − ¯𝑤 incorrect . For the right pair, the gap is ¯ 𝑤 incorrect − ¯𝑤 correct .                                         
+
+> Correct-favored Incorrect-favored Token Correct Gap Token Incorrect Gap
+> therm 0.607 +0.370 without 0.579 +0.234
+> Given 0.614 +0.360 Correct 0.492 +0.226
+> greater 0.597 +0.327 P0.321 +0.217
+> sqrt 0.527 +0.305 Therefore 0.515 +0.216
+> incorrect 0.520 +0.290 indicates 0.545 +0.180
+> element 0.525 +0.281 does 0.466 +0.178
+> reference 0.589 +0.221 properties 0.459 +0.177
+
+For example, therm has a correct-favored gap of 0.370, while without has an incorrect-favored gap of 0.234. Comparing the same token types removes differences in type identity but does not match their surrounding contexts. These gaps therefore remain descriptive, not causal. D.4 Hyperparameter Sensitivity To examine the evidence-loss scale in Equation (13), we compare the plotted 𝜆 evi settings on Chemistry using Llama-3.2-1B over 200 training steps. The figure reports validation accuracy together with gradient norm, response length, and entropy to show the training behavior accompanying each setting. 
+
+Figure 7: Sensitivity of Llama-3.2-1B to the evidence-loss coefficient 𝜆 evi on Chemistry over 200 training steps. From left to right, the panels report validation accuracy, Actor gradient norm, rollout response length, and Actor entropy. Higher accuracy indicates better task performance. The other quantities describe training behavior without a preferred direction. The selected 𝜆 evi = 1.0configuration is shown with solid lines, while the other configurations are shown with dashed lines. This comparison concerns the plotted coefficient settings on one task and backbone. As shown in Figure 7, validation performance does not improve monotonically as 𝜆 evi increases. The configuration 𝜆 evi = 1.0 has the highest displayed endpoint accuracy and matches the default in Table 15. This single-task comparison supports that choice among the plotted settings, without establishing an optimal coefficient across backbones or tasks. D.5 Probability Mass Retention under Top-K Truncation To assess the vocabulary approximation in Appendix F.4, we examine the first 200 steps of five Llama-3.2-1B-Instruct (Meta, 2024) FEC runs, one per task. All use FKL, joint loss weighting and advantage modulation, all-trajectory evidence routing, and EMA decay 0.95. The evidence-loss and advantage-modulation coefficients both equal 1. These diagnostics concern the joint update configuration, not the single-path main-table runs. 29 Support construction and measurement. The correction support 𝑆 combines the top 128 candidates from each of 𝑞 +, 𝑞 − , and 𝑞 0 with the sampled token and removes duplicates. Thus 𝐾 = 128 specifies candidates per branch, not the final support size. The reference channel uses a separate support 𝑆 ref 
+
+formed from its own top 128 candidates and the sampled token. All selected probabilities retain the full softmax normalization, without renormalizing the selected coordinates or adding a tail bucket. For a distribution 𝑞 , retained mass on 𝑆 is 𝑀 = Í𝑣 ∈𝑆 𝑞 (𝑣 ). Figure 8 reports the logged token means of 1 − 𝑀 . The positive Teacher, negative Teacher, and Actor share 𝑆 , whereas the reference mass uses 
+
+𝑆 ref .0 100 200 10 −3          
+
+> 10 −2
+> 10 −1
+> 10 0
+> Omitted mass  1 − 𝑀
+> Positive Teacher
+> 0100 200
+> Negative Teacher
+> 0100 200
+> Actor
+> 0100 200
+> Independent reference
+> Biology Chemistry Materials Physics Tool Use
+
+Figure 8: Omitted probability mass over the first 200 training steps for five FEC-LW+AM runs on Llama-3.2-1B-Instruct (Meta, 2024). The underlying observations are step means over routed valid response tokens. Lower values indicate greater probability retention on the selected support. The first three panels use the shared evidence-correction support, and the reference panel uses its independent support. The logarithmic axes show centered five-step moving averages within contiguous valid segments, with segment endpoints preserved. Colors, line styles, and markers distinguish tasks. Gaps mark zero-token steps and are not interpolated. Each task has one run, so the curves do not provide uncertainty estimates across seeds. 
+
+Observed retention. All numerical summaries use unsmoothed observations. Each logged mass averages over routed valid response tokens before acceptance weighting. We aggregate steps using their logged token counts, rather than averaging step means equally. In task order Biology, Chemistry, Materials, Physics, and Tool Use, the 200-step window contains 175, 195, 199, 199, and 200 valid observations per branch. The remaining steps have zero selected-token counts and contribute neither to the plot nor to the averages. Across the five tasks and four branches, token-weighted retained mass ranges from 95.92% to 99.32%, while the step-200 means range from 99.62% to 99.88%. The task-specific token-weighted mean correction-support sizes range from 148.26 to 171.33 coordinates. These measurements support 𝐾 = 128 as a compact support with high aggregate probability retention in the tested configuration. Retention is not uniformly high throughout training. The lowest valid step mean is 28.90% in the early Chemistry reference trace, and the plot retains these early low-coverage observations. 
+
+Exact truncated gradient. To identify what truncation changes, consider one token with 𝑝 =
+
+softmax (𝑧 ) at unit temperature. Freeze 𝑆 , the signed direction Δ on its selected coordinates, and the nonnegative weight 𝑤 during differentiation. Define the zero-padded vector Δ𝑆 (𝑣 ) = 1[𝑣 ∈ 𝑆 ]Δ(𝑣 )
+
+and the truncated loss 𝐿 𝑆 = −𝑤 Í𝑣 ∈𝑆 Δ(𝑣 ) log 𝑝 (𝑣 ). The softmax derivative 𝜕 log 𝑝 (𝑣 )/ 𝜕𝑧 𝑗 = 1[𝑣 =
+
+𝑗 ] − 𝑝 ( 𝑗 ) gives 
+
+𝑠 𝑆 =∑︁ 
+
+> 𝑣 ∈𝑆
+
+Δ(𝑣 ), −∇ 𝑧 𝐿 𝑆 = 𝑤  Δ𝑆 − 𝑠 𝑆 𝑝 . (D.1) The extra term −𝑤𝑠 𝑆 𝑝 comes from the live full-vocabulary normalizer. It acts on selected and omitted logits, ensuring that the logit update sums to zero even when the selected direction does not. Since 
+
+∥ 𝑝 ∥1 = 1 and 𝑤 ≥ 0, its absolute size satisfies 
+
+−∇ 𝑧 𝐿 𝑆 − 𝑤 Δ𝑆 1 = 𝑤 |𝑠 𝑆 |. (D.2) Thus the simple direction 𝑤 Δ𝑆 recovers the negative loss gradient when 𝑠 𝑆 = 0, including a full-vocabulary difference of normalized endpoints. A small-vocabulary finite-difference check verifies 30 both identities for nonzero mass defect, zero mass defect, full support, and zero weight, with maximum coordinate error below 3 .2 × 10 −12 .
+
+## E Diagnostic Metrics 
+
+To interpret the controller traces in Figure 5, this appendix defines their token sets, averaging rules, and inference limits. The four diagnostics describe acceptance and the measured FEC residual during training. They are not validation or test metrics. Let Iroute denote the valid response-token positions included by the evidence-route diagnostic mask. The implementation first sums each statistic and its token count across microbatches and data-parallel workers and then divides. Every mean below is therefore a global token-weighted mean rather than a mean of per-batch means. For the displayed FEC runs, the FEC diagnostic set equals Iroute . The mean definitions below require a nonempty diagnostic set. They do not specify a logging convention for empty sets. E.1 ZPD Effective Weight Coverage To measure the breadth of acceptance, WeightEffectiveCoverage counts diagnostic tokens whose stopped weight exceeds a fixed monitoring threshold: WeightEffectiveCoverage = 1
+
+|I route |∑︁ (𝑖,𝑡 ) ∈ I route 
+
+1𝑤 𝑖,𝑡 > 𝜏 eff 
+
+ , 𝜏 eff = 10 −3. (E.1) The denominator counts routed diagnostic tokens, not every token in the batch. Coverage therefore measures acceptance conditional on this set and does not measure how often the routing mask selects tokens. The threshold is used only for monitoring and does not enter the controller. This metric differs from the strict nonzero fraction 1[𝑤 𝑖,𝑡 > 0], which would count arbitrarily small numerical weights as active. E.2 Mean Signed Benefit and Fisher Cost To distinguish favorable and conflicting directions before rejection, we retain signed alignment in the benefit diagnostic. Equation (7) applies a positive part to this value for controller use. To expose rejected as well as accepted directions, the logged benefit diagnostic retains the value before this positive-part operation: 
+
+𝑏 𝑖,𝑡 = b𝐴 𝑖 (𝑒 𝑦 𝑖,𝑡 − 𝑝 𝑖,𝑡 )⊤𝑢 𝑖,𝑡 , ℎ𝑖,𝑡 = [𝑏 𝑖,𝑡 ]+. (E.2) The one-hot score direction compares the evidence move with the sampled token’s outcome signal. Only ℎ𝑖,𝑡 enters the default acceptance rule. The logged metric BenefitMean, shown in the second panel of Figure 5, is BenefitMean = 1
+
+|I route |∑︁ (𝑖,𝑡 ) ∈ I route 
+
+𝑏 𝑖,𝑡 . (E.3) It is a raw signed mean, not the mean of ℎ𝑖,𝑡 and not a conditional mean over positive-benefit tokens. A negative value means that the signed evidence directions oppose the local GRPO (Shao et al., 2024) score direction on average. The default controller assigns zero weight to each token with nonpositive benefit, but a negative mean does not imply that every token is rejected. It also does not measure the reward change after an optimizer step. The logged metric FisherCostMean, shown in the third panel, is the mean nonnegative Fisher movement term from Equation (7): FisherCostMean = 1
+
+|I route |∑︁ (𝑖,𝑡 ) ∈ I route 
+
+𝑐 𝑖,𝑡 , 𝑐 𝑖,𝑡 = 𝑢 ⊤ 
+
+> 𝑖,𝑡
+
+𝐹 ( 𝑝 𝑖,𝑡 )𝑢 𝑖,𝑡 ≥ 0. (E.4) This nonnegative statistic measures local distribution movement, not observed reward loss. It is the unscaled dynamic term in the controller denominator. The full movement penalty is 𝛼 cost 𝑐 𝑖,𝑡 + 𝜖 cost ,so the plotted quantity excludes both the scale and the positive floor. 31 E.3 FEC Residual Nuisance Fisher Covariance To check the aggregate residual left by the projection, FECResidualCov averages the signed Fisher covariance between the retained FEC residual in Equation (11) and the measured nuisance direction in Equation (10): FECResidualCov = 1
+
+|I FEC |∑︁ (𝑖,𝑡 ) ∈ I FEC 
+
+ΔFEC  
+
+> 𝑖,𝑡
+
+, Δnuis      
+
+> 𝑖,𝑡 𝐹 (𝑝 𝑖,𝑡 )
+
+. (E.5) Here IFEC contains the valid response-token positions on which the FEC branches and projection diagnostics are available. Equation (C.15) gives the remaining ridge-dependent covariance for each token under the coefficient in Equation (10). A small mean signed covariance does not establish token-wise orthogonality. Positive and negative residuals can cancel in the average, and small vector norms also produce small covariance without a small angle. Figure 5 therefore provides an aggregate numerical check of the projection rather than a bound on every residual. Neither the sign nor the magnitude establishes a causal contribution to task accuracy. 
+
+## F Experimental Details 
+
+To document the comparisons in Section 4, this appendix collects the data splits, runtime, shared training settings, method-specific coefficients, and supplied prompt templates. Hardware-specific timing runs are reported separately in Appendix G. F.1 Datasets and Data Processing We use the five-task benchmark release associated with SRPO (Li et al., 2026) as a fixed data source. Biology, Chemistry, Materials Science, and Physics are the Level-3 reasoning subsets of SciKnowEval (Feng et al., 2024). Tool Use is derived from ToolAlpaca (Tang et al., 2023). Table 12 reports the complete train and test splits used by every compared method. Table 12: Five-task data splits shared by the compared methods. Counts denote examples rather than sampled responses.                             
+
+> Task Source Train Test Total Biology SciKnowEval (Feng et al., 2024) Level 3 450 50 500 Chemistry SciKnowEval (Feng et al., 2024) Level 3 1,890 210 2,100 Materials Science SciKnowEval (Feng et al., 2024) Level 3 841 94 935 Physics SciKnowEval (Feng et al., 2024) Level 3 720 80 800 Tool Use ToolAlpaca (Tang et al., 2023) 4,046 68 4,114 Total –7,947 502 8,449
+
+The fixed splits prevent data membership from changing across methods. Science prompts request one of four answer options, while Tool Use prompts provide the available tool specifications. The literal input scaffolds are given in Appendix F.5. F.2 Models, Baselines, and Runtime To separate model and runtime choices from method coefficients, we summarize the Actor initialization, hardware profile, and thinking-mode switches are summarized in Table 13. The three listed models were full-parameter fine-tuned. The shared benchmark profile uses eight GPUs per run. The two-GPU Llama cost study in Appendix G is a separate hardware setting and is not pooled with the eight-GPU timing comparison. The implementation is built on verl (Sheng et al., 2025), uses PyTorch FSDP2 (Feng et al., 2025) for distributed Actor training, and uses vLLM (Kwon et al., 2023) for batched rollout generation. We use AdamW (Loshchilov & Hutter, 2019) for optimization. 32 F.3 Shared Training Setup To define the common sampling and optimization budget, Table 13 separates rollout settings from validation decoding. These settings describe matched benchmark runs, not the hardware-specific cost profiles. Table 15 then isolates the coefficients and support approximation used by VERPO. Table 13: Common benchmark, runtime, and optimization settings used by matched experiments.                       
+
+> Parameter Value Actor initialization Qwen3-4B (Yang et al., 2025), Qwen3-8B (Yang et al., 2025), Llama-3.2-1B-Instruct (Meta, 2024) Hardware 8×NVIDIA A800 GPUs per run Actor / Teacher / validation thinking False / False / False Global prompt batch / rollouts per prompt 32 / 8 Mini-batch trajectories / update epochs 32 / 1 Maximum prompt / response length 2,048 / 8,192 tokens Maximum reprompt / model length 10,240 / 18,944 tokens Training decoding temperature 1.0, top-𝑝 1.0, top-𝑘 disabled Validation decoding 16 rollouts, temperature 0.6, top-𝑝 0.95, top-𝑘 disabled Outcome clipping upper radius 𝜖 high =0.28 Optimizer AdamW (Loshchilov & Hutter, 2019), weight decay 0.01, gradient clip 1.0 Schedule constant after 10 warmup steps Budget 200 optimizer steps
+
+F.4 Method-Specific Hyperparameters To distinguish algorithm settings from the shared budget, Table 14 lists the baseline configurations. Their Jensen-Shannon divergence (Lin, 1991) is the symmetric distillation divergence, distinct from the FKL and RKL decompositions used for VERPO. Table 15 separates VERPO’s reference and evidence coefficients from its controller parameters. Given the benefit and cost proxies, the acceptance fraction uses 𝛼 cost and 𝜖 cost . The projection ridge instead changes the evidence direction before weighting. 33 Table 14: Baseline-specific loss and optimizer settings. Dashes preserve entries not specified for the corresponding baseline. 
+
+Parameters GRPO (Shao et al., 2024) SDPO (H¨ ubotter et al., 2026) SRPO (Li et al., 2026) 
+
+Outcome loss 
+
+Asymmetric upper clip 𝜖 high 0.28 – 0.28 Rollout IS clip 𝜌 – – 2.0 KL coefficient 0.0 – 0.0 
+
+Distillation loss 
+
+Top-𝐾 distillation – 100 100 Distillation divergence – Jensen-Shannon (Lin, 1991) Jensen-Shannon (Lin, 1991) EMA update rate – 0.05 0.05 Rollout IS clip 𝜌 – 2.0 2.0 
+
+Dynamic weighting 
+
+Dynamic-weighting coefficient 𝛽 – – 1
+
+Training 
+
+Optimizer AdamW (Loshchilov & Hutter, 2019) AdamW (Loshchilov & Hutter, 2019) AdamW (Loshchilov & Hutter, 2019) Learning rate 5 × 10 −6 1 × 10 −5 5 × 10 −6
+
+Warmup steps 10 10 10 Weight decay 0.01 0.01 0.01 Gradient clip norm 1.0 1.0 1.0 
+
+Table 15: VERPO-specific hyperparameters. 
+
+Parameter Value 
+
+𝜆 ref 0.1 
+
+𝜆 evi 1.0 Direction construction Fix (H¨ ubotter et al., 2026), CTR (Pan et al., 2026), FEC KL geometry FKL, RKL ZPD cost coefficient 𝛼 cost 0.0025 ZPD denominator floor 𝜖 cost 2.5 × 10 −5
+
+FEC ridge 10 −8
+
+Teacher candidates per branch Top-𝐾 = 128 Vocabulary chunk size 4,096 EMA Teacher decay 0.95 
+
+To reduce vocabulary computation, the implementation forms a deduplicated union of the top-𝐾 
+
+candidates from the Teacher branches used by each correction and adds the sampled token. FKL FEC uses the three branches 𝑞 +, 𝑞 − , and 𝑞 0. The RKL correction additionally includes the Actor’s top-𝐾 
+
+candidates. Thus 𝐾 = 128 specifies candidates per branch, not the size of the final union. Selected log probabilities retain their full-vocabulary softmax normalization. The omitted tail is neither renormalized into the selected coordinates nor represented by an extra bucket. Evidence losses, Fisher moments, and projection statistics on this support are therefore approximations to the full-vocabulary quantities in Appendix C. In particular, a truncated FKL displacement need not sum to zero on the selected coordinates, so the exact full-vocabulary logit identities cannot be assumed unchanged after truncation. Support selection, Teacher values, and projection coefficients are stopped during Actor differentiation, while the Actor softmax normalizer remains live. Appendix D.5 gives 34 the exact truncated logit gradient and measures probability retention for 𝐾 = 128 over 200 training steps. The EMA decay of 0.95 weights the previous Teacher state in Equation (B.7), leaving an update rate of 0.05. This distinction avoids interpreting decay and update rate as the same parameter. F.5 Prompt Templates To make the task formatting explicit, the following listings preserve the supplied prompt text, including literal placeholders, punctuation, and response tags. The science system message constrains the final output to an option letter, while its user message supplies the question and options. 
+
+Listing F.1: Science system message 
+
+Given a question and four options, please select the right answer. Respond in the following format: <reasoning> ... </reasoning> <answer> ... </answer> For the answer, only output the letter corresponding to the correct option (A, B, C, or D), and nothing else. Do not restate the answer text. For example, if the answer is "A", just output: <answer> A</answer> 
+
+Listing F.2: Science user message 
+
+[record-specific question and four answer options] Please reason step by step. 
+
+The Tool Use messages restrict the Actor to the supplied tools and specify the action-call format. Record-specific API descriptions and schemas occupy the indicated placeholder rather than a shared fixed tool list. 
+
+Listing F.3: Tool Use system message 
+
+You are a tool-use assistant. Solve each request by reasoning about the task and calling the provided tools when needed. Use only the tools provided in the user message. Follow the required response format exactly. 
+
+Listing F.4: Tool Use user-message scaffold 
+
+Your task is to answer the user’s question using available tools. You have access to the following tools: [record-specific tool names, descriptions, API documentation, parameter schemas, and output schemas] Use the following format: Thought: you should always think about what to do Action: the action to take, should be one of the tool names. Action Input: the input to the action, must be in JSON format. All of the action input must be realistic and from the user. Begin! Question: [record-specific question] 
+
+35 The final listing shows the positive-evidence Teacher scaffold. It augments the task prompt with privileged context before replaying the sampled prefix as defined in Equation (B.6). This supplied scaffold does not specify the exact incorrect-evidence serialization for every contrastive branch.               
+
+> Listing F.5: Evidence-conditioned self-Teacher reprompt
+> [original task user prompt] Correct solution: [validated privileged context or selected sibling response] Correctly solve the original question.
+
+## G Computational Analysis 
+
+To put the accuracy comparisons in computational context, this appendix reports logged step costs and the approximate compute-matched comparison discussed with Table 3. The Llama-3.2-1B measurements use two A800 GPUs, while the Qwen3-4B Chemistry measurements use eight. These hardware groups are evaluated separately. G.1 Per-Step Cost To distinguish total step cost from the recorded component timers, Tables 16 and 17 retain the generation, Teacher/evidence, and Actor-update columns alongside the logged total. Each entry averages its corresponding logged statistic over steps 10 to 200. The component values do not form an additive wall-clock decomposition. We preserve the reported timers without summing them to reconstruct the total or inferring an overlap schedule. Table 16: Logged Llama-3.2-1B computation costs on two A800 GPUs over steps 10 to 200. Gen denotes generation. Peak alloc. denotes logged peak allocated memory. Component timers must not be added to reconstruct total step time.                                
+
+> Method Hardware Gen Teacher/evidence Actor update Total step Throughput Peak alloc. s/step s/step s/step s/step tok/s/GPU GB Fixed (H¨ ubotter et al., 2026) 2×A800 7.21 53.48 12.30 23.30 508.4 10.77 CTR (Pan et al., 2026) 2×A800 10.92 53.99 14.84 29.68 638.9 11.66 FEC 2×A800 15.53 54.20 15.58 35.20 1021.4 12.30
+
+Table 17: Logged Qwen3-4B Chemistry computation costs on eight A800 GPUs over steps 10 to 200. N/A means that the corresponding Teacher/evidence timer was not available, not that the method performed no Teacher computation. The same nonadditive timing caveat as Table 16 applies.                                      
+
+> Method Hardware Gen Teacher/evidence Actor update Total step Throughput Peak alloc. s/step s/step s/step s/step tok/s/GPU GB GRPO (Shao et al., 2024) 8×A800 22.52 N/A 17.58 48.50 466.8 16.20 SDPO (H¨ ubotter et al., 2026) 8×A800 3.32 N/A 28.84 40.80 278.8 35.07 SRPO (Li et al., 2026) 8×A800 5.98 N/A 27.51 42.20 309.2 23.07 VERPO 8×A800 31.09 176.34 42.14 82.41 281.5 18.81
+
+In Table 16, Fixed (H¨ ubotter et al., 2026) has a logged total of 23.30 seconds per step, compared with 29.68 for CTR (Pan et al., 2026) and 35.20 for FEC. This ranks the observed step costs but does 36 not establish equal training quality. In particular, the Fixed-direction experiments exhibited reward hacking as reported with Table 4. In Table 17, VERPO records 82.41 seconds per step compared with 48.50 for GRPO (Shao et al., 2024). Its reported peak allocation is 18.81 GB, compared with 16.20 GB for that baseline and 35.07 GB for SDPO (H¨ ubotter et al., 2026). These are measurements from the listed profiles. Throughput alone does not rank end-to-end efficiency because generated token counts and response lengths differ. The recorded peak-allocation field also does not establish whether worker aggregation uses a maximum or another reduction. G.2 Compute-Matched Performance To compare quality at an approximately shared budget, we evaluate VERPO, GRPO (Shao et al., 2024), SDPO (H¨ ubotter et al., 2026), and SRPO (Li et al., 2026) on the same Llama-3.2-1B backbone and 2 ×A800 hardware in Table 18. For each run, we estimate the training compute based on the average wall-clock time per optimization step after the initial warm-up period. The budget for each task is defined by the compute required for the corresponding 200-step outcome-only baseline, and the nearest available five-step validation checkpoint is selected for the other methods. Table 18: Approximate compute-matched Llama-3.2-1B results. Each method cell reports matched step / validation accuracy. The budget row gives the task-specific target in A800 GPU-hours. Accuracy averages 16 sampled responses per evaluation example, with higher values indicating better performance. Checkpoint matching is approximate.                                     
+
+> Method Biology Chemistry Materials Physics Tool Use Average Budget, GPU-h 10.91 11.53 10.61 9.97 10.08 10.62 VERPO 105 / 0.5100 105 / 0.5661 85 / 0.4570 85 / 0.4914 90 / 0.4885 94 / 0.5026 GRPO (Shao et al., 2024) 200 / 0.4988 200 / 0.5247 200 / 0.4348 200 / 0.4867 200 / 0.4504 200 / 0.4791 SDPO (H¨ ubotter et al., 2026) 150 / 0.0862 150 / 0.0018 145 / 0.1117 125 / 0.3984 110 / 0.3107 136 / 0.1818 SRPO (Li et al., 2026) 145 / 0.3187 160 / 0.5649 130 / 0.3191 125 / 0.4313 160 / 0.4428 144 / 0.4154
+
+VERPO has the highest reported accuracy in each of the five task columns. Its average of 0.5026 exceeds the 0.4791 from GRPO (Shao et al., 2024) by 0.0235, at an average of 94 rather than 200 optimizer steps. These results support a quality advantage under the estimated budgets on this backbone. They do not show lower per-step cost or exact equality of consumed GPU-hours. Averaged step times and five-step checkpoint spacing make the match approximate, and the table contains no uncertainty estimates across repeated runs. 37 H Case Study 
+
+To illustrate the weight allocation summarized in Appendix D.3, Figure 9 shows one matched pair of correct and incorrect rollouts for a Materials question. Both trajectories contain weighted reasoning tokens, so nonzero acceptance is not restricted to responses with a correct final answer. The displayed weights were computed offline with both trajectory classes eligible. Darker text groups mark greater mean acceptance under the local benefit and cost proxies, not an estimated causal contribution to the answer. Uncolored groups fall below the figure’s coloring threshold, which does not establish that they are irrelevant to reasoning. This example illustrates nonuniform allocation within two responses rather than a general ordering of token importance. 
+
+Figure 9: Token-level FEC weights for one matched pair of rollouts. The Materials question asks which host yields the highest diffusion rate for Mg, given diffusion barriers of 0 .47406 eV in Fe, 
+
+−0.05779 eV in Ga, −0.09429 eV in Gd, and 0 .63542 eV in Hf. The ground-truth answer is A, corresponding to Mg in Gd. The upper correct rollout predicts A, whereas the lower incorrect rollout predicts C, corresponding to Mg in Fe. Adjacent subword pieces are grouped for readability. Fill color shows their mean offline scope-all raw FEC weight, with darker blue denoting a larger mean. A stronger outline marks a group containing a weight of at least 0.5. Groups whose maximum weight does not exceed 10 −8 are left uncolored. Weights indicate controller acceptance, not causal contributions to correctness or the training-time routing frequency. 38
