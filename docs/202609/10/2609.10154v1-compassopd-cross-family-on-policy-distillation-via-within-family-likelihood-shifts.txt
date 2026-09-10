@@ -1,0 +1,449 @@
+Title: CompassOPD: Cross-Family On-Policy Distillation via Within-Family Likelihood Shifts
+
+URL Source: https://arxiv.org/pdf/2609.10154v1
+
+Published Time: Thu, 10 Sep 2026 01:05:26 GMT
+
+Number of Pages: 12
+
+Markdown Content:
+# CompassOPD: Cross-Family On-Policy Distillation via Within-Family Likelihood Shifts 
+
+Naibin Gu 1,2 , Qingyi Si 3, Chenxu Yang 1,2 , Chuanyu Qin 1,2 , Junhao Zhou 1,2 ,Peng Fu 1,2* , Zheng Lin 1,2 , Weiping Wang 11Institute of Information Engineering, Chinese Academy of Sciences, Beijing, China 
+
+> 2
+
+School of Cyber Security, University of Chinese Academy of Sciences, Beijing, China 
+
+> 3
+
+JD.COM {gunaibin,fupeng }@iie.ac.cn 
+
+Abstract 
+
+On-policy distillation (OPD) provides dense token-level supervision on student-generated trajectories. Although OPD performs strongly when teacher and student belong to the same model family, we find that its effectiveness de-grades in cross-family settings even after tok-enizer alignment, with substantially stronger external teachers offering little additional im-provement. To understand this disconnect, we decompose the cross-family OPD signal into two components: an offset between a low-capability teacher-family reference and the stu-dent, and the within-family log-likelihood shift from that reference to the strong teacher. Stan-dard OPD transfers both components together, allowing the offset to dominate the update di-rection and obscure the changes associated with teacher capability improvements. We pro-pose CompassOPD, which removes this off-set and transfers the within-family shift, while a frozen student reference anchors updates to the student’s initial policy. Thus, both teacher-side and student-side changes are measured within their respective model families. Exper-iments across three student families and mul-tiple teacher families show that CompassOPD consistently outperforms standard cross-family OPD, improving average reasoning accuracy by up to 5.50 points. For an MoE teacher, we further construct the reference directly from the teacher checkpoint by reducing expert activa-tion, eliminating the need for a separate refer-ence checkpoint while retaining a 3.43-point gain over OPD. 
+
+1 Introduction 
+
+On-policy distillation (OPD) has emerged as an effective paradigm for post-training large language models (Agarwal et al., 2024; Gu et al., 2026b; Lu and Lab, 2025). It samples trajectories from the student policy and uses the teacher’s token-level likelihoods to provide dense supervision along the  
+
+> *Corresponding author.
+
+states that the student actually visits. This on-policy interaction supplies token-level learning signals while avoiding the distribution gap introduced by teacher-generated training data. By combining on-policy exploration with dense token-level feedback, OPD has shown strong empirical gains on reason-ing tasks (Yang et al., 2026a,b; Gu et al., 2026a). However, existing OPD methods have mainly been studied in scenarios where the teacher and student models belong to the same model fam-ily. 1 Such models largely share training recipes and policy structures, with capability differences typically arising from model scale or post-training strategies (Li et al., 2026; Ma et al., 2026). In practice, the student’s model family may not pro-vide a sufficiently strong teacher model, making it necessary to use stronger models from other fami-lies. Prior work has addressed the representational differences caused by different tokenizers through vocabulary or text-space alignment, enabling cross-model likelihood comparison. Such alignment makes likelihood scores comparable over shared textual units (Sun et al., 2026; Niu et al., 2026; Wang et al., 2026), but leaves open whether the resulting supervision effectively transfers teacher capabilities across model families. We find that, despite vocabulary alignment, re-placing a same-family teacher model with a cross-family teacher model of similar capability does not preserve the benefits of OPD. Figure 1(a) shows that same-family OPD produces sustained improve-ments, whereas cross-family OPD plateaus quickly. Moreover, as shown in Figure 1(b), external teacher models with substantially different capabilities yield distilled student models with nearly identi-cal performance. Thus, under cross-family OPD, improvements in teacher capability do not reliably translate into greater gains in student performance. 
+
+> 1We use “model family” to denote a release series, such as Qwen3, Qwen3.5, or Ministral-3. Different families often differ in vocabulary and training recipes.
+
+1arXiv:2609.10154v1 [cs.LG] 9 Sep 2026 To understand this phenomenon, we further com-pare the OPD update directions produced by mod-els of different scales within the same teacher fam-ily on identical student trajectories. Surprisingly, as shown in Figure 1(c), despite the substantial ca-pability gap, the strongest teacher and the smallest model in the teacher family still assign the same up-date direction on 70% of aligned textual units. This prompts us to ask: which part of the strong teacher signal truly reflects its capability improvement? Us-ing a low-capability model from the same family as a reference, we find that the cross-family OPD sig-nal can be decomposed into two components: one is the pre-existing cross-family offset between the reference model and the student, and the other is the within-family likelihood change from the low-capability reference model to the strong teacher model. Standard OPD transfers both components together; when the cross-family offset determines the sign of the combined signal, the update follows the direction already induced by the low-capability reference, while the strong teacher’s additional con-tribution changes only its magnitude. Based on this observation, we propose Compas-sOPD . CompassOPD removes the cross-family off-set and transfers only the within-family likelihood change. A frozen copy of the student’s initial pol-icy provides an anchor that modulates the update according to the student’s displacement from that initialization. In this way, both teacher-side and student-side variations are measured within their respective model families. Through this design, CompassOPD transfers the policy change direc-tions associated with teacher capability improve-ment rather than directly matching the absolute likelihoods of a cross-family teacher model. Experiments across three student families and multiple teacher families show that CompassOPD consistently outperforms standard cross-family OPD under matched student initializations, improv-ing average reasoning accuracy by up to 5.50 points. Further analysis shows that restoring the removed cross-family offset degrades performance. With a fixed teacher-family reference, CompassOPD also yields progressively better student performance as teacher scale increases. For MoE teacher mod-els, we further construct a low-capability reference model from the teacher checkpoint itself by reduc-ing expert activation, thereby eliminating the need for a separately released reference model while still retaining substantial improvements over OPD. 
+
+2 Preliminaries 
+
+On-Policy Distillation. Given a prompt x, the student policy πθ generates a response y ∼ πθ(· | 
+
+x). At generation step t, let ct = ( x, y <t ) denote the student-visited context and let yt be the sampled action. OPD (Lu and Lab, 2025) asks a teacher T
+
+to score the same action under the same textual context and constructs the token-level signal 
+
+AOPD  
+
+> t
+
+= log T (yt | ct) − log πθ(yt | ct). (1) The detached signal is used as an advantage in the policy update, , with positive values encouraging the sampled action and negative values discourag-ing it: 
+
+LOPD = −Ey∼πθ (·| x)
+
+AOPD  
+
+> t
+
+log πθ(yt | ct) ,
+
+(2) Because the teacher evaluates trajectories gener-ated by the current student, OPD provides dense supervision on states that the student actually visits. 
+
+Cross-Tokenizer Likelihood Alignment. Equa-tion 1 assumes that the teacher and student repre-sent the sampled action with compatible tokens. Prior work on cross-tokenizer distillation addresses this mismatch by aligning model likelihoods in text space (Sun et al., 2026; Niu et al., 2026). Following this line of work, we decode the student response into text, re-encode it with the teacher tokenizer, and align the two token sequences according to their shared textual boundaries. This procedure partitions the response into aligned textual units 
+
+U(y) = {z1, z 2, . . . , z M }, (3) where each unit is either a one-to-one token match or a span represented by different numbers of teacher and student tokens. We use ℓM(zu | cu) to denote the aligned log-likelihood score assigned by model M to unit zu under its preceding textual con-text cu. When considering an individual aligned unit, we omit the index u and write (z, c ). We apply the same text-space alignment procedure to standard cross-family OPD and CompassOPD, en-suring that differences in the alignment procedure do not confound their comparison. 
+
+3 Understanding Cross-Family OPD 
+
+When the teacher model and the student model come from the same model family, for example both being Qwen3 series models, OPD has already demonstrated significant performance gains (Yang 20 20 40 60 80 100 120 
+
+> Training step
+> 20 25 30 35 40 45 50 55
+> AIME24 mean@4 (%)
+> Same-family OPD Cross-family OPD
+
+(a) Same-family vs. cross-family OPD. −4 0 4 8 12 16 20 24   
+
+> Strong - weak gap (pp)
+> AIME24 AIME25 AIME26 HMMT25 Feb
+> HMMT25 Nov
+> HMMT26 MATH-500
+> Average
+> +0.1 +16.7
+> Teacher capability gap Student gap after OPD
+
+(b) Transfer of the teacher capability gap. −2 0 2   
+
+> 0.8B OPD signal
+> −3 −2 −1 0123
+> 35B-A3B OPD signal  Direction agreement: 70.0%
+> 35B-A3B vs 0.8B
+> −2 02
+> 0.8B OPD signal
+> −3 −2 −1 0123
+> 4B OPD signal
+> Direction agreement: 71.8%
+> 4B vs 0.8B
+> 10 0
+> 10 1
+> 10 2
+> 10 3
+> 10 4
+> 10 5
+> Aligned-unit density (log scale) Equal signal
+
+(c) OPD signal similarity within the teacher family. 
+
+Figure 1: Motivating observations for cross-family OPD. (a) Performance comparison of same-family and cross-family OPD. The same-family teacher model uses Qwen3-30B-A3B-Instruct, while the cross-family teacher model uses Qwen3.5-35B-A3B; the student model is Qwen3-4B in both cases. (b) The performance gap between Qwen3.5-35B-A3B and Qwen3.5-4B, and the gap between the Qwen3-4B student models distilled from these two teacher models. Hollow and solid markers denote the teacher model gap and the distilled student model gap, respectively. (c) When scoring the same aligned student-generated actions, Qwen3.5-0.8B agrees in update direction with Qwen3.5-35B-A3B and Qwen3.5-4B at approximately 70% of positions, revealing a substantial OPD component shared across teacher scales. 
+
+et al., 2025). A natural question is whether these gains still hold when the teacher model is switched to a model from a different family. 
+
+3.1 Same-Family and Cross-Family OPD 
+
+We first consider a relatively close model family for comparison. In the same-family setting, we distill from a Qwen3-30B-A3B-Instruct teacher model to a Qwen3-4B student model. In the cross-family setting, we use Qwen3.5-35B-A3B (Qwen Team, 2026) as the teacher model. To reduce differences in output style, the cross-family student model is first initialized by performing SFT on trajectories generated by the teacher (see Appendix A for de-tails). The experimental results are shown in Fig-ure 1(a). Same-family OPD produces sustained im-provements in reasoning accuracy, whereas cross-family OPD plateaus after limited early gains de-spite the preceding teacher-trajectory SFT. 
+
+Is the performance limitation of cross-family OPD related to teacher capability? After ob-serving the limited gains achieved with Qwen3.5-35B-A3B, we examine whether student gains track teacher capability. If a weaker cross-family teacher were used, the gains from distillation would be even worse, while a stronger teacher should correspond-ingly improve performance. We compared two teachers from the Qwen3.5 family but with signifi-cantly different performance levels, Qwen3.5-4B and Qwen3.5-35B-A3B, for performing OPD on the same Qwen3-4B student model. Figure 1(b) reveals a clear misalignment be-tween teacher capability and student model im-provement. Across benchmarks, Qwen3.5-35B-A3B outperforms Qwen3.5-4B by 16.7 points on average. However, the Qwen3-4B student mod-els distilled from these two teachers differ by only 0.1 points. On several benchmarks, the student distilled from the stronger teacher performs no bet-ter, and sometimes slightly worse, than the student distilled from the weaker teacher. Thus, the large capability gap within the teacher family translates into only marginal differences in the gains achieved by cross-family OPD. Taken together, these observations lead to a more specific question: Why does the large capability gap between the two teachers translate into only a marginal difference in student model gains under cross-family OPD? 
+
+3.2 Dissecting cross-family OPD signals 
+
+To understand why the large teacher capability gap in Figure 1(b) leads to only marginal differences in student performance, we examine how token-level OPD supervision signals vary with teacher capability. We use Qwen3.5-0.8B, Qwen3.5-4B, and Qwen3.5-35B-A3B to score the same cross-family student trajectories, with these three models covering a wide range of reasoning performance within the same model family. For an aligned textual unit z under context c, the OPD signal produced by a scoring model M is 
+
+AM(z, c ) = ℓM(z | c) − ℓπθ (z | c). (4) Its sign determines whether OPD increases or de-creases the likelihood of that observed action. Figure 1(c) compares the signals produced by Qwen3.5-0.8B with those produced by the two 3(a) CompassOPD    
+
+> On-policy rollout Two within-family comparisons Anchored policy update
+> TEACHER FAMILY STUDENT FAMILY
+> Prompt x
+> Trainable student
+
+πθ        
+
+> sample
+> y∼πθ(· | x)
+> y1y2··· yn
+> Text-space alignment
+> shared units zu
+> Strong teacher
+
+𝒯  
+
+> Weak reference
+
+ℛ  
+
+> −
+> +−
+> Current student πθ
+> Frozen initial πref
+> −
+> +−
+> Teacher shift
+
+ΔT = ℓ 𝒯 − ℓ ℛ            
+
+> Capability-sensitive
+> Student displacement
+> ΔS= log π θ− log π ref
+> Relative to initialization
+> ΔT, t
+> CompassOPD advantage
+> ACompass
+> t= sg [Δ T, t− αΔ S(yt,ct)]
+> Policy-gradient update
+> ℒ= − 𝔼 [ACompass
+> tlog π θ(yt|ct)]
+> Update πθand sample again
+> (b) Remove the cross-family offset
+
+AOPD = (ℓ ℛ − ℓ πθ) + (ℓ 𝒯 − ℓ ℛ)       
+
+> O: discard offset ΔT: retain shift
+> (c) Optional: MoE self-reference
+> Alternative construction of ℛ
+> 𝒯 Standard activation ℛReduced activation
+> ···
+
+Figure 2: Overview of CompassOPD. Given student-generated trajectories, the strong teacher T and its within-family reference RT score the same aligned textual actions. Their likelihood difference isolates the capability-sensitive within-family shift by removing the reference-anchored cross-family offset. The resulting signal is combined with the student’s displacement from its initial policy to guide the on-policy update. 
+
+larger models. Surprisingly, Qwen3.5-0.8B assigns the same update direction as Qwen3.5-35B-A3B on 
+
+70 .0% of the aligned units, and the same direction as Qwen3.5-4B on 71 .8% of the aligned units. De-spite the large capability differences, the two larger models frequently induce the same update direction as the low-capability model, even though the latter has weaker reasoning abilities than the cross-family student. This motivates using the low-capability model as a reference to separate the OPD signal it already induces from the likelihood changes intro-duced by a stronger teacher. 
+
+What masks the updates introduced by cross-family teachers? For the same student action z
+
+under context c, let T denote the strong teacher and 
+
+R a low-capability reference from the same teacher family. Using R as the OPD teacher yields: 
+
+AR(z, c ) = ℓR(z | c) − ℓπθ (z | c). (5) For the strong teacher T , adding and subtracting the reference score gives: 
+
+AT (z, c ) = ℓT (z | c) − ℓπθ (z | c)= ℓR(z | c) − ℓπθ (z | c)
+
+| {z }
+
+O(z,c )
+
++ ℓT (z | c) − ℓR(z | c)
+
+| {z }
+
+∆T (z,c )
+
+.
+
+(6) The first component O is the cross-family OPD signal already induced by the low-capability refer-ence R. It captures the log-likelihood discrepancy between R and the current student, forming the baseline OPD signal to which the strong teacher 
+
+T adds its within-family log-likelihood shift. The second component ∆T measures the log-likelihood change from R to T on the same student action. Since this comparison is entirely within the teacher family, it provides a more direct signal of which student actions gain or lose support as teacher ca-pability increases. Standard cross-family OPD transfers the com-bined signal O + ∆ T to the student. When the offset and the within-family shift favor opposite directions, an offset with greater magnitude causes the update to follow the reference-induced direc-tion. Figure 1(c) shows that the strong teacher T
+
+and the low-capability reference R produce the same OPD update direction at a substantial fraction of aligned units. At these positions, the teacher-family shift affects the update magnitude without reversing the direction already induced by the ref-erence. This observation motivates CompassOPD. We re-move the shared cross-family offset O and use ∆T
+
+as the capability-sensitive distillation signal. The 4goal remains to transfer the strong teacher model’s capability, and the within-family likelihood change provides a clearer direction for achieving this goal. 
+
+4 CompassOPD 
+
+In this section, we introduce CompassOPD. Build-ing on the preceding signal decomposition, Com-passOPD removes the shared cross-family offset and uses the within-family log-likelihood shift to supervise student-generated trajectories. A frozen student reference policy further anchors the up-date according to the student’s displacement from its initial policy. Together, these teacher-side and student-side comparisons guide capability transfer across model families. The overall workflow is illustrated in Figure 2. 
+
+4.1 A Capability Signal from the Teacher Family 
+
+Let T denote the strong teacher and R a low-capability reference model from the same teacher family. Given a prompt x, the current student pol-icy πθ samples a response, and both frozen models score the same aligned textual units in that response. For an aligned unit z under context c, Compas-sOPD removes the shared cross-family offset O
+
+from the strong-teacher OPD signal AT :
+
+∆T (z, c ) = AT (z, c ) − O(z, c )= ( ℓT − ℓπθ ) − (ℓR − ℓπθ )= ℓT (z | c) − ℓR(z | c).
+
+(7) Here, the student likelihood cancels in the sub-traction, leaving a log-likelihood change measured entirely within the teacher family. A positive ∆T
+
+means that T assigns higher likelihood to the same aligned action than R, while a negative value means that T assigns lower likelihood than R.Comparing ∆T across candidate continuations un-der the same context reveals how their relative pref-erence changes from R to T .
+
+4.2 Anchoring the Student Update 
+
+The teacher-family shift indicates which sampled actions should receive more or less support, but does not account for changes the student has al-ready made. We therefore retain a frozen student reference policy πref , initialized from the student before OPD training, to anchor updates relative to that starting point. For each sampled student token 
+
+yt under context ct, we measure the change in its log-likelihood relative to the reference: 
+
+∆S (yt, c t) = log πθ(yt | ct) − log πref (yt | ct).
+
+(8) Let ∆T,t denote the teacher-family shift assigned to student token position t through text-space align-ment. CompassOPD combines this signal with the student’s displacement to construct the sampled advantage: 
+
+ACompass  
+
+> t
+
+= sg [∆ T,t − α∆S (yt, c t)] , (9) where sg denotes stop-gradient and α controls the strength of the student reference anchor. At the beginning of training, πθ = πref and 
+
+∆S = 0 , so the update is determined entirely by the teacher-family shift. As the student moves an action’s log-likelihood in the direction favored by the teacher signal, the anchor term −α∆S opposes further movement in that direction. To interpret this feedback, consider a policy π over aligned tex-tual actions z at a fixed context c. The following reference-regularized objective captures the bal-ance between following the teacher-family shift and remaining close to the student reference: 
+
+JCompass (π; c) = Ez∼π(·| c) [∆ T (z, c )] 
+
+− αD KL (π(· | c)∥πref (· | c)) .
+
+(10) To see how the teacher-family shift and the student reference jointly shape the target distribution, we examine the maximizer of this objective. For α > 
+
+0, it takes the form (see Appendix B for a proof): 
+
+π∗(z | c) = πref (z | c) exp (∆ T (z, c )/α )
+
+Z(c) , (11) where Z(c) is the normalization factor ensuring that P 
+
+> z
+
+π∗(z | c) = 1 . The exponential factor reweights the student’s reference policy according to the teacher-family shift, expressing the trans-ferred changes relative to the student’s own initial-ization. In training, we substitute ACompass  
+
+> t
+
+for the standard OPD advantage and otherwise retain the same on-policy optimization procedure. 
+
+MoE self-reference. To obtain a teacher-family reference without a separate checkpoint, we also consider using an MoE teacher under two expert ac-tivation configurations (Figure 2(c)). The standard configuration serves as T , while a configuration with fewer activated experts serves as R, sharing the same frozen weights. Their log-likelihood dif-ference on the same aligned student-generated ac-tions supplies ∆T in Equation 7. 5Method AIME24 AIME25 AIME26 HMMT25 Feb HMMT25 Nov HMMT26 MATH-500 Avg. 
+
+Student: Granite4.1-3B 
+
+Base 4.79 7.92 5.83 1.25 1.46 3.03 64.31 12.66 SFT 21.25 19.58 19.79 8.54 6.67 14.39 80.52 24.39 OPD 25.00 18.96 17.29 12.29 11.04 13.83 79.12 25.36 
+
+CompassOPD 33.75 24.58 25.62 12.29 14.37 21.02 84.36 30.86 
+
+Student: Qwen3-4B 
+
+Base 24.79 18.33 18.12 12.50 8.33 17.80 83.25 26.16 SFT 28.33 24.17 22.92 13.54 12.50 15.53 84.51 28.79 OPD 36.25 32.29 30.83 17.50 20.00 21.02 86.70 34.94 
+
+CompassOPD 40.00 32.50 35.42 18.12 20.21 24.43 88.85 37.08 
+
+Student: OLMo-3-7B 
+
+Base 5.63 5.21 6.88 1.67 3.12 2.65 64.51 12.81 SFT 30.00 25.83 28.54 13.33 14.17 16.67 83.95 30.36 OPD 31.46 29.17 28.54 16.88 15.00 23.30 86.14 32.93 
+
+CompassOPD 36.67 30.00 29.38 17.50 19.79 23.48 86.38 34.74 
+
+> Table 1: Main results with Qwen3.5-35B-A3B as the teacher and Qwen3.5-0.8B as the reference for CompassOPD. OPD and CompassOPD share the same SFT initialization for each student. Best results within each student group are shown in bold.
+
+5 Experiments 
+
+5.1 Experimental Setup Training Data and Benchmarks. We evalu-ate CompassOPD on reasoning tasks. We use DAPO-Math (Yu et al., 2025) and DeepScaleR-Preview (Luo et al., 2025) for on-policy train-ing. Evaluation is conducted on seven bench-marks: AIME 2024 (Zhang and Math-AI, 2024), AIME 2025 (Zhang and Math-AI, 2025), AIME 2026 (Zhang and Math-AI, 2026), HMMT 2025 February, HMMT 2025 November, HMMT 2026 (Dekoninck et al., 2026), and MATH-500 (Lightman et al., 2023). For each benchmark, we report mean accuracy over 16 independent gen-erations per problem. 
+
+Models and baselines. We evaluate Compas-sOPD across three teacher families: Qwen3.5, Qwen3, and Mistral. The teachers are Qwen3.5-35B-A3B in non-thinking mode, Qwen3-30B-A3B-Instruct-2507, and Ministral-3-14B (Liu et al., 2026), respectively. Each teacher is paired with a lower-capability reference from its own family. Our student models span three model families, rep-resented by Granite4.1-3B (IBM Granite Team, 2026), Qwen3-4B, and OLMo-3-7B (Olmo et al., 2026). We compare the original model ( Base ), the teacher-trajectory SFT checkpoint, standard sam-pled OPD , and CompassOPD . For each compari-son, both distillation methods start from the same SFT checkpoint trained on reasoning trajectories generated by the strong teacher. Further analyses examine teacher scale within Qwen3.5 with a fixed 0.8B reference and MoE self-reference constructed by reducing expert activation (see Appendix A for details). 
+
+Implementation details. We implement all meth-ods using VERL (Sheng et al., 2024) and use vLLM (Kwon et al., 2023) for sampling genera-tion and teacher scoring. The learning rate is set to 
+
+1 × 10 −6, with a batch size of 128. The maximum prompt length and response length are 2,048 and 24,576 tokens, respectively. For CompassOPD, we set α = 0 .5. OPD and CompassOPD use the same student initialization, token/span alignment. 
+
+5.2 Main Results 
+
+Tables 1 and 2 report cross-family distillation re-sults spanning three teacher families and three stu-dent families. CompassOPD consistently outper-forms standard OPD across all five configurations. 
+
+Performance across student families. Table 1 compares the three student families with Qwen3.5-35B-A3B as the teacher. CompassOPD improves upon OPD in 20 of the 21 student–benchmark com-binations, with one tie. The gains are most pro-nounced on Granite4.1-3B, where standard OPD 6Method AIME24 AIME25 AIME26 HMMT25 Feb HMMT25 Nov HMMT26 MATH-500 Avg. Base 4.79 7.92 5.83 1.25 1.46 3.03 64.31 12.66 
+
+Teacher: Qwen3-30B-A3B (Ref. Qwen3-0.6B) 
+
+SFT 21.04 20.62 17.71 11.87 8.33 13.83 79.60 24.71 OPD 22.50 25.21 23.13 13.33 14.37 19.13 83.20 28.70 
+
+CompassOPD 28.54 30.21 26.46 16.88 15.00 21.97 84.45 31.93 
+
+Teacher: Ministral-3-14B (Ref. Ministral-3-3B) 
+
+SFT 18.54 18.12 14.79 9.79 6.25 13.26 78.44 22.74 OPD 21.46 16.67 18.12 11.46 8.75 13.26 78.93 24.09 
+
+CompassOPD 22.29 24.17 21.46 11.46 10.42 16.67 80.01 26.64 
+
+Table 2: Results with Qwen3 and Mistral teachers on Granite4.1-3B. Within each teacher group, OPD and CompassOPD share the same teacher-specific SFT initialization. Best results are shown in bold. 0 0.5 1 1.5 2          
+
+> Anchor strength α
+> 28.5 29.0 29.5 30.0 30.5 31.0
+> Avg. Performance  CompassOPD
+> (a) Anchor sensitivity. 0% 20% 40% 60% 80%
+> Cross-family offset coefficient β
+> 25.0 26.0 27.0 28.0 29.0 30.0 31.0
+> Avg. Performance  OPD CompassOPD + β⋅O(b) Offset restoration.
+
+Figure 3: Component analysis of CompassOPD on Granite4.1-3B, with Qwen3.5-35B-A3B as the teacher and Qwen3.5-0.8B as the reference. (a) Student anchor sensitivity. (b) Offset restoration with α = 0 .5; the dashed line denotes standard OPD. 
+
+provides limited improvement beyond SFT. Com-passOPD also improves Qwen3-4B and OLMo-3-7B, where standard OPD already yields clear gains, demonstrating benefits across students with differ-ent responses to cross-family distillation. 
+
+Performance across teacher families. Table 2 compares OPD and CompassOPD using Qwen3 and Mistral teachers with Granite4.1-3B as the student. CompassOPD improves average perfor-mance under both teacher families, outperforming OPD in 13 of the 14 teacher–benchmark combi-nations, with one tie. Together with the Qwen3.5 results, these findings demonstrate consistent im-provements across all three evaluated teacher fami-lies. 
+
+5.3 Component Analysis Sensitivity to the student reference anchor. Fig-ure 3(a) shows that performance improves as the anchor strength increases from α = 0 to α = 0 .5,where it reaches its highest value. When α = 0 , the update relies entirely on the teacher-family shift; a moderate anchor additionally accounts for the student’s displacement from its initial policy. Per-formance remains competitive at α = 1 .0 but de-clines under stronger anchoring, suggesting that excessive regularization restricts student updates. We set α = 0 .5 in our main experiments. 
+
+Impact of the offset on cross-family OPD. To test whether the cross-family offset identified in Section 3 limits capability transfer, we gradually restore it while keeping the student anchor fixed at 
+
+α = 0 .5:
+
+At(β) = sg [∆ T,t + βO t − α∆S (yt, c t)] . (12) Here, Ot is the offset assigned to student token position t, and β controls the fraction restored, with β = 0 recovering CompassOPD. Figure 3(b) shows that the average accuracy of Granite4.1-3B decreases monotonically as more of the offset is re-stored, removing most of the gain over OPD. This decline under a fixed student anchor demonstrates the benefit of removing the cross-family offset for capability transfer. 
+
+5.4 Teacher and Reference Configurations Effect of teacher–reference scale separation. 
+
+We examine how the scale separation between T
+
+and R affects relative supervision. With Qwen3.5-0.8B fixed as R, we progressively reduce T from Qwen3.5-35B-A3B to 9B, 4B, and 2B. Table 3 shows that the average accuracy of Granite4.1-3B decreases as the teacher approaches the reference in scale, consistent with the within-family shift becoming less informative as their separation nar-rows. Nevertheless, the 2B teacher paired with the 0.8B reference still outperforms standard OPD 7Configuration AIME24 AIME25 AIME26 HMMT25 Feb HMMT25 Nov HMMT26 MATH-500 Avg. OPD 25.00 18.96 17.29 12.29 11.04 13.83 79.12 25.36 CompassOPD with R = 0 .8B 
+
+T = 35B -A 3B 33.75 24.58 25.62 12.29 14.37 21.02 84.36 30.86 
+
+T = 9B 31.25 22.92 23.75 12.92 13.33 18.56 83.76 29.50 
+
+T = 4B 30.21 23.13 24.58 12.08 9.17 17.80 83.61 28.65 
+
+T = 2B 24.37 19.79 21.67 12.92 9.58 15.53 81.66 26.50            
+
+> Table 3: Results on Granite4.1-3B with Qwen3.5 teachers of different scales. CompassOPD uses a fixed Qwen3.5-0.8B reference, while OPD uses the 35B-A3B teacher.
+> Method Reference RAvg. SFT –24.39 OPD –25.36 CompassOPD Separate checkpoint (0.8B) 30.86 CompassOPD Teacher self-reference 28.79
+> Table 4: Reference constructions for Granite4.1-3B with Qwen3.5-35B-A3B as the teacher. Self-reference uses the same teacher checkpoint with expert activation re-duced to approximately 2B active parameters.
+
+with the 35B-A3B teacher. Thus, even modest within-family variation can provide more effective supervision than the absolute likelihoods of a much larger cross-family teacher model. This reliance on a teacher-family reference raises a practical ques-tion: what if the teacher family lacks a suitable low-capability checkpoint to serve as R?
+
+Can a teacher model provide its own reference? 
+
+CompassOPD relies on a suitable low-capability reference within the teacher family to remove the offset. A practical concern is that some top-tier very large models may not offer publicly accessi-ble smaller versions within the same family, such as Kimi K3 (Team et al., 2026). However, these models commonly use MoE architectures, which provide a natural alternative: the same checkpoint can be run under different activation capacities. We therefore use Qwen3.5-35B-A3B under its stan-dard routing configuration as T , and construct a reference R with roughly 2B activated parameters by enabling only one shared expert and one fine-grained expert. This design varies the activation ca-pacity while preserving the checkpoint and model family, allowing the teacher model to provide its own within-family reference. Table 4 shows that this self-reference configura-tion improves average accuracy over standard OPD by 3.43 points. Although it trails the dedicated 0.8B reference by 2.07 points, it retains a substan-tial improvement without requiring a separately released reference checkpoint. The result shows that useful within-family variation can come from different activation capacities of a single teacher, providing a practical alternative when a suitable reference model is unavailable. 
+
+6 Related Work 
+
+Cross-family distillation. Different training recipes and tokenizers complicate distribution matching in cross-family distillation. Sequence-level distillation transfers knowledge through teacher-generated text, which students can process with their own tokenizers (Kim and Rush, 2016). For finer-grained supervision, DSKD (Zhang et al., 2024) combines dual-space distillation with cross-model attention to align representations and distri-butions. ULD (Boizard et al., 2025) uses optimal transport to compare distributions across vocabular-ies, while ALM (Minixhofer et al., 2025) matches likelihoods on corresponding text segments. Re-cent work extends cross-tokenizer distillation to student-generated trajectories through shared text units, token mapping, or byte-prefix marginaliza-tion (Sun et al., 2026; Niu et al., 2026; Wang et al., 2026). Together, these methods provide compara-ble supervision interfaces across model families. 
+
+On-policy distillation. On-policy distillation ob-tains teacher feedback on student-generated trajec-tories, covering the states visited by the student. GKD (Agarwal et al., 2024) studies distillation on student-generated sequences with different di-vergence objectives, while MiniLLM (Gu et al., 2026b) adopts reverse KL optimization. We fol-low the sampled OPD formulation of Lu and Lab (2025), using teacher–student log-probability dif-ferences as token-level advantages. Recent analy-sis shows that transfer also depends on reasoning-8pattern compatibility and the teacher’s additional capabilities, beyond its standalone performance (Li et al., 2026). Concurrently with our work, other studies have explored contrastive supervision in OPD. RLCSD (Pan et al., 2026) contrasts correct and incorrect solution hints to mitigate style drift, while W2S-OPD (Yu et al., 2026) aims to improve a stronger student by leveraging differences between smaller models within the same family, thereby enabling weak-to-strong OPD. These methods pur-sue objectives distinct from ours. CompassOPD is the first work to identify the cross-family offset as a central limitation in cross-family OPD and to propose removing it while using within-family like-lihood shifts for cross-family capability transfer. 
+
+7 Conclusion 
+
+This paper reveals a key issue in cross-family OPD: standard OPD mixes the cross-family offset with within-family likelihood changes, allowing the for-mer to mask capability-sensitive supervision. Com-passOPD removes this offset, performs distillation using relative likelihood changes within the teacher family, and anchors student updates to the student’s initial policy. Experiments covering three student families and multiple teacher families show that CompassOPD consistently outperforms standard cross-family OPD. Further analysis validates the roles of offset removal and student-side anchoring. The self-reference construction based on MoE ex-pert activation also demonstrates that the method can be applied without an independent small-scale reference checkpoint. Overall, relative changes within the teacher family provide a more effective supervision interface for cross-family capability transfer. 
+
+Limitations 
+
+Due to computational constraints, we have not eval-uated CompassOPD on very large models. Nev-ertheless, our experiments across multiple teacher and student sizes demonstrate its effectiveness at different model scales. Extending this validation to substantially larger models remains a direction for future work. 
+
+References 
+
+Rishabh Agarwal, Nino Vieillard, Yongchao Zhou, Pi-otr Stanczyk, Sabela Ramos, Matthieu Geist, and Olivier Bachem. 2024. On-policy distillation of lan-guage models: Learning from self-generated mis-takes. Preprint , arXiv:2306.13649. Nicolas Boizard, Kevin El Haddad, Céline Hudelot, and Pierre Colombo. 2025. Towards cross-tokenizer distillation: the universal logit distillation loss for llms. Preprint , arXiv:2402.12030. Jasper Dekoninck, Nikola Jovanovi´ c, Tim Gehrunger, Kári Rögnvaldsson, Ivo Petrov, Chenhao Sun, and Martin Vechev. 2026. Beyond benchmarks: Math-arena as an evaluation platform for mathematics with llms. Naibin Gu, Chenxu Yang, Qingyi Si, Chuanyu Qin, Dingyu Yao, Peng Fu, Zheng Lin, Weiping Wang, Nan Duan, and Jiaqi Wang. 2026a. Co-evolving policy distillation. Preprint , arXiv:2604.27083. Yuxian Gu, Li Dong, Furu Wei, and Minlie Huang. 2026b. Minillm: On-policy distillation of large lan-guage models. Preprint , arXiv:2306.08543. Etash Guha, Ryan Marten, Sedrick Keh, Negin Raoof, Georgios Smyrnis, Hritik Bansal, Marianna Nezhu-rina, Jean Mercat, Trung Vu, Zayne Sprague, Ashima Suvarna, Benjamin Feuer, Liangyu Chen, Zaid Khan, Eric Frankel, Sachin Grover, Caroline Choi, Niklas Muennighoff, Shiye Su, and 31 others. 2025. Openthoughts: Data recipes for reasoning models. 
+
+Preprint , arXiv:2506.04178. IBM Granite Team. 2026. Granite-4.1-3B. Hugging Face. Model card. Yoon Kim and Alexander M. Rush. 2016. Sequence-level knowledge distillation. In Proceedings of the 2016 Conference on Empirical Methods in Natu-ral Language Processing , pages 1317–1327, Austin, Texas. Association for Computational Linguistics. Woosuk Kwon, Zhuohan Li, Siyuan Zhuang, Ying Sheng, Lianmin Zheng, Cody Hao Yu, Joseph E. Gonzalez, Hao Zhang, and Ion Stoica. 2023. Ef-ficient memory management for large language model serving with pagedattention. Preprint ,arXiv:2309.06180. Yaxuan Li, Yuxin Zuo, Bingxiang He, Jinqian Zhang, Chaojun Xiao, Cheng Qian, Tianyu Yu, Huan ang Gao, Wenkai Yang, Zhiyuan Liu, and Ning Ding. 2026. Rethinking on-policy distillation of large lan-guage models: Phenomenology, mechanism, and recipe. Preprint , arXiv:2604.13016. Hunter Lightman, Vineet Kosaraju, Yura Burda, Harri Edwards, Bowen Baker, Teddy Lee, Jan Leike, John Schulman, Ilya Sutskever, and Karl Cobbe. 2023. Let’s verify step by step. Preprint ,arXiv:2305.20050. Alexander H. Liu, Kartik Khandelwal, Sandeep Sub-ramanian, Victor Jouault, Abhinav Rastogi, Adrien Sadé, Alan Jeffares, Albert Jiang, Alexandre Cahill, Alexandre Gavaudan, Alexandre Sablayrolles, Amélie Héliou, Amos You, Andy Ehrenberg, Andy 
+
+9Lo, Anton Eliseev, Antonia Calvi, Avinash Soori-yarachchi, Baptiste Bout, and 101 others. 2026. Ministral 3. Preprint , arXiv:2601.08584. Kevin Lu and Thinking Machines Lab. 2025. On-policy distillation. Thinking Machines Lab: Con-nectionism . Https://thinkingmachines.ai/blog/on-policy-distillation. Michael Luo, Sijun Tan, Justin Wong, Xiaoxiang Shi, William Tang, Manan Roongta, Colin Cai, Jeffrey Luo, Tianjun Zhang, Erran Li, Raluca Ada Popa, and Ion Stoica. 2025. Deepscaler: Surpassing o1-preview with a 1.5b model by scaling rl. Notion Blog. Wenhan Ma, Jianyu Wei, Liang Zhao, Hailin Zhang, Bangjun Xiao, Lei Li, Qibin Yang, Bofei Gao, Yudong Wang, Rang Li, Jinhao Dong, Zhifang Sui, and Fuli Luo. 2026. Mopd: Multi-teacher on-policy distillation for capability integration in llm post-training. Preprint , arXiv:2606.30406. Benjamin Minixhofer, Ivan Vuli´ c, and Edoardo Maria Ponti. 2025. Universal cross-tokenizer distillation via approximate likelihood matching. Preprint ,arXiv:2503.20083. Yifan Niu, Han Xiao, Dongyi Liu, Zelong Wang, Di-hong Gong, Yasheng Wang, and Jia Li. 2026. Break-ing the tokenizer barrier: On-policy distillation across model families. Preprint , arXiv:2606.09456. Team Olmo, :, Allyson Ettinger, Amanda Bertsch, Bailey Kuehl, David Graham, David Heineman, Dirk Groeneveld, Faeze Brahman, Finbarr Timbers, Hamish Ivison, Jacob Morrison, Jake Poznanski, Kyle Lo, Luca Soldaini, Matt Jordan, Mayee Chen, Michael Noukhovitch, Nathan Lambert, and 50 oth-ers. 2026. Olmo 3. Preprint , arXiv:2512.13961. Leyi Pan, Shuchang Tao, Yunpeng Zhai, Lingzhe Zhang, Zhaoyang Liu, Bolin Ding, Aiwei Liu, and Lijie Wen. 2026. Rlcsd: Reinforcement learning with contrastive on-policy self-distillation. Preprint ,arXiv:2606.11709. Qwen Team. 2026. Qwen3.5: Towards native multi-modal agents. Guangming Sheng, Chi Zhang, Zilingfeng Ye, Xibin Wu, Wang Zhang, Ru Zhang, Yanghua Peng, Haibin Lin, and Chuan Wu. 2024. Hybridflow: A flexible and efficient rlhf framework. arXiv preprint arXiv: 2409.19256 .Jie Sun, Mao Zheng, Mingyang Song, Qiyong Zhong, Yilin Cheng, Bichuan Feng, Pengfei Liu, Junfeng Fang, and Xiang Wang. 2026. Simct: Recovering lost supervision for cross-tokenizer on-policy distillation. 
+
+Preprint , arXiv:2605.07711. Kimi Team, Tongtong Bai, Yifan Bai, Yiping Bao, M. C., Jianfeng Cai, Xinyuan Cai, Peizhou Cao, Yux-uan Cao, Ziwei Chai, Y. Charles, H. S. Che, Guanduo Chen, Guangyu Chen, Guanzheng Chen, Huarong Chen, Jia Chen, Jianlong Chen, Jun Chen, and 383 others. 2026. Kimi k3: Open frontier intelligence. 
+
+Preprint , arXiv:2607.24653. ModelScope Team. 2024. EvalScope: Evaluation frame-work for large models. Hao Wang, Kun Yuan, Wenlin Zhong, Minglei Zhang, Han Xiao, Ming Sun, and Honggang Qi. 2026. Cross-tokenizer on-policy distillation via byte-prefix marginalization. Preprint , arXiv:2607.22334. An Yang, Anfeng Li, Baosong Yang, Beichen Zhang, Binyuan Hui, Bo Zheng, Bowen Yu, Chang Gao, Chengen Huang, Chenxu Lv, Chujie Zheng, Day-iheng Liu, Fan Zhou, Fei Huang, Feng Hu, Hao Ge, Haoran Wei, Huan Lin, Jialong Tang, and 41 others. 2025. Qwen3 technical report. Preprint ,arXiv:2505.09388. Chenxu Yang, Chuanyu Qin, Qingyi Si, Minghui Chen, Naibin Gu, Dingyu Yao, Zheng Lin, Weiping Wang, Jiaqi Wang, and Nan Duan. 2026a. Self-distilled rlvr. 
+
+Preprint , arXiv:2604.03128. Wenkai Yang, Weijie Liu, Ruobing Xie, Kai Yang, Saiy-ong Yang, and Yankai Lin. 2026b. Learning beyond teacher: Generalized on-policy distillation with re-ward extrapolation. Preprint , arXiv:2602.12125. Fangxu Yu, Weijia Xu, Michael Xu, Tianyi Zhou, and Zinan Lin. 2026. Weak-to-strong on-policy distilla-tion. Preprint , arXiv:2607.26246. Qiying Yu, Zheng Zhang, Ruofei Zhu, Yufeng Yuan, Xiaochen Zuo, Yu Yue, Weinan Dai, Tiantian Fan, Gaohong Liu, Lingjun Liu, Xin Liu, Haibin Lin, Zhiqi Lin, Bole Ma, Guangming Sheng, Yuxuan Tong, Chi Zhang, Mofan Zhang, Wang Zhang, and 16 others. 2025. Dapo: An open-source llm re-inforcement learning system at scale. Preprint ,arXiv:2503.14476. Songming Zhang, Xue Zhang, Zengkui Sun, Yufeng Chen, and Jinan Xu. 2024. Dual-space knowledge distillation for large language models. Preprint ,arXiv:2406.17328. Yifan Zhang and Team Math-AI. 2024. American invi-tational mathematics examination (aime) 2024. Yifan Zhang and Team Math-AI. 2025. American invi-tational mathematics examination (aime) 2025. Yifan Zhang and Team Math-AI. 2026. American invi-tational mathematics examination (aime) 2026. 
+
+10 Appendix 
+
+A Implementation Details 
+
+A.1 Model Configuration 
+
+The main experiments use Qwen3.5-35B-A3B as the strong teacher T and Qwen3.5-0.8B as the teacher-family reference R, with both models run-ning in non-thinking mode. The student models are Granite4.1-3B, Qwen3-4B, and OLMo-3-7B-Instruct-SFT. For teacher-family generalization, we use Qwen3-30B-A3B-Instruct-2507 with Qwen3-0.6B, and Ministral-3-14B-Instruct-2512 with Ministral-3-3B-Instruct-2512, as teacher–reference pairs for Granite4.1-3B. For the teacher––reference scale separation experiments, we fix Qwen3.5-0.8B as 
+
+R and vary T across Qwen3.5-35B-A3B, 9B, 4B, and 2B. All four configurations use the same Granite4.1-3B SFT checkpoint trained on trajecto-ries generated by Qwen3.5-35B-A3B. During distillation, the strong teacher T , the teacher-family reference R, and the frozen copy of the student’s initial policy πref remain fixed. Only the current student policy πθ is updated. Standard OPD and CompassOPD start from the same SFT checkpoint in every comparison. 
+
+A.2 Cold Start Settings 
+
+Cross-family models often differ in response style, format, and reasoning length. Following prior work on vocabulary alignment (Sun et al., 2026), we first perform supervised fine-tuning on the student using reasoning trajectories generated by the strong teacher to reduce these differences before on-policy distillation. The resulting checkpoint initializes both standard OPD and CompassOPD. We use the OpenThoughts-114k (Guha et al., 2025) dataset, which includes 89,120 math prob-lems, 19,904 code problems, and 4,933 problems from biology, physics, chemistry, and logic puz-zles. For each teacher family, we replace the orig-inal dataset answers with responses generated by its strong teacher in non-thinking mode. We re-tain only samples that terminate normally and have non-empty responses. The cold-start stage uses full-parameter super-vised fine-tuning with a maximum sequence length of 32,768 tokens. We use a learning rate of 
+
+2 × 10 −5, weight decay of 10 −6, a cosine learn-ing rate schedule with 10% warmup, and a batch size of 32, and train for one epoch. This stage provides a common initialization adapted to the teacher’s responses. For each teacher–student com-bination, standard OPD and CompassOPD use the same cold-start data and SFT checkpoint. 
+
+A.3 Distillation Settings 
+
+Based on model capability, we use the DAPO-Math dataset for Qwen3-4B, and the DeepScaleR-Preview dataset for Granite4.1-3B and OLMo-3-7B. Rollouts use temperature 1.0 and top-p = 1 .0,with maximum prompt and response lengths of 2,048 and 24,576 tokens, respectively. The optimizer is AdamW with a constant learn-ing rate of 1×10 −6 and no warmup. The PPO mini-batch size is 64, and the micro-batch size per GPU is 1. The training objective uses the distillation signal without task correctness rewards. Within each comparison, standard OPD and CompassOPD use the same number of training steps and sampled student responses. All experiments are conducted on eight NVIDIA H200 GPUs. 
+
+A.4 Cross-Tokenizer Alignment 
+
+For each student-generated response, we score the same text with the strong teacher and the teacher-family reference. Token sequences across mod-els are monotonically aligned according to shared text boundaries. For one-to-one token matches, we use the corresponding token log-likelihood directly. For text segments represented by different numbers of tokens, we construct a common span and aver-age the token log-likelihoods within that span to reduce scale differences associated with tokenizer granularity. For CompassOPD, the teacher-family shift is computed from the aligned teacher and reference scores and assigned to every student token within the corresponding span. The student-reference dis-placement is computed directly at each student token position. Positions where consistent text boundaries cannot be formed are excluded by an alignment mask and do not contribute to the loss. Standard cross-family OPD and CompassOPD use the same alignment procedure. 
+
+A.5 MoE Self-Reference 
+
+In the self-reference experiments, T and R share the same Qwen3.5-35B-A3B checkpoint. The strong teacher uses the default MoE routing con-figuration, activating eight fine-grained experts per token in addition to the shared expert. The refer-ence configuration activates one fine-grained expert 11 while retaining the shared expert, corresponding to approximately 2B activated parameters. The two configurations share all model weights, the to-kenizer, and the input context, and differ only in expert activation. We perform two separate forward passes with frozen weights and use the difference between their aligned log-likelihoods as ∆T .
+
+A.6 Evaluation Protocol 
+
+All models use their native chat templates. Dur-ing evaluation, the maximum generation length is 24,576 tokens, the temperature is 0.7, top-p = 1 .0,top-k = 40 , and the presence penalty is 2.0. Each model independently samples 16 responses per problem on benchmarks. For each bench-mark, we report accuracy averaged over all sam-pled responses. The Avg. column reports the un-weighted mean of the seven benchmark accuracies. Evaluation uses the automatic scoring pipeline of EvalScope (Team, 2024). 
+
+B Analysis of the CompassOPD Target Policy 
+
+We analyze Equation 10 at a fixed context c, hold-ing ∆T and πref fixed. All policies are defined over the same aligned textual action space. Assume 
+
+α > 0, that πref is positive on this action space, and that the quantities below are finite. Define the normalization factor 
+
+Z(c) = X
+
+> z
+
+πref (z | c) exp (∆ T (z, c )/α ) . (13) The policy in Equation 11 satisfies 
+
+log π∗(z | c)
+
+πref (z | c) = ∆T (z, c )
+
+α − log Z(c).
+
+Substituting this identity into Equation 10 yields 
+
+JCompass (π; c) = α log Z(c)
+
+− αD KL (π(· | c)∥π∗(· | c)) .
+
+(14) Since Z(c) is independent of π and the KL di-vergence is nonnegative, the objective is bounded above by α log Z(c), with equality if and only if 
+
+π(· | c) = π∗(· | c). This establishes the optimality of Equation 11. 12
