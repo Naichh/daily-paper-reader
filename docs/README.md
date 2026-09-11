@@ -6,35 +6,36 @@
 </div>
 
 ## 每次日报
-- 最新运行日期：2026-09-10
-- 运行时间：2026-09-10 21:50:27 UTC
+- 最新运行日期：2026-09-11
+- 运行时间：2026-09-11 21:30:43 UTC
 - 运行状态：成功
-- 本次总论文数：5
-- 精读区：2
-- 速读区：3
+- 本次总论文数：4
+- 精读区：3
+- 速读区：1
 
 ### 今日简报（AI）
-今天精读2篇、速读3篇，聚焦On-Policy Distillation在跨家族、视频理解与视觉语言适配等方向的新进展。最值得看的是9.0分的CompassOPD（跨家族同策略蒸馏）和8.0分的Video-MOPD（多教师视频理解蒸馏）。普通读者可先读这两篇精读，再按需速览其余3篇。
-- 详情：[/202609/10/README](/202609/10/README)
+今日更新4篇，精读3篇、速读1篇，重点聚焦在线策略蒸馏的逐Token门控与负自蒸馏推理。
+
+最值得看的是9.0分的FKL/RKL混合多通道门控，以及8.0分的负自蒸馏“避错”推理方向。
+
+普通读者可先读高分蒸馏门控，再了解负自蒸馏思路，速读Miles v0.1把握生产级后训练。
+- 详情：[/202609/11/README](/202609/11/README)
 
 ### 精读区论文标签
-1. [CompassOPD: Cross-Family On-Policy Distillation via Within-Family Likelihood Shifts](/202609/10/2609.10154v1-compassopd-cross-family-on-policy-distillation-via-within-family-likelihood-shifts)  
+1. [A Unified Per-Token Gating Family for On-Policy Distillation: FKL/RKL Mixing with Multi-Channel and Bias Coefficients](/202609/11/2609.11768v1-a-unified-per-token-gating-family-for-on-policy-distillation-fklrkl-mixing-with-multi-channel-and-bias-coefficients)  
    标签：评分：9.0/10、query:policy-dist
-   evidence：分解似然偏移的跨族同策略蒸馏方法
-2. [Video-MOPD: Multi-Teacher On-Policy Distillation for Video Understanding](/202609/10/2609.09300v1-video-mopd-multi-teacher-on-policy-distillation-for-video-understanding)  
+   evidence：在线策略蒸馏的逐Token KL门控
+2. [Negative Self-Distillation: Learning to Reason by Avoiding Flaws](/202609/11/2609.11699v1-negative-self-distillation-learning-to-reason-by-avoiding-flaws)  
    标签：评分：8.0/10、query:policy-dist
-   evidence：用多教师同策略蒸馏整合后训练中的专家强化学习策略
+   evidence：负自蒸馏改进在策略自蒸馏
+3. [SenseNova-U1.5: Towards Native Unified Visual Intelligence](/202609/11/2609.11929v1-sensenova-u15-towards-native-unified-visual-intelligence)  
+   标签：评分：8.0/10、query:policy-dist
+   evidence：通过多专家在线策略蒸馏进行后训练能力整合
 
 ### 速读区论文标签
-1. [Beyond Verified Answers: Solver-Informed Self-Distillation for Bootstrapping Operations Research Language Models](/202609/10/2609.09957v1-beyond-verified-answers-solver-informed-self-distillation-for-bootstrapping-operations-research-language-models)  
-   标签：评分：7.0/10、query:policy-dist
-   evidence：用强化学习与在线策略自蒸馏进行大模型后训练
-2. [On-Policy Distillation for Vision-Language Model Adaptation, an Effective Paradigm on Low-Quality Multimodal Data](/202609/10/2609.10321v1-on-policy-distillation-for-vision-language-model-adaptation-an-effective-paradigm-on-low-quality-multimodal-data)  
-   标签：评分：7.0/10、query:policy-dist
-   evidence：首个将在线策略蒸馏用于视觉语言模型适配的框架
-3. [Miles v0.1: Production-Level Post-Training](/202609/10/2609.08368v1-miles-v01-production-level-post-training)  
+1. [Miles v0.1: Production-Level Post-Training](/202609/11/2609.08368v1-miles-v01-production-level-post-training)  
    标签：评分：6.0/10、query:policy-dist
-   evidence：支持在策略蒸馏的生产级后训练强化学习系统
+   evidence：支持在线策略蒸馏的生产级后训练系统
 
 
 <div class="dpr-home-promo-card">
