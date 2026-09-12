@@ -1,6 +1,9 @@
 * <a class="dpr-sidebar-root-link" href="#/">首页</a>
 * <a class="dpr-sidebar-root-link dpr-sidebar-noactive-link" href="javascript:void(0)" data-dpr-hash="#/tutorial/README">使用教程</a>
 * Daily Papers
+  * 2026-09-12 <!--dpr-date:20260912-->
+    * 精读区
+      * <a class="dpr-sidebar-item-link dpr-sidebar-item-structured" href="#/202609/12/2609.11929v1-sensenova-u15-towards-native-unified-visual-intelligence" data-sidebar-item="{&quot;title&quot;: &quot;SenseNova-U1.5: Towards Native Unified Visual Intelligence&quot;, &quot;link&quot;: &quot;https://arxiv.org/abs/2609.11929v1-sensenova-u15-towards-native-unified-visual-intelligence&quot;, &quot;score&quot;: &quot;9.0&quot;, &quot;tags&quot;: [{&quot;kind&quot;: &quot;query&quot;, &quot;label&quot;: &quot;policy-dist&quot;}], &quot;evidence&quot;: &quot;用于后训练的多专家在策略蒸馏&quot;}">SenseNova-U1.5: Towards Native Unified Visual Intelligence</a>
   * 2026-09-11 <!--dpr-date:20260911-->
     * 精读区
       * <a class="dpr-sidebar-item-link dpr-sidebar-item-structured" href="#/202609/11/2609.11768v1-a-unified-per-token-gating-family-for-on-policy-distillation-fklrkl-mixing-with-multi-channel-and-bias-coefficients" data-sidebar-item="{&quot;title&quot;: &quot;A Unified Per-Token Gating Family for On-Policy Distillation: FKL/RKL Mixing with Multi-Channel and Bias Coefficients&quot;, &quot;link&quot;: &quot;https://arxiv.org/abs/2609.11768v1-a-unified-per-token-gating-family-for-on-policy-distillation-fklrkl-mixing-with-multi-channel-and-bias-coefficients&quot;, &quot;score&quot;: &quot;9.0&quot;, &quot;tags&quot;: [{&quot;kind&quot;: &quot;query&quot;, &quot;label&quot;: &quot;policy-dist&quot;}], &quot;evidence&quot;: &quot;在线策略蒸馏的逐Token KL门控&quot;}">A Unified Per-Token Gating Family for On-Policy Distillation: FKL/RKL Mixing with Multi-Channel and Bias Coefficients</a>

@@ -6,36 +6,24 @@
 </div>
 
 ## 每次日报
-- 最新运行日期：2026-09-11
-- 运行时间：2026-09-11 21:30:43 UTC
+- 最新运行日期：2026-09-12
+- 运行时间：2026-09-12 21:23:43 UTC
 - 运行状态：成功
-- 本次总论文数：4
-- 精读区：3
-- 速读区：1
+- 本次总论文数：1
+- 精读区：1
+- 速读区：0
 
 ### 今日简报（AI）
-今日更新4篇，精读3篇、速读1篇，重点聚焦在线策略蒸馏的逐Token门控与负自蒸馏推理。
-
-最值得看的是9.0分的FKL/RKL混合多通道门控，以及8.0分的负自蒸馏“避错”推理方向。
-
-普通读者可先读高分蒸馏门控，再了解负自蒸馏思路，速读Miles v0.1把握生产级后训练。
-- 详情：[/202609/11/README](/202609/11/README)
+今日精读 1 篇 9.0 分论文，聚焦原生统一视觉智能。最值得看的是 SenseNova-U1.5 如何把多种视觉任务整合进一个统一框架。普通读者可先读其摘要与任务演示，判断是否契合自己的应用场景。
+- 详情：[/202609/12/README](/202609/12/README)
 
 ### 精读区论文标签
-1. [A Unified Per-Token Gating Family for On-Policy Distillation: FKL/RKL Mixing with Multi-Channel and Bias Coefficients](/202609/11/2609.11768v1-a-unified-per-token-gating-family-for-on-policy-distillation-fklrkl-mixing-with-multi-channel-and-bias-coefficients)  
+1. [SenseNova-U1.5: Towards Native Unified Visual Intelligence](/202609/12/2609.11929v1-sensenova-u15-towards-native-unified-visual-intelligence)  
    标签：评分：9.0/10、query:policy-dist
-   evidence：在线策略蒸馏的逐Token KL门控
-2. [Negative Self-Distillation: Learning to Reason by Avoiding Flaws](/202609/11/2609.11699v1-negative-self-distillation-learning-to-reason-by-avoiding-flaws)  
-   标签：评分：8.0/10、query:policy-dist
-   evidence：负自蒸馏改进在策略自蒸馏
-3. [SenseNova-U1.5: Towards Native Unified Visual Intelligence](/202609/11/2609.11929v1-sensenova-u15-towards-native-unified-visual-intelligence)  
-   标签：评分：8.0/10、query:policy-dist
-   evidence：通过多专家在线策略蒸馏进行后训练能力整合
+   evidence：用于后训练的多专家在策略蒸馏
 
 ### 速读区论文标签
-1. [Miles v0.1: Production-Level Post-Training](/202609/11/2609.08368v1-miles-v01-production-level-post-training)  
-   标签：评分：6.0/10、query:policy-dist
-   evidence：支持在线策略蒸馏的生产级后训练系统
+- 本次无速读推荐。
 
 
 <div class="dpr-home-promo-card">
