@@ -6,24 +6,26 @@
 </div>
 
 ## 每次日报
-- 最新运行日期：2026-09-12
-- 运行时间：2026-09-12 21:23:43 UTC
+- 最新运行日期：2026-09-13
+- 运行时间：2026-09-13 21:27:55 UTC
 - 运行状态：成功
 - 本次总论文数：1
-- 精读区：1
-- 速读区：0
+- 精读区：0
+- 速读区：1
 
 ### 今日简报（AI）
-今日精读 1 篇 9.0 分论文，聚焦原生统一视觉智能。最值得看的是 SenseNova-U1.5 如何把多种视觉任务整合进一个统一框架。普通读者可先读其摘要与任务演示，判断是否契合自己的应用场景。
-- 详情：[/202609/12/README](/202609/12/README)
+今天只速读了1篇，聚焦人形机器人前瞻行走：RoboDreamer用预测状态空间模型做拟人运动。
+最值得看的是“预测状态空间模型+前瞻式人形行走”这一组合，但6.0/10的评分提示它更像中等亮点的方向参考，而非必读突破。
+普通读者可先记住这个关键词，等后续出现实机验证或开源代码再深入跟进。
+- 详情：[/202609/13/README](/202609/13/README)
 
 ### 精读区论文标签
-1. [SenseNova-U1.5: Towards Native Unified Visual Intelligence](/202609/12/2609.11929v1-sensenova-u15-towards-native-unified-visual-intelligence)  
-   标签：评分：9.0/10、query:policy-dist
-   evidence：用于后训练的多专家在策略蒸馏
+- 本次无精读推荐。
 
 ### 速读区论文标签
-- 本次无速读推荐。
+1. [RoboDreamer: Anticipatory Humanoid Locomotion with Predictive State-Space Models](/202609/13/2609.07096v1-robodreamer-anticipatory-humanoid-locomotion-with-predictive-state-space-models)  
+   标签：评分：6.0/10、query:policy-dist
+   evidence：面向控制策略的教师-学生策略蒸馏
 
 
 <div class="dpr-home-promo-card">

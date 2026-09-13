@@ -1,6 +1,9 @@
 * <a class="dpr-sidebar-root-link" href="#/">首页</a>
 * <a class="dpr-sidebar-root-link dpr-sidebar-noactive-link" href="javascript:void(0)" data-dpr-hash="#/tutorial/README">使用教程</a>
 * Daily Papers
+  * 2026-09-13 <!--dpr-date:20260913-->
+    * 速读区
+      * <a class="dpr-sidebar-item-link dpr-sidebar-item-structured" href="#/202609/13/2609.07096v1-robodreamer-anticipatory-humanoid-locomotion-with-predictive-state-space-models" data-sidebar-item="{&quot;title&quot;: &quot;RoboDreamer: Anticipatory Humanoid Locomotion with Predictive State-Space Models&quot;, &quot;link&quot;: &quot;https://arxiv.org/abs/2609.07096v1-robodreamer-anticipatory-humanoid-locomotion-with-predictive-state-space-models&quot;, &quot;score&quot;: &quot;6.0&quot;, &quot;tags&quot;: [{&quot;kind&quot;: &quot;query&quot;, &quot;label&quot;: &quot;policy-dist&quot;}], &quot;evidence&quot;: &quot;面向控制策略的教师-学生策略蒸馏&quot;}">RoboDreamer: Anticipatory Humanoid Locomotion with Predictive State-Space Models</a>
   * 2026-09-12 <!--dpr-date:20260912-->
     * 精读区
       * <a class="dpr-sidebar-item-link dpr-sidebar-item-structured" href="#/202609/12/2609.11929v1-sensenova-u15-towards-native-unified-visual-intelligence" data-sidebar-item="{&quot;title&quot;: &quot;SenseNova-U1.5: Towards Native Unified Visual Intelligence&quot;, &quot;link&quot;: &quot;https://arxiv.org/abs/2609.11929v1-sensenova-u15-towards-native-unified-visual-intelligence&quot;, &quot;score&quot;: &quot;9.0&quot;, &quot;tags&quot;: [{&quot;kind&quot;: &quot;query&quot;, &quot;label&quot;: &quot;policy-dist&quot;}], &quot;evidence&quot;: &quot;用于后训练的多专家在策略蒸馏&quot;}">SenseNova-U1.5: Towards Native Unified Visual Intelligence</a>
