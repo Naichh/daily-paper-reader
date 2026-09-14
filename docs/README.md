@@ -6,26 +6,28 @@
 </div>
 
 ## 每次日报
-- 最新运行日期：2026-09-13
-- 运行时间：2026-09-13 21:27:55 UTC
+- 最新运行日期：2026-09-14
+- 运行时间：2026-09-14 22:22:31 UTC
 - 运行状态：成功
-- 本次总论文数：1
-- 精读区：0
+- 本次总论文数：2
+- 精读区：1
 - 速读区：1
 
 ### 今日简报（AI）
-今天只速读了1篇，聚焦人形机器人前瞻行走：RoboDreamer用预测状态空间模型做拟人运动。
-最值得看的是“预测状态空间模型+前瞻式人形行走”这一组合，但6.0/10的评分提示它更像中等亮点的方向参考，而非必读突破。
-普通读者可先记住这个关键词，等后续出现实机验证或开源代码再深入跟进。
-- 详情：[/202609/13/README](/202609/13/README)
+1) 2026-09-14日报：精读1篇、速读1篇，9.0分SCOPE-OPSD与7.0分RoboDreamer领衔今日推荐。
+2) 最值得看的是SCOPE-OPSD的Fisher条件化特权子空间与在策略自蒸馏，以及RoboDreamer用预测状态空间模型做前瞻人形运动。
+3) 普通读者可先看9.0分精读，再按机器人兴趣速览7.0分速读。
+- 详情：[/202609/14/README](/202609/14/README)
 
 ### 精读区论文标签
-- 本次无精读推荐。
+1. [SCOPE-OPSD: Fisher-Conditioned Privileged Subspaces for On-Policy Self-Distillation](/202609/14/2609.12579v1-scope-opsd-fisher-conditioned-privileged-subspaces-for-on-policy-self-distillation)  
+   标签：评分：9.0/10、query:policy-dist
+   evidence：在线自蒸馏与师生残差迁移
 
 ### 速读区论文标签
-1. [RoboDreamer: Anticipatory Humanoid Locomotion with Predictive State-Space Models](/202609/13/2609.07096v1-robodreamer-anticipatory-humanoid-locomotion-with-predictive-state-space-models)  
-   标签：评分：6.0/10、query:policy-dist
-   evidence：面向控制策略的教师-学生策略蒸馏
+1. [RoboDreamer: Anticipatory Humanoid Locomotion with Predictive State-Space Models](/202609/14/2609.07096v2-robodreamer-anticipatory-humanoid-locomotion-with-predictive-state-space-models)  
+   标签：评分：7.0/10、query:policy-dist
+   evidence：两阶段教师-学生策略蒸馏用于控制策略
 
 
 <div class="dpr-home-promo-card">
