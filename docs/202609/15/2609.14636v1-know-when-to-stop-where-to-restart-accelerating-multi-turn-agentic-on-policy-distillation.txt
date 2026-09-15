@@ -1,0 +1,1557 @@
+Know When to Stop, Where to Restart:
+Accelerating Multi-Turn Agentic On-Policy
+Distillation
+Zhiyu Gui1,2,‡,∗, Kexin Huang1,‡, Jia Guo2,†, Junkang Wu1, Zihao Wang2, Zhiqiang Zhang2,
+Jun Zhou2, Jiancan Wu1, Xiang Wang1,†
+1University of Science and Technology of China, 2Ant Group
+‡Equal contribution, †Corresponding authors, ∗Work done during internship at Ant Group.
+On-policy distillation (OPD) has become a standard approach for transferring capabilities from large
+teachers to compact students. Its cost, however, is dominated by autoregressive student rollouts
+and scales poorly in multi-turn agentic settings. Existing acceleration methods truncate or relocate
+the supervision signal according to fixed, offline budgets, despite substantial variation in teacher-
+signal reliability both within and across trajectories. Our empirical analysis on τ 2-bench reveals a
+clear structure in this variation: informative supervision is concentrated in the prefix of each turn,
+and—most importantly for multi-turn agentic training—the cross-turn loss of teacher endorsement
+is temporally locked to the student’s first erroneous action rather than accumulating gradually over
+turns. Building on these findings, we propose STRIDE (STop-and-Restart on-polIcy Distillation
+accEleration), which combines two complementary techniques: adaptive early stopping, which
+terminates a rollout once the cumulative teacher log-probability falls below an out-of-distribution
+threshold, and a prefix buffer, which caches high-quality prefixes and restarts generation at the
+weakest correct turn. Together, these mechanisms induce a data-driven curriculum that progressively
+extends coverage to later turns. On τ 2-bench retail, our method matches full-trajectory OPD and
+exceeds the 30B teacher at a 3.73× speedup, surpasses the baseline itself at 2.34×, and retains a
+4.51× speedup under cross-domain multi-teacher training. As a supplementary generalization test
+beyond the agentic setting, STRIDE outperforms full OPD on AIME 2025 at a 5.10× speedup and on
+AIME 2024 at a 3.08× speedup; averaged across the two evaluations, both fixed-budget truncation
+baselines remain below full OPD.
+Date: August 2026
+Keywords: On-policy distillation; agentic training; efficient post-training
+1
+Introduction
+Large language model (LLM) agents that interleave
+reasoning, tool use, and environment interaction
+over many turns are increasingly deployed in prac-
+tice OpenAI (2025); Anthropic (2025), yet serving
+a large agent model at scale remains costly. Knowl-
+edge distillation offers a standard remedy Hinton
+et al. (2015): train a compact student to imitate a
+stronger teacher. Classic off-policy distillation, how-
+ever, trains the student on teacher-generated data,
+whose distribution diverges from the states the stu-
+dent actually visits at deployment; the mismatch
+compounds over autoregressive generation and is am-
+plified across agentic interactions Liao et al. (2026);
+Zhong et al. (2026). On-policy distillation (OPD)
+removes the mismatch at its source: the student
+generates its own trajectories and the teacher sup-
+plies dense token-level feedback on them. OPD now
+underpins industrial training recipes Qwen Team
+(2025); DeepSeek-AI et al. (2026); Lu et al. (2025).
+1
+arXiv:2609.14636v1  [cs.LG]  13 Sep 2026
+
+
+(a) Motivation
+KL 
+ High → Low
+ Token
+ Turn mean
+1
+Within-turn: prefix dominates
+Tokens within a turn →
+2
+Across turns: no propagation
+Turn index k →
+3
+First error t*: KL residual rises
+−4
+−3
+−2
+−1
+t*
++1
++2
++3
++4
+Turn − t* → (shade = KL residual)
+Onset shifts per trajectory and over training — probe online
+➔
+(b) Method: STRIDE
+reused prefix
+generated+trained
+value below each box: mean teacher log-prob lk of that turn
+Epoch 1
+⬇
+early stop — signal no longer reliable (Σlk<λ)
+Epoch 2
+⬇
+prefix buffer — restart from the weakest turn k*
+Epoch 3
+rollout cost cut; full trajectory coverage kept
+➔
+(c) Results
+τ²-bench Retail
+⚡Up to 3.73× faster
+training time to match full-rollout reward
+🎯0.475 vs. 0.461 mean@16
+4B student surpasses its 30B teacher
+t1
+-0.6
+k* weakest
+t2
+-0.8
+t3
+-0.7
+STOP
+Σlk<λ
+t1
+reused
+t2
+-0.5
+t3
+-0.6
+k*
+t4
+-0.8
+t5
+-0.7
+STOP
+Σlk<λ
+t1
+t2
+reused
+t3
+t4
+-0.5
+t5
+-0.6
+EOS ✓
+t6
+-0.7
+Figure 1 Overview of STRIDE. (a) Where the teacher signal remains reliable in agentic OPD (Observations 1–3, §3.2). (b) STRIDE
+on one task across training epochs: adaptive early stopping terminates the rollout once the cumulative teacher log-probability crosses
+λ, and the prefix buffer caches the correct prefix and restarts the next rollout from the weakest correct turn k∗, which shifts rightward
+as the student improves (per-turn values are illustrative). (c) On τ 2-bench retail, STRIDE matches full-trajectory OPD and exceeds
+the 30B teacher at a 3.73× speedup.
+Removing this mismatch, however, comes at a price:
+online data generation. Unlike off-policy distillation,
+which trains on a fixed teacher-generated dataset
+that is collected once and reused throughout training,
+OPD must repeatedly roll out the evolving student
+to collect fresh on-policy trajectories—an overhead
+that is especially pronounced in multi-turn agentic
+settings. Existing acceleration methods reduce this
+cost through static decisions made offline, before or
+outside training: truncating supervision to a fixed
+prefix, which directly shortens the rollout Zhang
+et al. (2026); Ji et al. (2025); or moving OPD offline
+entirely by sampling rollouts once and precomput-
+ing teacher scores on them, which removes both the
+online rollout and the live teacher but freezes the
+training distribution at the initial policy Wu et al.
+(2026). Such static choices are misaligned with how
+the reliability of the distillation signal actually be-
+haves:
+• Within a response, the corrective signal gener-
+ally concentrates near the beginning, but the
+rate at which it decays—and thus the length of
+the useful prefix—varies substantially across
+responses;
+• Within a multi-turn trajectory, the teacher’s en-
+dorsement can collapse abruptly once the stu-
+dent takes a single wrong action, at a depth that
+differs from trajectory to trajectory and that it-
+self shifts as the student improves over training.
+As our experiments confirm (§5.2,
+§5.5),
+a
+static rule therefore inevitably over-truncates some
+trajectories—discarding valid supervision—while
+under-truncating others—retaining tokens whose
+teacher signal is no longer meaningful.
+This structure of the signal explains why offline
+remedies can fail: the failure point differs across
+trajectories and shifts over the course of training,
+so the reliability of the teacher signal must be as-
+sessed during the rollout itself. Our analysis on
+the τ 2-bench retail domain (§3; Figure 1a) confirms
+this: supervision concentrates in the within-turn pre-
+fix, the fade does not propagate across turns, and
+the cross-turn loss of teacher endorsement is tempo-
+rally locked to the student’s first erroneous action.
+The sharp, action-locked onset of failure can there-
+fore be caught by an online probe as it happens—
+enabling adaptive early stopping—while everything
+before it remains valid supervision that need not
+be regenerated—enabling safe prefix reuse. Both
+mechanisms are driven by a single statistic that OPD
+already computes during the rollout: the per-turn
+mean teacher log-probability.
+Taken together, these findings call for accelera-
+tion that is both adaptive and online. We propose
+STRIDE (Stop-and-Restart on-policy Distillation
+acceleration), which combines two complementary
+2
+
+
+techniques (§4; overview in Figure 1). Adaptive
+early stopping terminates a rollout as soon as the
+cumulative teacher log-probability crosses a thresh-
+old, directly cutting the dominant rollout cost while
+responding to the action-locked onset of out-of-
+distribution (OOD) drift rather than penalizing long-
+but-valid trajectories. Because pure truncation for-
+feits coverage of the later turns, a prefix buffer caches
+high-quality trajectory prefixes, restarts the next roll-
+out of the same task from the weakest correct turn,
+and thereby slides the training window rightward as
+the student improves—a data-driven curriculum that
+requires no hand-designed schedule.
+Our experiments focus on two multi-turn agen-
+tic settings—single-teacher OPD on τ 2-bench re-
+tail and cross-domain multi-teacher OPD on re-
+tail and telecom—supplemented by a single-turn
+math-reasoning study on AIME that tests whether
+the method’s effectiveness depends exclusively on
+the multi-turn structure (§5). On retail, STRIDE
+matches the full-trajectory baseline and exceeds
+the 30B teacher—while attaining the best pass@16
+overall—at a 3.73× speedup, and surpasses the base-
+line by +1.3% mean@16 at 2.34×; multi-teacher
+training retains a 4.5× speedup, and the method out-
+performs full OPD on AIME 2025 at 5.10× and
+on AIME 2024 at 3.08×. In contrast, fixed-budget
+truncation remains below full OPD when averaged
+across the two AIME evaluations.
+Our contributions are as follows:
+• An empirical analysis of teacher-signal reliabil-
+ity in agentic OPD that localizes the failure of
+the teacher signal: supervision concentrates in
+the within-turn prefix, and the cross-turn loss of
+endorsement is locked to the first erroneous ac-
+tion rather than to turn index or trajectory length
+(§3).
+• Adaptive early stopping, an online truncation
+rule driven by the cumulative teacher log-
+probability, which detects the onset of OOD
+drift instead of imposing a fixed budget (§4.1).
+• A prefix buffer that couples prefix reuse with
+weakest-turn localization, recovering the cov-
+erage lost to truncation through a data-driven
+curriculum over trajectory depth (§4.2).
+• A comprehensive evaluation across single-
+teacher and multi-teacher agentic OPD, plus
+a supplementary single-turn math-reasoning
+study, characterizing the speed–quality Pareto
+frontier and showing that acceleration does not
+compromise the student’s ability to exceed its
+teacher (§5).
+2
+Related Work
+On-policy distillation. Off-policy distillation suf-
+fers from a distribution mismatch between the
+teacher’s training data and the student’s deployment
+distribution, an error that compounds over autore-
+gressive generation. On-policy distillation (OPD)
+lets the student generate its own training data and
+uses the teacher only to score it, eliminating the mis-
+match at the source Fang et al. (2026); Sun et al.
+(2026a). GKD Agarwal et al. (2024) introduced sys-
+tematic on-policy sampling into LLM distillation,
+MiniLLM Gu et al. (2024) cast reverse-KL OPD as
+policy-gradient optimization, and Yang et al. (2026a)
+proved that OPD is a special case of densely KL-
+constrained RL whose reward extrapolation lets the
+student exceed the teacher—a property our agentic
+results confirm. OPD has since become a production
+staple Sun et al. (2026b): Qwen3 Qwen Team (2025)
+formalized a two-stage recipe of off-policy cold start
+followed by on-policy distillation, and Thinking Ma-
+chines Lu et al. (2025) reported RL-grade quality at
+roughly a tenth of RL cost by replacing sparse RL
+rewards with dense per-token teacher feedback.
+Teacher-signal reliability and OOD drift. A line
+of work examines when the teacher signal itself be-
+comes unreliable. Fu et al. (2026) show that once
+the student prefix leaves the teacher’s typical support
+the teacher’s conditional distribution is no longer re-
+liable; Liu et al. (2026a) identify local teachability
+collapse in strong-to-weak OPD, motivating prefix-
+only supervision; Liu et al. (2026b) formalize the
+within-turn aspect of this phenomenon as supervi-
+sion fidelity decay and counter it with a lookahead
+reward; and Li et al. (2026a) restrict confidence-
+based decisions to reliably calibrated position inter-
+vals. TIP Xu et al. (2026) shows that training on a
+fraction of tokens can match full-token OPD, but its
+selection presupposes a complete rollout and a full
+3
+
+
+teacher pass, so it reduces neither the rollout nor the
+teacher cost. Our analysis in §3.2 is complementary:
+it establishes the within-turn fade empirically, shows
+that it does not transfer across turns, and localizes
+the cross-turn OOD trigger to a specific erroneous
+action rather than to turn index or trajectory length.
+Accelerating OPD. Since the cost of OPD is dom-
+inated by the student rollout, several methods strip
+or relocate the supervision signal at a fixed budget.
+Fast OPD Zhang et al. (2026) truncates supervision
+to a fixed student prefix, and Lightning OPD Wu
+et al. (2026) moves OPD offline entirely at the
+price of freezing the training distribution at the
+initial policy. By contrast, our early stopping is
+adaptive and online, and the prefix buffer recov-
+ers the coverage that truncation forgoes. Closest
+to our work are four concurrent methods: Prune-
+OPD Yang et al. (2026b) truncates drifted rollouts
+in real time by token-level student–teacher compati-
+bility; TurnOPD Zhou et al. (2026) budgets the roll-
+out depth of multi-turn agent training from probe-
+based turn statistics; TCOD Wang et al. (2026) con-
+trols the exposed trajectory depth by a manually de-
+signed temporal-curriculum schedule and regener-
+ates every rollout from scratch; and ReOPD Liao
+et al. (2026) replays pre-collected teacher prefixes
+offline: the student is on-policy only at the sin-
+gle supervised step, and reliability is reduced to a
+static position-decaying schedule over a frozen pre-
+fix pool—whereas Observation 3 shows the failure
+point is action-locked and shifts over training. All
+four allocate computation by supervision reliability,
+as we do, but none recovers what truncation removes.
+3
+Teacher-Signal Reliability and the Cause
+of OOD Drift
+3.1
+Preliminaries: Token-Level OPD
+We begin by fixing the minimal notation used
+throughout. In on-policy distillation (OPD), the stu-
+dent model πθ generates a response y ∼πθ(· | x)
+from an input x, and the teacher model πT com-
+putes log-probabilities at each student-generated to-
+ken, supplying a dense token-level supervision sig-
+nal. OPD is theoretically grounded in minimizing
+the sequence-level reverse KL divergence between
+the student and teacher policies Gu et al. (2024). Ap-
+plying the policy-gradient theorem to this objective
+yields a gradient estimator in which the update at
+position t couples the immediate reward at t with all
+future rewards:
+gseq
+t
+= ∇θ log πθ(yt | y<t) ·
+|y|
+X
+t′=t
+rt′,
+rt = log πT (yt | y<t) −log πθ(yt | y<t),
+(1)
+where gseq
+t
+denotes the gradient contribution of posi-
+tion t under the sequence-level objective, and rt is
+the per-token teacher–student log-probability ratio.
+This estimator is unbiased, but its variance grows
+rapidly with sequence length (up to O(T 4) under
+bounded rewards and gradients Li et al. (2026b)),
+which is prohibitive for long agentic trajectories.
+Token-level OPD, which we adopt throughout, re-
+moves the future-reward coupling—equivalently, set-
+ting the discount factor to zero—so that each position
+is updated using only its local reward:
+LOPD = Ex, y∼πθ
+h
+−
+X
+t
+log πθ(yt | y<t) · rt
+· 1trainable(t)
+i
+,
+(2)
+where rt is treated as a constant (stop-gradient), and
+the indicator 1trainable(t) masks out tokens returned
+by the environment as observations, ensuring that
+only tokens the student generates on its own par-
+ticipate in the loss. Token-level OPD is a biased
+approximation of the sequence-level objective, but
+it reduces the worst-case gradient variance from
+O(T 4) to O(T 2), making it a practical choice for
+long-horizon training.
+In agentic settings, a trajectory τ consists of alternat-
+ing student actions and environment observations:
+τ = [x, athink
+0
+, atool
+0 , o1, athink
+1
+, atool
+1 , o2, . . .]
+(3)
+We partition the student’s generation by interaction
+turn: turn k comprises the reasoning block and tool
+call that the student produces before the (k+1)-th en-
+vironment observation. Let y(k) = (y(k)
+1 , . . . , y(k)
+nk )
+denote the token sequence generated in turn k, with
+nk tokens, and h(k) the history context up to turn k.
+The per-turn mean teacher log-probability is
+¯lk = 1
+nk
+nk
+X
+i=1
+log πT
+
+y(k)
+i
+ h(k), y(k)
+<i
+
+.
+(4)
+4
+
+
+Intuitively, ¯lk characterizes the average endorsement
+the teacher grants to the student’s turn-k output:
+higher values indicate that the student’s generation
+lies closer to the teacher’s support. Fu et al. (2026)
+have shown that once the teacher’s conditional distri-
+bution πT (· | y<t) over a prefix falls into an out-of-
+distribution (OOD) region it is no longer reliable, and
+the resulting log-probability signal log πT (yt | y<t)
+may produce misleading gradient directions. ¯lk and
+its evolution across turns therefore serve both as the
+object of the empirical analysis that follows (§3.2)
+and as the core online probe underlying the early-
+stopping criterion (§4.1).
+3.2
+Empirical Analysis of Teacher-Signal
+Reliability
+We examine where the teacher signal remains reli-
+able and, more importantly, why it breaks down. The
+analysis is conducted on the τ 2-bench retail domain
+(456 tasks, 5,856 turns) with student Qwen3-4B and
+the Qwen3-30B-A3B-Thinking-2507 teacher used in
+our single-teacher experiments (§5.2). For each turn
+we track the mean teacher log-probability ¯lk (Eq. 4)
+and the mean per-token student–teacher KL (esti-
+mated per token by log πθ(yt | y<t) −log πT (yt |
+y<t), i.e. −rt in Eq. 1).
+Observation 1 (within-turn). The within-turn pro-
+file is flat only at the very opening, where the
+response-framing tokens dominate: past the first
+∼150 tokens, the per-token student–teacher KL
+peaks at +0.62 and then declines monotonically
+across the remaining deciles to +0.37, while the
+mean teacher log-probability rises steadily from
+−0.78 to −0.65 over the same span (Figure 2a).
+The student–teacher gap thus narrows as genera-
+tion proceeds—the teacher grants increasing endorse-
+ment to the student’s own tokens, and its scores
+progressively lose the power to discriminate correct
+from incorrect continuations. Effective supervision
+is therefore concentrated in the response prefix, the
+empirical basis of prefix-only distillation Zhang et al.
+(2026); Liu et al. (2026a). The fade mirrors two
+independent findings: Liu et al. (2026b) show that
+the teacher’s distribution loses confidence and dis-
+criminative power as the prefix grows, while Li et al.
+(2026a) report late-response inverse calibration of
+OPD confidence.
+Observation 2 (across turns). The within-turn fade
+does not propagate to the turn axis. Were the teacher
+to assimilate the student distribution by reading an
+ever-growing body of student text turn after turn, ¯lk
+would rise monotonically with k. It does not: across
+turns 0–12, the mean teacher log-probability is es-
+sentially flat (+0.07) and the KL shift is correspond-
+ingly small (−0.06; Figure 2a), both far weaker than
+the within-turn shift and non-monotone. The reason
+is structural rather than statistical: the Qwen3 Qwen
+Team (2025) chat template drops the reasoning con-
+tent of previous assistant turns when composing later-
+turn prompts, so the teacher observes too little stu-
+dent text to fit its distribution turn by turn. Any
+pronounced cross-turn decline of ¯lk therefore cannot
+be attributed to progressive assimilation and must
+have another origin.
+Observation 3 (origin of cross-turn drift). For each
+failed task we identify the first error turn t∗—the ear-
+liest turn at which the agent’s action departs from the
+environment’s reference behavior—and align turns
+by the offset turn −t∗. To isolate structure indepen-
+dent of turn position we residualize against the per-
+turn-index mean, removing exactly the weak trend
+documented in Observation 2. As Figure 2b shows,
+the teacher-log-probability residual is flat and mildly
+positive before t∗, turns over at t∗, and remains neg-
+ative thereafter, while the KL residual mirrors it.
+The residualized before-versus-after effect (Cohen’s
+d, computed over the 267 failed tasks for which t∗
+is identified) is +0.30 on ¯l and −0.33 on the KL.
+The loss of endorsement is thus temporally locked
+to the erroneous action rather than to turn index or
+trajectory length: a wrong action in turn t∗drives
+the subsequent state off the teacher’s support—the
+single-turn trigger of the inter-turn error accumula-
+tion described by TCOD Wang et al. (2026).
+Implications. The reliable signal occupies precisely
+the region the teacher can still support: within a turn,
+the high-contrast prefix (Observation 1); across turns,
+the segment preceding an erroneous action (Observa-
+tion 3). In both regimes the boundary of this region
+is tracked by ¯lk. This calls for an online detector
+rather than a post-hoc selection of “critical tokens,”
+which would presuppose the full rollout Xu et al.
+5
+
+
+Figure 2 (a) Per-token student–teacher KL versus the relative
+position within a turn (blue) and versus the turn index (red) on
+τ 2-bench retail (student Qwen3-4B, teacher Qwen3-30B-A3B-
+Thinking-2507). (b) Residualized teacher log-probability (solid)
+and student–teacher KL (dashed) versus the offset from the first-
+error turn t∗; shaded bands indicate ±1 standard error.
+(2026): detect the crossing of the support boundary
+through the cumulative decline of ¯lk and truncate
+there (§4.1), while a prefix buffer recovers the cov-
+erage that truncation forgoes on later-stage behavior
+(§4.2).
+4
+Method
+4.1
+Early Stopping via Teacher Log-Probability
+Motivation.
+§3.2 establishes that the per-turn
+teacher log-probability ¯lk tracks the reliability of
+the teacher’s supervision, and that the cross-turn loss
+of endorsement is sharp and locked to the first er-
+roneous action (Observations 2 and 3)—precisely
+the kind of drop an online probe can catch as it hap-
+pens. Tokens generated after such a drop lie off the
+teacher’s support and carry no reliable gradient. The
+natural response is to terminate the rollout as soon
+as the cumulative teacher log-probability signals that
+the trajectory has crossed into an OOD region, rather
+than to keep computing over an unreliable one.
+Detection criterion.
+We use the per-turn mean
+teacher log-probability ¯lk (Eq. 4) as an online OOD
+probe. During normal interaction ¯lk typically re-
+sides in a moderately negative range, reflecting the
+teacher’s partial endorsement of the student’s plau-
+sible but imperfect outputs; when the student drifts
+into an OOD region, ¯lk drops sharply, rapidly push-
+ing the cumulative sum past the threshold. Formally,
+we terminate the rollout at the first turn K∗for which
+K∗
+X
+k=1
+¯lk < λ,
+(5)
+where the threshold λ controls OOD sensitivity.
+Generation stops at turn K∗, but tokens from
+turns 1 through K∗—including the triggering turn—
+participate in the OPD loss: under token-level OPD
+the teacher’s low log-probability on the erroneous
+action translates into a negative per-token reward,
+so the triggering turn supplies an explicit negative
+signal that teaches the student which action to avoid,
+and discarding it would forfeit precisely the most
+informative corrective signal. Because the cross-
+turn decline of ¯lk is locked to an erroneous action
+rather than to turn index or trajectory length (Ob-
+servation 3), this rule responds to erroneous states
+instead of penalizing long-but-valid trajectories.
+Acceleration mechanism. Early stopping directly
+reduces the dominant cost of OPD: the student’s
+autoregressive rollout, which accounts for the bulk
+of per-step training time in agentic settings—every
+discarded turn is generation that never happens. Ter-
+minating early also avoids teacher scoring and gradi-
+ent computation over the truncated suffix, but these
+savings are secondary: a teacher forward pass over
+the retained prefix is cheap relative to autoregres-
+sive generation, so the measured speedup is driven
+essentially by the shortened rollout.
+Synergy with the prefix buffer. When the prefix buffer
+is enabled, the early-stopping cumulative sum is
+taken only over the newly generated turns of the
+current rollout, i.e. PK
+j=K0+1 ¯lj < λ, where K0 is
+the number of turns already covered by the prefix.
+This design keeps historical turns reused from the
+prefix out of the stopping decision: their accumu-
+lated teacher signal would otherwise drown out the
+signal of the newly generated turns and blunt the
+probe’s OOD-detection sensitivity.
+The λ control surface. A smaller |λ| gives an aggres-
+sive stopping policy—high OOD sensitivity and max-
+imum speedup, at the risk of misjudging the bound-
+ary region and of insufficient coverage; a larger |λ| is
+more conservative, tolerating more of the boundary-
+signal region at the cost of a reduced speedup. The
+appropriate scale of λ depends on the token length of
+the generation unit and is therefore chosen per task
+domain.
+6
+
+
+4.2
+Prefix Buffer: Progressive Coverage
+Motivation. Early stopping saves computation but
+forfeits coverage of the later turns. To recover that
+coverage without giving back the speedup, we in-
+troduce the prefix buffer (PB), which caches high-
+quality trajectory prefixes from prior rollouts and
+reuses them as context for subsequent rollouts, so
+that the student’s generation—and the training that
+follows—concentrates on the weakest remaining
+turns.
+Mechanism. The PB operates in four steps during
+each training iteration:
+1. Quality decision. If ¯lk > α, turn k is deemed
+a “correct turn,” and its prefix is admitted as a
+reuse candidate. α is the prefix-quality thresh-
+old.
+2. Weakest-turn localization. Among all contin-
+uous correct prefix turns 1, . . . , Kmax (where
+Kmax is the length of the longest continuous
+correct prefix), locate the turn with the lowest
+teacher endorsement:
+k∗= arg min1≤k≤Kmax ¯lk,
+(6)
+i.e. the weakest correct turn in the trajectory—
+the part most in need of training.
+3. Prefix reuse. In the next rollout of the same
+task, use the trajectory prefix up to turn k∗−1 as
+context, resample from turn k∗onward, and ap-
+ply the early-stopping rule (Eq. 5) to the newly
+generated portion.
+4. Progressive coverage. As the student gradu-
+ally masters the earlier turns, their ¯lk values rise
+and k∗shifts rightward naturally, so the training
+window slides toward the later stages of the tra-
+jectory without any hand-designed curriculum
+schedule.
+The α control surface. Lowering α relaxes the qual-
+ity gate until, in the limit, filtering is disabled and
+every prefix becomes reusable; raising it admits only
+prefixes with sufficient teacher endorsement, guard-
+ing against prefix pollution at the cost of fewer reuse
+opportunities. We study this trade-off in the ablation
+of §5.4.3.
+Task x ∈D
+Prior
+record?
+Locate weakest
+k∗= arg min ¯lk
+Reuse prefix
+y<k∗
+Student rollout
+(autoregressive)
+Teacher eval
+compute ¯lk
+P ¯lk
+< λ?
+OPD loss +
+update θ
+Record ¯lk
+→H(x)
+yes
+no
+yes: stop
+no: continue
+next task
+Figure 3 Joint training framework of early stopping and prefix
+buffer.
+In single-turn tasks (e.g., math), a single reasoning
+error does not necessarily imply that the prefix is
+unusable (subsequent reasoning may still correct it-
+self and return a correct trajectory), so in that setting
+we disable α quality filtering; in the multi-teacher
+setting, α filtering plays a critical safety role (§5.4.3,
+Figure 7).
+4.3
+Synergy and Overall Algorithm
+We refer to the combination of the two components
+as STRIDE: early stopping answers “when to stop,”
+cutting the trajectory once it no longer provides a re-
+liable learning signal, and the prefix buffer answers
+“where to restart,” refocusing training on the weakest
+remaining turns. The complete training procedure
+is summarized in Algorithm 1 and illustrated in Fig-
+ure 3.
+5
+Experiments
+Our experiments are designed to answer three pro-
+gressively broader questions: (1) Is the proposed
+method effective in the core single-teacher agentic
+OPD setting? (2) Can it generalize to cross-domain
+multi-teacher OPD? (3) Does its effectiveness rely
+on the multi-turn structure of agentic tasks, or can it
+be extrapolated to single-turn reasoning tasks?
+7
+
+
+Algorithm 1: STRIDE: accelerated OPD with
+adaptive early stopping and prefix buffer.
+Input :Dataset D, student πθ, teacher πT ,
+thresholds λ, α
+1 Initialize per-task trajectory record H ←∅;
+2 for each training iteration do
+3
+for each task x ∈D do
+4
+if H(x) contains the prior rollout’s
+trajectory record then
+5
+Take its per-turn teacher log-probs
+{¯l1, . . . , ¯lT };
+6
+Kmax ←max{K | ∀k ≤K, ¯lk >
+α};
+7
+k∗←arg min1≤k≤Kmax ¯lk;
+8
+Use the prefix up to turn k∗−1 as the
+context start, K0 ←k∗−1;
+9
+else
+10
+K0 ←0;
+11
+for turn k = K0+1, K0+2, . . . do
+12
+Student generates turn k; teacher
+computes ¯lk;
+13
+if Pk
+j=K0+1 ¯lj < λ then
+14
+Early stop; break;
+15
+Record this trajectory’s {¯lk} to H(x);
+16
+Compute the OPD loss on the retained
+tokens (including the turn that triggered
+stopping) and update θ;
+5.1
+Experimental Setup
+Models and infrastructure. All experiments are
+implemented on the veRL framework Sheng et al.
+(2025), with rollout handled by vLLM. The three
+experiment configurations are:
+• Single-teacher agentic (§5.2): Student Qwen3-
+4B, teacher Qwen3-30B-A3B-Thinking-2507.
+The teacher doubles as the user simulator and
+the distillation-signal provider; multi-turn inter-
+action follows the τ 2-bench agentic specifica-
+tion Barres et al. (2025).
+• Multi-teacher agentic (§5.3): Student Qwen3-
+4B, with an additional Qwen3-8B scaling study,
+distilled jointly from a retail-domain and a
+telecom-domain expert teacher; an independent
+user simulator drives the dialogue but provides
+no distillation supervision, and each trajectory is
+scored by the expert teacher of its own domain.
+• Math reasoning (§5.5): Student Qwen3-4B-
+Base, SFT-initialized on OpenThought3-8B rea-
+soning traces; teacher Qwen3-8B. Single-turn
+chain-of-thought generation on dapo-math-17k.
+Tasks and metrics. Training tasks are synthesized
+on the τ 2-bench environments following the data-
+generation pipeline of Gao et al. (2026). The single-
+teacher experiment is evaluated on the retail do-
+main with mean@16 and pass@16, the multi-teacher
+experiment on retail and telecom with mean@4,
+and the math experiment on AIME 2024/2025 with
+mean@8; both agentic evaluations use the corrected
+τ 3 release of the task sets Sierra Research (2026).
+Further data and evaluation details are deferred to
+Appendix A.
+Compared methods. Full-trajectory OPD (base-
+line): full rollout, all student-generated tokens par-
+ticipate in the loss, early stopping and prefix buffer
+disabled. Fast OPD Zhang et al. (2026): the rep-
+resentative fixed-budget truncation method, which
+shortens the rollout to a fixed budget. In the multi-
+turn agentic experiments we evaluate its natural
+multi-turn extension with a fixed budget of 5 in-
+teraction turns; in the math experiment we evaluate
+the original token-budget variant (2048/4096 tokens).
+TCOD-F2B Wang et al. (2026): temporal-curriculum
+OPD, which controls the exposed trajectory depth
+by a manually designed schedule and expands it
+over training (F2B variant). turnOPD Zhou et al.
+(2026): turn-aware OPD for long-horizon agent train-
+ing. STRIDE w/o PB: adaptive early stopping only
+(λ active, prefix buffer disabled). STRIDE: the full
+combination of adaptive early stopping and the prefix
+buffer, reusing a prefix whenever one is available.
+Threshold configuration. The λ values examined in
+each setting are reported in the corresponding results
+tables; the prefix-quality threshold α is fixed per
+setting (Appendix A).
+5.2
+Main Results: Single-Teacher Agentic OPD
+STRIDE matches or surpasses both the baseline
+and the teacher. With the prefix buffer, STRIDE
+8
+
+
+Table 1 Single-teacher agentic OPD results (τ 2-bench retail). Bold marks the best result in each column.
+Method
+s/step
+Speedup
+mean@16
+pass@16
+Reference
+Teacher (30B)
+—
+—
+0.461
+0.847
+Baselines
+Full OPD
+273.8
+1.00×
+0.477
+0.850
+Fast OPD Zhang et al. (2026)
+101.4
+2.70×
+0.434
+0.800
+TCOD-F2B Wang et al. (2026)
+135.9
+2.01×
+0.437
+0.822
+turnOPD Zhou et al. (2026)
+167.4
+1.64×
+0.434
+0.801
+STRIDE w/o prefix buffer (ours)
+λ=−1
+61.8
+4.43×
+0.368
+0.732
+λ=−1.5
+80.1
+3.42×
+0.440
+0.816
+λ=−2
+95.7
+2.86×
+0.451
+0.823
+STRIDE w/ prefix buffer (ours)
+λ=−1
+73.3
+3.73×
+0.475
+0.859
+λ=−1.5
+91.4
+3.00×
+0.463
+0.847
+λ=−2
+117.2
+2.34×
+0.483
+0.837
+stays on par with full-trajectory OPD at every stop-
+ping threshold (Table 1; training curves in Ap-
+pendix C): the best configuration attains the high-
+est mean@16 overall, exceeding both the full-OPD
+baseline and the 30B teacher, and even the most
+aggressive threshold essentially matches the base-
+line’s mean@16 while achieving the best pass@16
+of all methods. Notably, the student surpasses its
+own teacher, so the acceleration does not come at the
+expense of this capability.
+Comparison with fixed-budget and curriculum
+baselines. Fast OPD, despite a 2.70× speedup, falls
+below the baseline on both metrics: a fixed turn
+budget cannot distinguish high-quality trajectories
+from OOD ones—the former are cut off prematurely
+while the latter are retained beyond the effective
+signal. The curriculum-based TCOD-F2B and the
+turn-aware turnOPD close part of the gap but remain
+clearly below the full-OPD baseline, at even lower
+speedups. STRIDE dominates all three on accuracy
+and speed simultaneously—even its most aggressive
+configuration is both more accurate and faster than
+any of them. This confirms that effective accelera-
+tion hinges on online OOD detection rather than on
+a fixed budget or a hand-designed schedule.
+Wall-clock efficiency. Figure 4 shows mean@16
+against cumulative training time.
+STRIDE with
+the prefix buffer, at its most aggressive threshold,
+matches the baseline’s final quality with about a quar-
+0
+2
+4
+6
+8
+10
+Cumulative training time (h)
+0.30
+0.35
+0.40
+0.45
+mean@16
+Full OPD (baseline)
+Fast OPD (max-turn)
+TCOD-F2B
+turnOPD
+Teacher (30B)
+STRIDE (ours)
+Figure 4 Wall-clock efficiency: mean@16 vs. cumulative train-
+ing hours.
+ter of its time budget (2.85 h vs. 10.65 h for the same
+140 steps), while TCOD-F2B and turnOPD require
+considerably more time without reaching baseline
+quality at any point; STRIDE thus dominates them
+on the wall-clock axis as well.
+5.3
+Main Results: Multi-Teacher Agentic OPD
+We extend the evaluation to cross-domain multi-
+teacher OPD on retail and telecom (setup in §5.1).
+This setting tests whether the proposed acceleration
+remains effective under a more complex student–
+teacher architecture (multiple domain-specialized
+teachers, cross-domain joint training), and whether
+the prefix-quality threshold α plays a measurable
+role when domain difficulty differs.
+9
+
+
+Table 2 Multi-teacher agentic OPD results (τ 2-bench retail + telecom, mean@4). Bold marks the best non-reference result in each
+domain column. Italic rows are references.
+Method
+s/step
+Speedup
+Retail
+Telecom
+Reference: expert teachers
+Retail
+—
+—
+0.649
+0.384
+Telecom
+—
+—
+0.622
+0.960
+Reference: single-domain full OPD
+Retail
+157.6
+—
+0.586
+—
+Telecom
+423.1
+—
+—
+0.816
+Baselines
+Full OPD
+221.5
+1.00×
+0.590
+0.853
+Fast OPD Zhang et al. (2026)
+47.8
+4.63×
+0.548
+0.783
+TCOD-F2B Wang et al. (2026)
+71.3
+3.11×
+0.561
+0.752
+turnOPD Zhou et al. (2026)
+120.2
+1.84×
+0.568
+0.754
+STRIDE w/o prefix buffer (ours)
+λ=−1.5
+39.3
+5.64×
+0.553
+0.680
+λ=−2
+43.8
+5.06×
+0.533
+0.739
+STRIDE w/ prefix buffer (ours)
+λ=−1.5
+37.3
+5.94×
+0.550
+0.818
+λ=−2
+49.1
+4.51×
+0.599
+0.807
+λ=−3
+56.0
+3.96×
+0.546
+0.849
+0
+25
+50
+75
+100
+125
+Training step
+0.2
+0.4
+0.6
+retail mean@4
+(a) Retail
+0
+25
+50
+75
+100
+125
+Training step
+0.2
+0.4
+0.6
+0.8
+1.0
+telecom mean@4
+(b) Telecom
+Full OPD (baseline)
+Fast OPD (max-turn)
+STRIDE (ours) λ=-1.5 w/o PB
+STRIDE (ours) λ=-1.5 w/ PB
+STRIDE (ours) λ=-2 w/o PB
+STRIDE (ours) λ=-2 w/ PB
+STRIDE (ours) λ=-3 w/ PB
+Figure 5 Multi-teacher agentic OPD: retail (a) and telecom
+(b) mean@4 vs. training step. Solid lines use the prefix buffer
+(α = −0.8); dashed lines are the early-stopping-only variants.
+The horizontal lines mark the single-domain baselines (gray
+dashed) and the domain expert teachers (purple dotted) of the
+respective domain.
+The italic rows of Table 2 are calibration references
+excluded from the speedup ranking: expert-teacher
+scores set domain-specific ceilings, while single-
+domain full-OPD runs isolate the effect of cross-
+domain joint training. We therefore compare each
+method only within its domain against the corre-
+sponding teacher and baseline.
+Gain of the accelerated methods over the cross-
+domain joint baseline. On retail, the best PB-based
+configuration surpasses the cross-domain joint base-
+line at a substantial speedup, while the other PB
+configurations and the w/o-PB variants remain be-
+low the baseline; the fixed-budget Fast OPD and the
+curriculum-based TCOD-F2B and turnOPD likewise
+fall short of the baseline on both domains. This indi-
+cates that removing the tokens whose teacher signal
+has degraded in OOD regions does not weaken the ef-
+fective supervision provided by the expert teachers—
+rather, it lets that signal act more fully.
+Domain asymmetry. On retail, the PB-based ac-
+celerated methods can surpass the baseline; on the
+harder telecom domain, even the best configuration
+still falls short of the baseline. A plausible con-
+tributor is the difference in trajectory length: tele-
+com tasks require substantially more turns on av-
+erage than retail ones—reflected in the larger test-
+time turn budget of the multi-teacher setting (Ap-
+pendix A)—while the number of turns a single roll-
+out can cover before the per-rollout cumulative sum
+crosses λ is roughly fixed, so each telecom rollout
+covers a smaller fraction of the task and the training
+window advances toward the later turns more slowly.
+Consistent with this, the most conservative λ = −3
+delivers the best accelerated telecom score (0.849),
+nearly matching the joint baseline (0.853), albeit at
+the cost of retail accuracy (0.546).
+10
+
+
+Table 3 Multi-teacher agentic OPD results with a Qwen3-8B student (τ 2-bench retail + telecom, mean@4). Bold marks the best
+non-reference result in each domain column. Italic rows are references.
+Method
+s/step
+Speedup
+Retail
+Telecom
+Reference: expert teachers
+Retail
+—
+—
+0.649
+0.384
+Telecom
+—
+—
+0.622
+0.960
+Baselines
+Full OPD
+221.5
+1.00×
+0.625
+0.882
+Fast OPD Zhang et al. (2026)
+60.5
+3.66×
+0.504
+0.857
+TCOD-F2B Wang et al. (2026)
+130.0
+1.70×
+0.586
+0.849
+turnOPD Zhou et al. (2026)
+113.4
+1.95×
+0.548
+0.671
+STRIDE w/o prefix buffer (ours)
+λ=−2
+56.1
+3.95×
+0.610
+0.807
+λ=−3
+73.2
+3.03×
+0.607
+0.849
+STRIDE w/ prefix buffer (ours)
+λ=−2
+64.9
+3.41×
+0.658
+0.864
+λ=−3
+72.7
+3.05×
+0.673
+0.941
+Scaling to a larger student.
+Table 3 shows
+that STRIDE retains its qualitative advantage with
+Qwen3-8B, achieving the strongest results on both
+domains among the compared training methods
+while preserving a multi-fold speedup.
+5.4
+Ablation Studies
+We next isolate the contribution of each component
+of STRIDE: the prefix buffer (§5.4.1), the stopping
+threshold λ (§5.4.2), and the prefix-quality threshold
+α (§5.4.3).
+5.4.1
+Effect of the Prefix Buffer
+In both agentic settings the PB improves over the cor-
+responding w/o-PB variant at nearly every stopping
+threshold (Tables 1 and 2), and the gain tends to grow
+with the aggressiveness of stopping—consistent with
+the PB’s role: the earlier a trajectory is truncated, the
+larger the coverage gap the PB must bridge. The
+gain is also consistently larger on the harder telecom
+domain than on the retail domain of the same multi-
+teacher setting, indicating that the harder the task,
+the more critical coverage compensation becomes.
+5.4.2
+Effect of the Stopping Threshold λ
+The three λ values with the PB define a clear speed–
+performance tradeoff frontier (Table 1): a smaller |λ|
+buys more speedup at a negligible accuracy conces-
+0
+25
+50
+75
+100
+125
+Training step
+0.25
+0.30
+0.35
+0.40
+0.45
+mean@16
+(a) w/o prefix buffer
+0
+25
+50
+75
+100
+125
+Training step
+0.30
+0.35
+0.40
+0.45
+mean@16
+(b) w/ prefix buffer
+Full OPD (baseline)
+STRIDE (ours) λ=-1
+STRIDE (ours) λ=-1.5
+STRIDE (ours) λ=-2
+Figure 6 Single-teacher λ ablation: mean@16 vs. training step
+without (a) and with (b) the prefix buffer.
+sion, while a larger |λ| trades speedup for a robust
+accuracy lead. A user can thus select λ directly by
+compute budget.
+Figure 6 reports the full training curves behind this
+frontier. Without the PB (panel a), all three thresh-
+olds fall behind the baseline after about 60 steps—
+the coverage gap left by truncation accumulates—
+and the most aggressive λ = −1 turns unstable; with
+the PB (panel b), every threshold tracks the baseline
+throughout and the differences between thresholds
+become small, indicating that the prefix buffer makes
+the method robust to the choice of λ.
+5.4.3
+Effect of the Prefix-Quality Threshold α
+The prefix-quality threshold α controls whether low-
+endorsement prefixes may be reused. Disabling this
+filter (α = −∞) admits every prefix for reuse, in-
+11
+
+
+0
+20
+40
+60
+80
+100
+Training step
+0.2
+0.3
+0.4
+0.5
+0.6
+retail mean@4
+Full OPD (baseline)
+STRIDE (ours) α=−0.8
+STRIDE (ours) α=−∞
+Figure 7 α ablation at λ=−2 on retail (τ 2-bench), prefix reuse
+enabled, first 100 training steps.
+cluding those that embed the student’s earlier mis-
+taken states: the next rollout then continues from a
+mistaken state, early stopping triggers almost at the
+very start, and the effective training length collapses.
+Holding λ = −2 fixed and contrasting the two α
+choices on retail (Figure 7) makes this failure mode
+directly visible: the unfiltered variant matches the
+filtered one only briefly before its curve collapses,
+while the filtered variant remains stable throughout.
+We therefore default to α = −0.8: α is not an or-
+namental modulator but a key safety parameter that
+prevents prefix pollution and safeguards reuse qual-
+ity in difficult scenarios.
+5.5
+Extension: Math Reasoning OPD
+To test generality beyond multi-turn agents, we ap-
+ply STRIDE to single-turn math reasoning on AIME
+2024/2025 at mean@8 (setup in §5.1). Since turn-
+level stopping is unavailable, we apply Eq. 5 incre-
+mentally and stop when the cumulative token-level
+teacher log-probability falls below λ, enabling di-
+rect comparison with the 2048/4096-token budgets
+of Fast OPD Zhang et al. (2026). Detailed results
+are reported in Appendix B. At a 5.10× speedup,
+STRIDE improves AIME 2025 while trailing full
+OPD on AIME 2024; at a 3.08× speedup, it im-
+proves AIME 2024 while remaining close to full
+OPD on AIME 2025. These results support teacher-
+signal OOD drift as a general mechanism beyond
+agentic tasks.
+6
+Conclusion
+We presented STRIDE, an acceleration framework
+for on-policy distillation that adapts the training
+budget to the online reliability of the teacher sig-
+nal. An analysis on τ 2-bench shows that teacher
+supervision concentrates in the within-turn pre-
+fix and that the cross-turn loss of endorsement is
+locked to the student’s first erroneous action; ac-
+cordingly, adaptive early stopping truncates roll-
+outs at a cumulative teacher-log-probability thresh-
+old, and the prefix buffer recycles verified pre-
+fixes from the weakest correct turn as a data-driven
+curriculum. Across single-teacher, cross-domain
+multi-teacher, and single-turn math-reasoning OPD,
+STRIDE provides competitive or better performance
+than full-trajectory OPD at multi-fold speedups; ab-
+lations identify the prefix buffer as the key coverage-
+compensation mechanism.
+Acknowledgments. This work was supported by
+Ant Group Research Intern Program.
+References
+Rishabh Agarwal, Nino Vieillard, Piotr Stanczyk, et al. On-policy distil-
+lation of language models: Learning from self-generated mistakes.
+In International Conference on Learning Representations (ICLR),
+2024.
+Anthropic. Claude code. Anthropic, 2025. https://www.anthropic.
+com/claude-code.
+Victor Barres, Honghua Dong, Soham Ray, Xujie Si, and Karthik
+Narasimhan. τ 2-bench: Evaluating conversational agents in a dual-
+control environment. arXiv preprint arXiv:2506.07982, 2025.
+DeepSeek-AI et al. Deepseek-v4: Towards highly efficient million-token
+context intelligence, 2026. https://arxiv.org/abs/2606.19348.
+Junfeng Fang, Zhepei Hong, Mao Zheng, Mingyang Song, Gengsheng
+Li, Houcheng Jiang, Dan Zhang, Haiyun Guo, Xiang Wang, and
+Tat-Seng Chua. Rubric-based on-policy distillation, 2026. https:
+//arxiv.org/abs/2605.07396.
+Yuqian Fu, Haohuan Huang, Kaiwen Jiang, Jiacai Liu, Zhuo Jiang,
+Yuanheng Zhu, and Dongbin Zhao. Revisiting on-policy distillation:
+Empirical failure modes and simple fixes, 2026. https://arxiv.
+org/abs/2603.25562.
+Jiaxuan Gao, Jiaao Chen, Chuyi He, Shusheng Xu, Di Jin, Yi Wu,
+et al.
+From self-evolving synthetic data to verifiable-reward rl:
+Post-training multi-turn interactive tool-using agents. arXiv preprint
+arXiv:2601.22607, 2026.
+Yuxian Gu, Li Dong, Furu Wei, and Minlie Huang. MiniLLM: Knowl-
+edge distillation of large language models. In The Twelfth Inter-
+national Conference on Learning Representations, 2024. https:
+//openreview.net/forum?id=5h0qf7IBZZ.
+Geoffrey Hinton, Oriol Vinyals, and Jeff Dean. Distilling the knowledge
+in a neural network, 2015. https://arxiv.org/abs/1503.02531.
+Ke Ji, Jiahao Xu, Tian Liang, Qiuzhi Liu, and Zhiwei He. The first
+few tokens are all you need: An efficient and effective unsupervised
+prefix fine-tuning method for reasoning models. arXiv preprint
+arXiv:2503.02875, 2025.
+Shuhao Li, Guodong Du, Anhao Zhao, Wanyu Lin, Tianyu Yuan, and
+Xiaoyu Shen. Post-training shifts confidence: A three-stage anal-
+ysis of how sft, rl, and opd shape cot calibration. arXiv preprint
+arXiv:2607.13753, 2026a.
+Yaxuan Li, Yuxin Zuo, Bingxiang He, Jinqian Zhang, and Chaojun
+Xiao.
+Rethinking on-policy distillation of large language mod-
+els:
+Phenomenology, mechanism, and recipe.
+arXiv preprint
+arXiv:2604.13016, 2026b.
+Baohao Liao, Hanze Dong, Christof Monz, Xinxing Xu, Li Dong, and
+12
+
+
+Furu Wei. Multi-turn on-policy distillation with prefix replay, 2026.
+https://arxiv.org/abs/2607.04763.
+Kaiyuan Liu, Ziyuan Zhuang, Yang Bai, Bing Wang, Rongxiang
+Weng, and Jieping Ye. Prefix teach, suffix fade: Local teachabil-
+ity collapse in strong-to-weak on-policy distillation. arXiv preprint
+arXiv:2605.13643, 2026a.
+Yanjiang Liu, Jie Lou, Xinyan Guan, Yuqiu Ji, Hongyu Lin, Ben He,
+Xianpei Han, Le Sun, Xing Yu, and Yaojie Lu. Your teacher can’t
+help you here: Combating supervision fidelity decay in on-policy
+distillation. arXiv preprint arXiv:2605.30833, 2026b.
+Kevin
+Lu
+et
+al.
+On-policy
+distillation.
+Thinking
+Ma-
+chines Lab Blog, 2025.
+https://thinkingmachines.ai/blog/
+on-policy-distillation/.
+OpenAI. Introducing codex. OpenAI Blog, 2025. https://openai.
+com/index/introducing-codex/.
+Qwen Team. Qwen3 technical report. arXiv preprint arXiv:2505.09388,
+2025.
+Guangming Sheng, Chi Zhang, Zilingfeng Ye, Xibin Wu, Wang Zhang,
+Ru Zhang, Yanghua Peng, Haibin Lin, and Chuan Wu. Hybridflow:
+A flexible and efficient rlhf framework. In Proceedings of the Twen-
+tieth European Conference on Computer Systems, EuroSys ’25, page
+1279–1297. ACM, March 2025. doi: 10.1145/3689031.3696075.
+http://dx.doi.org/10.1145/3689031.3696075.
+Sierra Research. τ 3-bench: Fixing airline + retail. https://taubench.
+com/blog/tau3-task-fixes.html, 2026.
+Jie Sun, Mao Zheng, Mingyang Song, Qiyong Zhong, Yilin Cheng,
+Bichuan Feng, Pengfei Liu, Junfeng Fang, and Xiang Wang. Simct:
+Recovering lost supervision for cross-tokenizer on-policy distillation,
+2026a. https://arxiv.org/abs/2605.07711.
+Jie Sun, Mao Zheng, Mingyang Song, Qiyong Zhong, Gengsheng Li,
+Zhepei Hong, Chang Wu, Pengfei Liu, Junfeng Fang, and Xiang
+Wang. Easyopd: An easy-to-use on-policy distillation framework
+for large language models, 2026b. https://arxiv.org/abs/2607.
+11012.
+Jiaqi Wang, Wenhao Zhang, Weijie Shi, Yaliang Li, and James Cheng.
+Tcod: Exploring temporal curriculum in on-policy distillation for
+multi-turn autonomous agents. arXiv preprint arXiv:2604.24005,
+2026.
+Yecheng Wu, Song Han, and Hai Cai. Lightning opd: Efficient post-
+training for large reasoning models with offline on-policy distillation.
+arXiv preprint arXiv:2604.13010, 2026.
+Yuanda Xu, Hejian Sang, Zhengze Zhou, et al. Tip: Token importance
+in on-policy distillation. arXiv preprint arXiv:2604.14084, 2026.
+Wenkai Yang, Weijie Liu, Ruobing Xie, et al. Learning beyond teacher:
+Generalized on-policy distillation with reward extrapolation. arXiv
+preprint arXiv:2602.12125, 2026a.
+Zhicheng Yang, Zhijiang Guo, Yifan Song, Minrui Xu, Yongxin Wang,
+Yiwei Wang, Xiaodan Liang, and Jing Tang. Prune-opd: Efficient
+and reliable on-policy distillation for long-horizon reasoning. arXiv
+preprint arXiv:2605.07804, 2026b.
+Dongxu Zhang, Zhichao Yang, Sepehr Janghorbani, Jun Han, and An-
+drew Ressler II. Fast and effective on-policy distillation from reason-
+ing prefixes. arXiv preprint arXiv:2602.15260, 2026.
+Qiyong Zhong, Mao Zheng, Mingyang Song, Xin Lin, Jie Sun,
+Houcheng Jiang, Xiang Wang, and Junfeng Fang.
+Sod: Step-
+wise on-policy distillation for small language model agents, 2026.
+https://arxiv.org/abs/2605.07725.
+Yuhang Zhou, Kai Zheng, Haoling Li, Dengyun Peng, Can Xu,
+and Jingjing Chen. Turnopd: Making on-policy distillation turn-
+aware for efficient long-horizon agent training.
+arXiv preprint
+arXiv:2607.05804, 2026.
+Appendix
+A
+Experimental Setup Details
+Hyperparameters.
+The three experiments share the
+following settings: AdamW optimizer, token-level
+OPD loss, maximum prompt length 24K (agentic) /
+1K (math), and maximum response length 8K (agen-
+tic) / 30K (math).
+Single-teacher: learning rate
+10−5, batch size 24, student on 4 GPUs + teacher
+on 4 GPUs. Multi-teacher: learning rate 10−5, batch
+size 24, student on 4 GPUs + the two domain-expert
+teachers and one user-simulator instance together on
+4 GPUs. Math: learning rate 2 × 10−6, batch size 48,
+student on 6 GPUs + teacher on 2 GPUs. All experi-
+ments use FSDP with parameter and optimizer-state
+offloading. The prefix-quality threshold is set to
+α = −0.8 for the agentic experiments; for the math
+task, α filtering is disabled (α = −∞).
+Data and evaluation details.
+For a fair compari-
+son under a common step budget, the single-teacher,
+multi-teacher, and math experiments are truncated
+to the first 140, 120, and 160 training steps, respec-
+tively. The Qwen3-8B multi-teacher scaling study
+otherwise follows the Qwen3-4B configuration but
+uses the first 200 training steps because the larger
+student converges more slowly and reaches a higher
+ceiling. Each domain independently reports its best
+mean@4 within this budget; speedups use unrounded
+mean training-step times. The math student is SFT-
+initialized on OpenThought3-8B reasoning traces for
+500 steps, and training uses at most 2,880 samples
+from dapo-math-17k. Evaluation runs every 20 train-
+ing steps, and all wall-clock measurements count
+only the per-step training time, excluding evaluation.
+In the agentic Fast OPD variant, the 5-turn budget
+applies only to training rollouts; the turn limit at test
+time is 50 in the single-teacher setting and 100 in
+the multi-teacher setting, the latter because telecom
+tasks require more turns.
+Baseline configurations.
+For turnOPD Zhou et al.
+(2026), the adaptive rollout budget is bounded by
+Hmin=2 and Hmax=100, with EMA smoothing
+αema=0.30 on the control horizon, a full-length
+probe every 8 steps, 3 warmup probe-only steps, cov-
+erage quantile p=0.80, and a minimum of 8 success-
+ful trajectories for refreshing the coverage horizon;
+13
+
+
+its turn-normalized loss weight is annealed from 0
+(pure token-level) to 1 (pure turn-normalized) over
+the first 10 optimizer steps. For TCOD-F2B Wang
+et al. (2026), the number of supervised turns grows as
+k = min(kstart+⌊t/η⌋, tmax) with kstart=1, η=10,
+and tmax=50.
+B
+Math Reasoning Results
+Table 4 Math OPD results (AIME 2024/2025, mean@8). Bold
+marks the best result in each column.
+Method
+s/step Speedup AIME25 AIME24
+Baselines
+Full OPD
+220.5
+1.00×
+0.458
+0.546
+Fast OPD 2048 Zhang et al. (2026)
+22.4
+9.83×
+0.408
+0.554
+Fast OPD 4096 Zhang et al. (2026)
+36.4
+6.05×
+0.429
+0.542
+STRIDE w/o prefix buffer (ours)
+λ=−1000
+41.6
+5.30×
+0.429
+0.542
+λ=−2100
+63.7
+3.46×
+0.429
+0.533
+STRIDE w/ prefix buffer (ours)
+λ=−1000
+43.2
+5.10×
+0.467
+0.517
+λ=−2100
+71.6
+3.08×
+0.454
+0.558
+C
+Single-Teacher Training Curves
+0
+25
+50
+75
+100
+125
+Training step
+0.30
+0.35
+0.40
+0.45
+mean@16
+Full OPD (baseline)
+TCOD-F2B
+turnOPD
+Teacher (30B)
+STRIDE (ours)
+Figure 8 Single-teacher agentic OPD: mean@16 vs. training
+step for full OPD, STRIDE (λ = −1 with the prefix buffer),
+and the curriculum baselines.
+Figure 8 reports the full mean@16 training curves
+of the single-teacher agentic experiment (§5.2), com-
+plementing the best-so-far numbers of Table 1.
+14

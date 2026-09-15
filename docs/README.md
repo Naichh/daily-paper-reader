@@ -6,28 +6,35 @@
 </div>
 
 ## 每次日报
-- 最新运行日期：2026-09-14
-- 运行时间：2026-09-14 22:22:31 UTC
+- 最新运行日期：2026-09-15
+- 运行时间：2026-09-15 22:12:53 UTC
 - 运行状态：成功
-- 本次总论文数：2
-- 精读区：1
+- 本次总论文数：5
+- 精读区：4
 - 速读区：1
 
 ### 今日简报（AI）
-1) 2026-09-14日报：精读1篇、速读1篇，9.0分SCOPE-OPSD与7.0分RoboDreamer领衔今日推荐。
-2) 最值得看的是SCOPE-OPSD的Fisher条件化特权子空间与在策略自蒸馏，以及RoboDreamer用预测状态空间模型做前瞻人形运动。
-3) 普通读者可先看9.0分精读，再按机器人兴趣速览7.0分速读。
-- 详情：[/202609/14/README](/202609/14/README)
+今天精读4篇、速读1篇共5篇，聚焦多轮智能体策略蒸馏与无数据蒸馏。最值得看的是满分《Data-free On-policy Distillation》和9分的多轮智能体“停在哪、从哪重启”加速方法。普通读者可优先读这两篇，再按需了解速读那篇价值引导偏好蒸馏。
+- 详情：[/202609/15/README](/202609/15/README)
 
 ### 精读区论文标签
-1. [SCOPE-OPSD: Fisher-Conditioned Privileged Subspaces for On-Policy Self-Distillation](/202609/14/2609.12579v1-scope-opsd-fisher-conditioned-privileged-subspaces-for-on-policy-self-distillation)  
+1. [Data-free On-policy Distillation](/202609/15/2609.14193v1-data-free-on-policy-distillation)  
+   标签：评分：10.0/10、query:policy-dist
+   evidence：前沿后训练流水线中的无数据在线策略蒸馏
+2. [Know When to Stop, Where to Restart: Accelerating Multi-Turn Agentic On-Policy Distillation](/202609/15/2609.14636v1-know-when-to-stop-where-to-restart-accelerating-multi-turn-agentic-on-policy-distillation)  
    标签：评分：9.0/10、query:policy-dist
-   evidence：在线自蒸馏与师生残差迁移
+   evidence：加速多轮智能体在线策略蒸馏
+3. [Reducing the Output-Mode Gap in Speech Language Models via Joint-Output On-Policy Distillation](/202609/15/2609.15313v1-reducing-the-output-mode-gap-in-speech-language-models-via-joint-output-on-policy-distillation)  
+   标签：评分：9.0/10、query:policy-dist
+   evidence：面向语音大模型的联合输出在线策略蒸馏
+4. [Who Teaches Which Token? Verifier-Gated Multi-Expert On-Policy Distillation for Scientific Reasoning](/202609/15/2609.15404v1-who-teaches-which-token-verifier-gated-multi-expert-on-policy-distillation-for-scientific-reasoning)  
+   标签：评分：9.0/10、query:policy-dist
+   evidence：面向科学推理的验证门控多专家在线策略蒸馏
 
 ### 速读区论文标签
-1. [RoboDreamer: Anticipatory Humanoid Locomotion with Predictive State-Space Models](/202609/14/2609.07096v2-robodreamer-anticipatory-humanoid-locomotion-with-predictive-state-space-models)  
-   标签：评分：7.0/10、query:policy-dist
-   evidence：两阶段教师-学生策略蒸馏用于控制策略
+1. [Optimizing Sparse Outcomes Through Dense Behavioral Signals via Value-Guided Preference Distillation](/202609/15/2609.14648v1-optimizing-sparse-outcomes-through-dense-behavioral-signals-via-value-guided-preference-distillation)  
+   标签：评分：6.0/10、query:policy-dist
+   evidence：通过强化学习对齐对话智能体的偏好蒸馏
 
 
 <div class="dpr-home-promo-card">
