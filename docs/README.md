@@ -6,35 +6,32 @@
 </div>
 
 ## 每次日报
-- 最新运行日期：2026-09-15
-- 运行时间：2026-09-15 22:12:53 UTC
+- 最新运行日期：2026-09-16
+- 运行时间：2026-09-16 22:35:09 UTC
 - 运行状态：成功
-- 本次总论文数：5
-- 精读区：4
-- 速读区：1
+- 本次总论文数：3
+- 精读区：1
+- 速读区：2
 
 ### 今日简报（AI）
-今天精读4篇、速读1篇共5篇，聚焦多轮智能体策略蒸馏与无数据蒸馏。最值得看的是满分《Data-free On-policy Distillation》和9分的多轮智能体“停在哪、从哪重启”加速方法。普通读者可优先读这两篇，再按需了解速读那篇价值引导偏好蒸馏。
-- 详情：[/202609/15/README](/202609/15/README)
+- 今日共生成 3 篇推荐（精读 1 篇，速读 2 篇）
+- 精读：《Lightning Weave: Improving the Accuracy-Efficiency Frontier of Reasoning Models through Capability Composition》（9.0/10）
+- 速读：《From Collaboration to Capability: Internalizing Routed LLM Experts into Compact Reasoners》（6.0/10）, 《Temporal Self-Distillation: Faster Inference in Discrete Diffusion Language Models》（6.0/10）
+- 这些结果覆盖了当下较热的方向，建议先看精读区论文的关键问题与方法。
+- 详情：[/202609/16/README](/202609/16/README)
 
 ### 精读区论文标签
-1. [Data-free On-policy Distillation](/202609/15/2609.14193v1-data-free-on-policy-distillation)  
-   标签：评分：10.0/10、query:policy-dist
-   evidence：前沿后训练流水线中的无数据在线策略蒸馏
-2. [Know When to Stop, Where to Restart: Accelerating Multi-Turn Agentic On-Policy Distillation](/202609/15/2609.14636v1-know-when-to-stop-where-to-restart-accelerating-multi-turn-agentic-on-policy-distillation)  
+1. [Lightning Weave: Improving the Accuracy-Efficiency Frontier of Reasoning Models through Capability Composition](/202609/16/2609.14708v1-lightning-weave-improving-the-accuracy-efficiency-frontier-of-reasoning-models-through-capability-composition)  
    标签：评分：9.0/10、query:policy-dist
-   evidence：加速多轮智能体在线策略蒸馏
-3. [Reducing the Output-Mode Gap in Speech Language Models via Joint-Output On-Policy Distillation](/202609/15/2609.15313v1-reducing-the-output-mode-gap-in-speech-language-models-via-joint-output-on-policy-distillation)  
-   标签：评分：9.0/10、query:policy-dist
-   evidence：面向语音大模型的联合输出在线策略蒸馏
-4. [Who Teaches Which Token? Verifier-Gated Multi-Expert On-Policy Distillation for Scientific Reasoning](/202609/15/2609.15404v1-who-teaches-which-token-verifier-gated-multi-expert-on-policy-distillation-for-scientific-reasoning)  
-   标签：评分：9.0/10、query:policy-dist
-   evidence：面向科学推理的验证门控多专家在线策略蒸馏
+   evidence：后训练框架，用在线策略蒸馏在学生中组合能力
 
 ### 速读区论文标签
-1. [Optimizing Sparse Outcomes Through Dense Behavioral Signals via Value-Guided Preference Distillation](/202609/15/2609.14648v1-optimizing-sparse-outcomes-through-dense-behavioral-signals-via-value-guided-preference-distillation)  
+1. [From Collaboration to Capability: Internalizing Routed LLM Experts into Compact Reasoners](/202609/16/2609.12578v1-from-collaboration-to-capability-internalizing-routed-llm-experts-into-compact-reasoners)  
    标签：评分：6.0/10、query:policy-dist
-   evidence：通过强化学习对齐对话智能体的偏好蒸馏
+   evidence：专家增强强化学习加轨迹内化，把路由专家内化进紧凑学生
+2. [Temporal Self-Distillation: Faster Inference in Discrete Diffusion Language Models](/202609/16/2609.15177v1-temporal-self-distillation-faster-inference-in-discrete-diffusion-language-models)  
+   标签：评分：6.0/10、query:policy-dist
+   evidence：面向语言模型的在线策略自蒸馏方法
 
 
 <div class="dpr-home-promo-card">
