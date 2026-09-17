@@ -1,0 +1,1109 @@
+Title: Beyond Token-Local Imitation: Reward-Compatible Temporal Credit Assignment for On-Policy Distillation
+
+URL Source: https://arxiv.org/pdf/2609.16937v1
+
+Published Time: Wed, 16 Sep 2026 01:01:24 GMT
+
+Number of Pages: 20
+
+Markdown Content:
+Preprint 
+
+# BEYOND TOKEN -L OCAL IMITATION :REWARD -C OMPATIBLE TEMPORAL CREDIT 
+
+# ASSIGNMENT FOR ON-P OLICY DISTILLATION 
+
+Shiqi Liu 1,2 , Zeyu He 1,2 , Letian Tao 1,2 , Guojian Zhan 1,2 , Jiaxin Gao 1,Feihong Zhang 1, Jingliang Duan 1,2 , Wei Xiong 2, Kehua Sheng 2, Bo Zhang 2,Yang Guan 1, B, Shengbo Eben Li 1, B
+
+> 1
+
+School of Vehicle and Mobility & College of AI, Tsinghua University 
+
+> 2
+
+Didi Voyager Labs, DiDi Autonomous Driving 
+
+ABSTRACT 
+
+On-policy distillation (OPD) has emerged as an effective approach for large lan-guage model post-training, yet existing objectives face a trade-off between ob-jective fidelity and optimization stability. Token-level OPD provides stable but local supervision, whereas sequence-level OPD captures future credit at the cost of horizon-dependent variance. We establish a unified temporal-credit view of these formulations, showing that practical token-level OPD can be interpreted as a temporal approximation to the sequence-level reverse-KL gradient. Building on this connection, we propose γOPD, which uses discounted temporal credit assignment to balance long-horizon supervision and optimization stability, while admitting a horizon-independent variance bound. We further develop a reward-compatible bounded mixing (RBM) mechanism for γOPD that balances verifiable outcome feedback with the discounted OPD advantage to move beyond purely teacher-dependent optimization. Experiments on mathematical and code rea-soning demonstrate consistent improvements over existing OPD methods across vanilla, size-mismatched, and multi-teacher distillation settings. (b) (a) 
+
+Figure 1: Core Idea. (a) Vanilla OPD (left) focuses only on the immediate next step and closely follows the teacher’s local guidance. We argue that OPD should instead account for the influence of future reasoning steps and should not merely imitate the teacher token by token (right). (b) By in-corporating future outcomes through temporal credit assignment and balancing teacher supervision with verifiable rewards, γOPD achieves strong overall performance across mathematical and code reasoning tasks in the multi-teacher distillation setting, as detailed in Section 4. 
+
+1 INTRODUCTION 
+
+Recent large language models (LLMs), including Kimi K3 (Kimi Team et al., 2026), GLM-5 (GLM-5 Team, 2026), DeepSeek-V4 (DeepSeek-AI et al., 2026), and Nemotron-Cascade 2 (Yang et al., 2026b), have demonstrated strong reasoning capabilities across mathematics, coding, and science.  
+
+> B
+
+Corresponding author: S. E. Li and Y. Guan; email: lishbo@tsinghua.edu.cn. 
+
+1arXiv:2609.16937v1 [cs.LG] 15 Sep 2026 Preprint To further consolidate and integrate such capabilities, on-policy distillation (OPD) (Lu & Think-ing Machines Lab, 2025) has emerged as a key approach in LLM post-training. It provides dense teacher supervision on trajectories sampled from the current student policy, promoting high-quality reasoning while mitigating exposure bias. To avoid costly full-vocabulary reverse-KL computation, existing OPD methods (Yang et al., 2026a; Jin et al., 2026; Oh et al., 2026) reformulate the objective in a policy-gradient form and approximate it using a one-sample token-level Monte Carlo estimator (Li et al., 2026). While computationally ef-ficient, this practical estimator introduces non-negligible bias relative to the original sequence-level objective, effectively altering the optimization problem (Yang et al., 2026a). Other methods (Fu et al., 2026) instead adopt sequence-level Monte Carlo estimators to more faithfully preserve the original objective. However, accumulating future credit over the remaining response leads to in-creasing variance as the sequence grows, resulting in unstable optimization for long reasoning tra-jectories. In this work, we present a unified analysis of token-level and sequence-level OPD, deriving their underlying objectives and clarifying the relationship between their policy-gradient formulations. Building on this insight, we propose γOPD , which introduces discounted temporal credit assign-ment to interpolate between token-local and sequence-level supervision while admitting a horizon-independent variance bound. To complement teacher supervision with outcome-level guidance, we further develop a reward-compatible bounded mixing mechanism that incorporates verifiable out-come feedback without sacrificing the stability benefits of temporal discounting. Overall, our main contributions are summarized as follows: • We establish a unified temporal-credit view of OPD, showing that practical token-level OPD can be interpreted as a temporally truncated approximation to the sequence-level reverse-KL gradient. • Building on this connection, we propose γOPD , a discounted temporal-credit surrogate that interpolates between token-level and sequence-level credit assignment, while admitting a horizon-independent variance bound. • We further develop Reward-Compatible Bounded Mixing (RBM) for γOPD , which com-bines discounted teacher-derived credit with verifiable outcome rewards while preventing the teacher signal from dominating task-level supervision. 
+
+2 PRELIMINARIES 
+
+2.1 NOTATION 
+
+We consider autoregressive reasoning tasks over a discrete vocabulary V, where we aim to optimize a student policy πθ parameterized by θ under the guidance of a fixed teacher policy π∗. Let x ∼ D 
+
+denote a prompt sequence sampled from the reasoning dataset. Given x, the policy generates a com-plete response trajectory y = ( y1, y 2, . . . , y T ) ∈ V T , where T = |y| is the number of tokens in the trajectory, and yt ∈ V is the token generated at step t. At decoding step t, the policy conditions on the historical context prefix ht := ( x, y<t ), which consists of the prompt and all previously gener-ated reasoning tokens. We use DKL (·∥· ) to denote the KL divergence. For notational simplicity, we define the token-level and sequence-level log-ratios as 
+
+∆t ≜ log πθ (yt | ht) − log π∗(yt | ht), (1a) 
+
+∆( y) ≜ log πθ (y | x) − log π∗(y | x) = 
+
+> T
+
+X
+
+> t=1
+
+∆t. (1b) 2.2 ON-P OLICY DISTILLATION (OPD) On-policy distillation (OPD) (Agarwal et al., 2024; DeepSeek-AI et al., 2026) trains the student by minimizing the reverse KL divergence from the student policy πθ to the teacher policy π∗, evaluated on trajectories induced by the current student itself: 
+
+JOPD (θ) = Ex∼D [DKL (πθ (y | x) ∥ π∗(y | x))] . (2) 2Preprint By training on trajectories sampled from the current student policy, on-policy learning reduces expo-sure bias and is well suited to long chain-of-thought reasoning tasks such as mathematical problem solving (GLM-5 Team, 2026). Following recent practice (Lu & Thinking Machines Lab, 2025; Li et al., 2026), the empirical implementation of OPD typically converts the reverse-KL minimization in equation 2 into an RL-style surrogate gradient: 
+
+∇θ JOPD (θ) ≈ − Ex∼D 
+
+" TX
+
+> t=1
+
+AOPD  
+
+> t
+
+∇θ log πθ (yt | ht)
+
+#
+
+, (3) where AOPD  
+
+> t
+
+≜ −∆t = log π∗(yt | ht) − log πθ (yt | ht) is the token-level OPD advantage. 2.3 RL WITH VERIFIABLE REWARDS (RLVR) Reinforcement learning with verifiable rewards (RLVR) (Shao et al., 2024; Guo et al., 2025; Yu et al., 2025) has also become a key approach for improving the reasoning ability of LLMs. For a prompt x ∼ D , the policy πθ generates an output sequence y = ( y1, . . . , y T ) ∼ πθ (· | x). The generated output is evaluated by an external verifier, such as a code compiler or a mathematical rule checker, which provides a sparse sequence-level reward scalar R(x, y) ∈ {− 1, 1}. The RLVR objective is 
+
+JRLVR (θ) = Ex∼D , y∼πθ (·| x) [R(x, y)] .
+
+Compared with OPD, RLVR provides a sparse but verifier-grounded sequence-level correctness signal, whereas OPD supplies dense token-level supervision through teacher guidance, which may nevertheless be limited by the teacher’s suboptimal behavior. 
+
+3 METHODOLOGY 
+
+3.1 TOKEN -LEVEL OPD AS A TEMPORAL APPROXIMATION 
+
+Although the practical OPD objective in equation 3 is widely used, it should be understood as a temporal approximation rather than the exact policy gradient of the OPD objective in equation 2. To clarify this distinction, we formally define token-level OPD and sequence-level OPD as follows: 
+
+Jseq OPD (θ) ≜ Ex∼D [DKL (πθ (y | x) ∥ π∗(y | x))] , (4a) 
+
+Jtoken OPD (θ) ≜ Ex∼D 
+
+" TX
+
+> t=1
+
+Eht∼d¯θ (·| x) [DKL (πθ (yt | ht) ∥ π∗(yt | ht))] 
+
+#
+
+, (4b) where Jseq OPD denotes the sequence-level reverse-KL objective, i.e., the original OPD objective de-fined in equation 2, which compares the student and teacher distributions over complete response trajectories. In contrast, Jtoken OPD denotes the token-level objective, which compares their next-token distributions at sampled prefixes. The distribution d¯θ (ht | x) is the prefix distribution induced by the current student policy, where ht = ( x, y<t ). The notation ¯θ indicates stop-gradient, namely this prefix distribution is treated as fixed when differentiating with respect to θ.The two objectives are equivalent at the level of function values when the stop-gradient reference parameter is evaluated at the current policy parameter. Specifically, if ¯θ = θ, then the sampled prefix distribution in Jtoken OPD matches the autoregressive prefix distribution induced by πθ , and we have 
+
+Jseq OPD (θ) = Jtoken OPD (θ) ¯θ=θ .
+
+However, this value-level equivalence does not imply gradient-level equivalence. The reason is that Jseq OPD differentiates through the autoregressive distribution over future prefixes, whereas Jtoken OPD 
+
+stops this dependence through d¯θ (ht | x). This distinction leads to different temporal credit assign-ments, as shown below. 
+
+Proposition 3.1 (Token-level OPD gradient) . Under the stop-gradient treatment of the prefix distri-bution d¯θ (ht | x), the gradient of Jtoken OPD (θ) in equation 4b is given by 
+
+∇θ Jtoken OPD (θ) = Ex∼D , y∼πθ (·| x)
+
+" TX
+
+> t=1
+
+∆t∇θ log πθ (yt | ht)
+
+#
+
+. (5) 3Preprint Token-level OPD     
+
+> Sequence-level OPD
+> Temporal-credit OPD ( OPD)
+> low
+> high
+> Teacher Verifier
+> (a) Temporal credit Assignment (b) Reward-compatible bounded mixing
+
+Figure 2: Overview of γOPD. (a) Token-level OPD considers only the log-ratio of the current to-ken, whereas sequence-level OPD accumulates the log-ratios of all future tokens. γOPD introduces a discount factor γ to interpolate between these two extremes. (b) The γOPD advantage is first nor-malized and then combined with the verifiable task reward, balancing dense teacher guidance with task-level verification signals. The proof is provided in Appendix A. Consequently, the gradient of Jtoken OPD (θ) recovers the practical OPD update in equation 3. Mean-while, the gradient of the sequence-level OPD objective Jseq OPD (θ) takes the following form: 
+
+Proposition 3.2 (Sequence-level OPD gradient) . The gradient of the sequence-level OPD objective 
+
+Jseq OPD (θ) in equation 4a is given by 
+
+∇θ Jseq OPD (θ) = Ex∼D , y∼πθ (·| x)
+
+" TX
+
+> t=1
+> T
+
+X
+
+> t′=t
+
+∆t′
+
+!
+
+∇θ log πθ (yt | ht)
+
+#
+
+. (6) The proof is provided in Appendix B. Propositions 3.1 and 3.2 show that practical OPD is a token-level approximation to sequence-level OPD that neglects the influence of subsequent tokens. As illustrated in Figure 2, under the sequence-level objective, the score term at step t is weighted by the future log-ratio PTt′=t ∆t′ , since yt affects all future histories ht+1 , . . . , hT . In contrast, practical OPD keeps only the local term ∆t. This gap stems from the stop-gradient treatment of d¯θ (ht | x) in equation 4b. 3.2 TEMPORAL -C REDIT ON-P OLICY DISTILLATION (γOPD) Compared with the token-level gradient in Proposition 3.1, the sequence-level gradient in equation 6 accounts for the indirect effect of each token on future autoregressive prefixes, and is therefore unbi-ased with respect to the sequence-level objective in equation 2. However, for long reasoning trajec-tories, the accumulated future log-ratio PTt′=t ∆t′ can have large variance, which may destabilize training. To balance bias and variance in temporal credit assignment, we propose Temporal-Credit On-Policy Distillation ( γOPD) . The key idea is to introduce a discount factor γ ∈ [0 , 1] to control how much future OPD credit is assigned to the current token. Specifically, we define the temporal-credit surro-gate gradient as 
+
+gγ (θ) ≜ −Ex∼D , y∼πθ (·| x)
+
+" TX
+
+> t=1
+
+A(γ) 
+
+> t
+
+∇θ log πθ (yt | ht)
+
+#
+
+,
+
+where the discounted γOPD advantage is defined as 
+
+A(γ) 
+
+> t
+
+≜ −
+
+> T
+
+X
+
+> t′=t
+
+γt′−t∆t′ . (7) 4Preprint The discount factor γ controls the temporal horizon of OPD credit assignment. When γ = 1 , A(1) 
+
+> t
+
+becomes the sequence-level OPD return-to-go, recovering equation 6. When γ = 0 , it reduces to the token-level OPD advantage A(0)  
+
+> t
+
+= −∆t, recovering equation 5. Thus, for 0 < γ < 1, gγ (θ) is deliberately introduced as a biased surrogate that interpolates between these two endpoint gradients, allowing its variance to be controlled through γ, as formalized in the following theorem. 
+
+Theorem 3.3 (Variance Stability of γOPD ). Assume that the token-level OPD advantage has a bounded second moment, i.e., E[( A(0)  
+
+> t
+
+)2] ≤ σ2∆ for all t. Then, the sequence-level OPD credit ad-mits a horizon-dependent variance bound, whereas the γOPD credit admits a horizon-independent variance bound: 
+
+Var 
+
+
+
+A(1) 
+
+> t
+
+
+
+≤ (T − t + 1) 2σ2∆,
+
+Var 
+
+
+
+A(γ)
+
+> t
+
+
+
+≤ σ2∆
+
+(1 − γ)2 , ∀γ ∈ [0 , 1) .
+
+The proof is provided in Appendix C. Theorem 3.3 shows that the variance of sequence-level OPD credit can grow quadratically with the remaining sequence horizon in the worst case, whereas γOPD admits a horizon-independent variance bound for any fixed γ < 1. Adjusting γ therefore provides a principled trade-off between training stability and long-horizon credit propagation. 3.3 γOPD WITH REWARD -C OMPATIBLE BOUNDED MIXING (RBM) Although γOPD improves temporal credit assignment, its optimization signal is still fundamentally derived from the teacher distribution. Consequently, the student may remain constrained by the teacher policy and lack an explicit task-level optimization signal for solving verifiable reasoning problems. To move beyond this teacher-imitation ceiling, we incorporate the verifiable task reward R(x, y) ∈{− 1, 1} into γOPD . A naive combination, however, can be problematic because the magnitude of the teacher-derived advantage A(γ) 
+
+> t
+
+may vary substantially across responses and potentially domi-nate the bounded task reward. We therefore introduce a reward-compatible bounded mixing (RBM) mechanism : the γOPD credit is first calibrated by its response-wise mean absolute magnitude, then bounded through a softsign transformation, and finally combined with the verifiable reward. These operations can be written compactly as 
+
+bA(γ) 
+
+> t
+
+≜ A(γ)
+
+> t
+> 1
+> T
+
+PTk=1 A(γ) 
+
+> k
+
++ A(γ)
+
+> t
+
++ R(x, y). (8) When the denominator vanishes, equivalently when A(γ) 
+
+> k
+
+= 0 for all k, we define the normalized teacher term as zero. The first term is equivalent to applying softsign after response-wise mean-absolute normalization. It is monotonic in A(γ) 
+
+> t
+
+and bounded within (−1, 1) , thereby retaining the relative token-level OPD credit while preventing the teacher-derived signal from overwhelming the task reward. Since R(x, y) ∈ {− 1, 1}, it follows that sign( bA(γ) 
+
+> t
+
+) = R(x, y). Thus, RBM is reward-compatible by construction: the verifiable reward determines whether the sampled response is rein-forced or suppressed, while the bounded γOPD credit modulates the token-level update strength. The resulting reward-compatible γOPD surrogate gradient is 
+
+ˆgγ (θ) ≜ −Ex∼D , y∼πθ (·| x)
+
+" TX
+
+> t=1
+
+bA(γ) 
+
+> t
+
+∇θ log πθ (yt | ht)
+
+#
+
+. (9) Therefore, RBM combines sparse verifiable rewards for task-level learning beyond teacher imitation with bounded γOPD for dense token-level credit assignment. Unless otherwise specified, γOPD 
+
+refers to its use within RBM throughout the remainder of this paper. 5Preprint Table 1: Mathematical reasoning results under vanilla and size-mismatch distillation. We report accuracy and pass rate across four mathematical reasoning benchmarks.                                                                                                                                                                                                                           
+
+> Method AIME24 AIME25 AMC23 MATH500 Average Acc. Pass Acc. Pass Acc. Pass Acc. Pass Acc. Pass
+> Qwen3-4B-Math →Qwen3-4B
+> Student 22.60 60.00 20.83 33.33 60.16 92.50 67.40 72.60 42.75 64.61 Teacher 57.40 76.67 51.67 66.67 93.52 97.50 69.80 78.40 68.10 79.81 JustRL 53.54 83.33 42.50 56.67 88.75 97.50 68.00 70.40 63.20 76.97 STAPO 55.31 83.33 50.00 66.67 90.16 97.50 68.35 69.80 65.95 79.33 OPD 56.46 80.00 50.83 63.33 92.81 95.00 68.05 72.20 67.04 77.63 ExOPD 57.19 83.33 52.50 63.33 93.13 97.50 68.90 74.20 67.93 79.59 REOPOLD 56.98 83.33 51.67 63.33 93.59 97.50 68.70 72.60 67.74 79.19 AOPD 56.56 86.67 52.50 66.67 93.28 97.50 69.35 73.00 67.92 80.96 TOPD 54.79 80.00 51.67 63.33 93.44 97.50 69.95 72.40 67.46 78.31
+> γOPD 60.94 86.67 54.17 66.67 92.89 97.50 69.95 78.80 69.49 82.41 Qwen3-4B-Math →Qwen3-1.7B
+> Student 11.77 46.67 8.33 20.00 39.84 90.00 59.20 72.80 29.79 57.37 Teacher 57.40 76.67 51.67 66.67 93.52 97.50 69.80 78.40 68.10 79.81 JustRL 37.60 66.67 36.67 50.00 78.67 95.00 65.10 68.80 54.51 70.12 STAPO 35.52 63.33 30.83 46.67 77.73 95.00 64.95 68.80 52.26 68.45 OPD 37.71 66.67 31.25 40.00 76.02 92.50 65.40 69.80 52.60 67.24 ExOPD 38.54 66.67 31.67 43.33 76.72 92.50 65.05 68.40 53.00 67.73 REOPOLD 37.50 66.67 30.83 43.33 77.73 92.50 66.70 69.00 53.19 67.88 AOPD 37.71 70.00 32.50 43.33 79.38 95.00 65.85 70.80 53.86 69.78 TOPD 39.38 70.00 30.83 36.67 79.14 95.00 65.60 70.00 53.74 67.92
+> γOPD 42.08 70.00 35.00 46.67 80.86 95.00 68.10 73.20 56.51 71.22
+
+4 EXPERIMENTS 
+
+4.1 SETTINGS 
+
+Benchmarks. Our experiments evaluate both mathematical and code reasoning abilities. For math-ematical reasoning, we train on DeepMath (He et al., 2025), retaining problems with difficulty level at least 6, and evaluate on AIME24 (Li et al., 2024), AIME25 (OpenCompass, 2025), AMC23 (Li et al., 2024), and MATH500 (Hendrycks et al., 2021). For code reasoning, we train on the 25K-sample Eurus-RL-Code dataset (Cui et al., 2026) and evaluate on HumanEval+, MBPP+ (Liu et al., 2023), and the v6 split of LiveCodeBench (Jain et al., 2025), covering problems from February 2025 to May 2025. Detailed training and evaluation configurations are provided in Appendix E. 
+
+Models. We conduct experiments under three distillation settings: (1) vanilla distillation , where we distill a Qwen3-4B-Math (Yang et al., 2026a) teacher into a Qwen3-4B (Yang et al., 2025) student for mathematical reasoning; (2) size-mismatch distillation , where we distill the same Qwen3-4B-Math teacher into a smaller Qwen3-1.7B student for mathematical reasoning; and (3) multi-teacher distillation , where we distill Qwen3-4B-Math and Qwen3-4B-Code (Yang et al., 2026a) teachers into a single Qwen3-4B student for both math and code reasoning. 
+
+Baselines. We compare γOPD against representative OPD-based baselines, including vanilla OPD (Lu & Thinking Machines Lab, 2025), ExOPD (Yang et al., 2026a), REOPOLD (Ko et al., 2026), AOPD (Jia et al., 2026), and TOPD (Zhang et al., 2026), as well as RL-based methods, including JustRL (He et al., 2026) and STAPO (Liu et al., 2026). For γOPD , we use γ = 0 .99 
+
+6Preprint 0 10 20 30 40 Step 0.0 0.2 0.4 0.6 Verifiable Reward                  
+
+> 010 20 30 40 Step 10 −4
+> 10 −2
+> 10 0
+> Absolute Advantage
+> 010 20 30 40 Step 10 −1
+> 10 1
+> Grad Norm
+> 010 20 30 40 Step 5000 10000 Response Length
+> OPD ExOPD REOPOLD AOPD TOPD γOPD
+
+Figure 3: Training dynamics under vanilla distillation. Verifiable reward, absolute advantage, gradient norm, and response length throughout training are reported. Due to the truncation mecha-nism, TOPD’s verifiable reward remains mostly below zero throughout training. Table 2: Accuracy on mathematical and code reasoning benchmarks under multi-teacher distillation. TotalAvg is the equal-weighted average of the mean mathematical score and the mean code score.                                                                          
+
+> Method Mathematical Reasoning Code Reasoning AIME24 AIME25 AMC23 MATH500 HumanEval+ MBPP+ LCB TotalAvg Student 22.60 20.83 60.16 67.40 75.61 61.90 17.14 47.15 Teacher 57.40 51.67 93.52 69.80 82.32 70.63 25.71 63.82 OPD 55.21 52.50 93.13 68.65 84.15 67.99 26.00 63.37 ExOPD 57.50 52.50 92.34 68.25 85.37 71.16 26.71 64.36 REOPOLD 58.13 52.08 91.88 68.55 82.32 69.31 28.00 63.77 AOPD 55.52 55.83 93.05 68.70 84.76 69.05 26.71 64.22 TOPD 57.81 51.67 92.34 69.50 84.15 69.58 27.86 64.18
+> γOPD 59.27 55.00 94.38 69.00 89.02 70.63 28.14 66.00
+
+by default unless otherwise specified. All methods are implemented based on veRL (Sheng et al., 2025). 4.2 MAIN RESULTS 
+
+Vanilla Distillation. As shown in Table 1, γOPD consistently outperforms existing OPD baselines in the vanilla distillation setting. Compared with the strongest baseline for each metric, γOPD 
+
+achieves relative improvements of 2.30% in AvgAcc and 1.80% in AvgPass. Notably, it also sur-passes the teacher on both averaged metrics. These results demonstrate the effectiveness of γOPD 
+
+and suggest that the proposed RBM can better leverage dense teacher supervision while enabling improvement beyond direct imitation. 
+
+Size-Mismatch Distillation. The size-mismatch setting (Qwen3-4B-Math → Qwen3-1.7B) is more challenging because the student has substantially lower capacity than the teacher. Consequently, as shown in Table 1, all student methods remain below the teacher. Nevertheless, γOPD substan-tially narrows the performance gap and achieves the best overall performance. Compared with the strongest baseline for each metric, γOPD achieves relative improvements of 4.92% in AvgAcc and 
+
+2.06% in AvgPass. These results highlight the benefit of temporal credit assignment when distilling a stronger teacher into a lower-capacity student. 
+
+Multi-Teacher Distillation. We next evaluate whether γOPD remains effective in the multi-teacher distillation setting. As shown in Table 2, it consistently performs strongly across mathematical rea-soning benchmarks and achieves the best results on HumanEval+ and LCB among the code reason-ing tasks. Overall, γOPD improves TotalAvg by 1.87% over the strongest baseline, AOPD. Notably, it also outperforms the teacher on average in both mathematical and code reasoning. These re-sults demonstrate that γOPD remains effective when jointly training a shared student with domain-specialized teachers. 
+
+Training Dynamics. We further visualize the training dynamics of different methods under the vanilla distillation setting in Figure 3. Throughout training, γOPD consistently achieves the highest verifiable reward, indicating the largest proportion of correctly solved problems. It also maintains a stable absolute OPD advantage and exhibits the smallest fluctuations in gradient norm among all 7Preprint Table 3: Ablation study of the proposed components on AIME benchmarks. γ, Mix, and Norm correspond to temporal discounting, reward mixing, and bounded normalization, respectively. ∆
+
+Avg. denotes the absolute improvement in average accuracy over the vanilla OPD baseline. Components Accuracy (%) ∆ Avg. 
+
+γ Mix Norm AIME24 AIME25 Avg. Vanilla OPD 56.46 50.83 53.65 –
+
+✓ – – 58.29 53.08 55.69 +2.04 
+
+✓ ✓ – 58.81 52.67 55.74 +2.09 – ✓ ✓ 57.55 53.75 55.65 +2.00 
+
+✓ ✓ ✓ 60.94 54.17 57.56 +3.91 
+
+methods, suggesting more consistent temporal credit assignment and optimization. Moreover, the response length of γOPD converges to a shorter and more stable range than those of most base-lines, with the exception of TOPD, which explicitly truncates the distillation signal. Together, these results suggest that γOPD enables more stable optimization while achieving stronger mathematical reasoning performance. 4.3 ABLATION STUDIES 
+
+We isolate the effects of temporal discounting, reward mixing, and bounded normalization on the AIME benchmarks in Table 3. Temporal discounting alone improves the average accuracy by 2.04 
+
+points over vanilla OPD. Removing temporal discounting from the full method while retaining re-ward mixing and normalization reduces the gain from 3.91 to 2.00 points, confirming its comple-mentary contribution. Moreover, adding naive reward mixing to temporal discounting brings only a marginal 0.05 -point improvement, whereas the full combination including bounded normalization yields the strongest overall performance. These results suggest that temporal credit assignment and reward-compatible normalization provide complementary benefits, with their combination yielding the strongest performance. We further analyze the computational and memory overhead of the in-dividual components of γOPD . Compared with standard OPD, γOPD introduces only about 0.1% 
+
+additional computation time with negligible memory overhead; detailed profiling results are pro-vided in Appendix F.1. 4.4 DETAILED ANALYSIS 
+
+Sensitivity to γ. We further investigate the sensitivity of temporal credit assignment to the discount factor γ without RBM. Specifically, we distill a Qwen3-4B-Math teacher into a Qwen3-1.7B student using different values of γ, with the results shown in Figure 4. Here, γ = 0 reduces to local OPD, whereas γ = 1 corresponds to the undiscounted sequence-level return-to-go. Due to the long response horizon, the sequence-level variant produces substantially larger gradient norms and suffers from rapid entropy collapse, resulting in inferior reasoning performance. In contrast, local OPD and the discounted variants steadily improve during training. Among them, γ = 0 .99 achieves the best performance, outperforming smaller values such as γ = 0 .9, while exhibiting distinct gradient-norm and entropy dynamics. These results suggest that a large but sub-unity discount factor provides the best balance between long-range temporal credit assignment and optimization stability. 
+
+Visualization of Token Advantages. We further visualize the normalized token-level advantages 
+
+A(0)  
+
+> t
+
+and A(0 .99)  
+
+> t
+
+in Figure 5. In the correct response, A(0)  
+
+> t
+
+provides sparse local supervision, as-signing a noticeable negative signal to only a few tokens while exerting little influence on most of the reasoning process. In contrast, A(0 .99)  
+
+> t
+
+propagates information from subsequent steps, producing a smoother signal and assigning stronger positive credit to the key mathematical derivation while mildly penalizing redundant text. For the incorrect response, A(0)  
+
+> t
+
+strongly penalizes several tokens that are only weakly related to the actual reasoning error, whereas A(γ) 
+
+> t
+
+concentrates stronger nega-tive credit on the erroneous formula derivation without excessively penalizing the final token. These examples illustrate that temporal credit assignment can redistribute supervision toward reasoning 8Preprint 0 10 20 30 40 50 60 70 Step 0.1 0.2 0.3 0.4 AIME24 Acc (avg@32)                      
+
+> 010 20 30 40 50 60 70 Step 10 0
+> 10 1
+> Grad Norm
+> 010 20 30 40 50 60 70 Step 0.2 0.3 0.4 Entropy
+> γ= 0 γ= 0.9 γ= 0.99 γ= 1
+
+Figure 4: Training dynamics under different γ. OPD distills a Qwen3-4B-Math teacher into a Qwen3-1.7B student, with validation accuracy, gradient norm, and policy entropy reported. We are given a function $ f(x, y, z) = xyz $ and a region $W$ defined by the inequalities $ 0                                  
+
+> A(0)
+> t
+> (a) Correct answer We are given a function $ f(x, y, z) = xyz $ and a region $W$ defined by the inequalities $ 0
+> A(0.99)
+> t
+> $$ \sum_{k=1}^{6} \tan^2 \left( \frac{k\pi}{7} \right) =\frac{(7-1)(7-2)}{3} =\frac{6 \cdot 5}{3} = \frac{30}{3} = 10 $$ --- ### Final Answer: $$ \boxed{10} $$<|im_end|> (b) Incorrect answer $$ \sum_{k=1}^{6} \tan^2 \left( \frac{k\pi}{7} \right) =\frac{(7-1)(7-2)}{3} =\frac{6 \cdot 5}{3} = \frac{30}{3} = 10 $$ --- ### Final Answer: $$ \boxed{10} $$<|im_end|>
+> -1.0 -0.5 0.0 0.5 1.0
+> At
+> ...... ......
+
+Figure 5: Token-level advantage visualization. (a) Correct response; (b) incorrect response. The top row shows normalized A(0)  
+
+> t
+
+, and the bottom row shows normalized A(0 .99)  
+
+> t
+
+. Blue and red denote negative and positive advantages, respectively, with color intensity indicating magnitude. Complete response examples are provided in Appendix F.2. steps that are more relevant to the final outcome, yielding smoother and more semantically aligned token-level signals. Complete response-level visualizations are provided in Appendix F.2. 
+
+5 RELATED WORK 
+
+Credit Assignment for OPD. Recent studies have explored credit assignment in OPD, motivated by the potentially unreliable reasoning trajectories generated by relatively weak student policies(Liu et al., 2026; Yu et al., 2026). Truncation-based methods (Zhou et al., 2026; Zhang et al., 2026) termi-nate rollouts early or mask the learning signals of tokens beyond selected positions, thereby reducing the influence of unreliable continuations. Entropy-aware OPD (Jin et al., 2026) augments reverse KL with forward KL on tokens where the teacher has high entropy, while ExOPD (Yang et al., 2026a) introduces a reference model to calibrate the OPD advantage. Fu et al. (2026) analyze the bias–variance trade-off between token-level and sequence-level reverse-KL estimators and propose teacher top-K local-support matching, yet a principled balance between sequence-level objective fidelity and token-level optimization stability remains unresolved. 
+
+Reward-Guided OPD. Recent studies incorporate verifiable rewards into OPD to complement teacher-derived supervision. REOPOLD (Ko et al., 2026) combines reward clipping, entropy-based sampling, and exploration-to-refinement scheduling, while SCOPE (Zheng et al., 2026) routes in-correct trajectories to teacher-perplexity-weighted KL distillation and correct trajectories to student-perplexity-weighted MLE. AOPD (Jia et al., 2026) preserves positive reinforcement while replac-ing non-positive token updates with localized teacher imitation, whereas RWOPD (Zou et al., 2026) weights teacher KL gradients using verifier rewards. Other works (Ding et al., 2026; Zhan et al., 2026) further stabilize optimization through advantage compression and warmup-then-anneal scheduling. Nevertheless, these methods often introduce additional complexity through group-based 9Preprint advantage estimation, log-ratio correction, or verifier-weighted teacher KL objectives, potentially incurring substantial computational overhead. 
+
+6 CONCLUSION 
+
+In this work, we unified token-level and sequence-level OPD from a temporal credit assignment perspective and proposed γOPD to balance long-horizon supervision and optimization stability. We further introduced RBM to combine discounted teacher guidance with verifiable outcome rewards. Empirical results on mathematical and code reasoning demonstrate that γOPD remains effective across different teacher–student configurations and distillation scenarios. Due to computational constraints, our experiments are currently limited to models with fewer than 10B parameters. Evaluating γOPD at larger scales and exploring more flexible temporal credit assignment schemes, such as adaptive or entropy-aware discounting, are promising directions for future work. 
+
+REFERENCES 
+
+Rishabh Agarwal, Nino Vieillard, Yongchao Zhou, Piotr Stanczyk, Sabela Ramos Garea, Matthieu Geist, and Olivier Bachem. On-policy distillation of language models: Learning from self-generated mistakes. In International Conference on Learning Representations , 2024. Ganqu Cui, Lifan Yuan, Zefan Wang, Hanbin Wang, Yuchen Zhang, Jiacheng Chen, et al. Process reinforcement through implicit rewards. Transactions on Machine Learning Research , 2026. URL 
+
+https://arxiv.org/abs/2502.01456 .DeepSeek-AI, Anyi Xu, Bangcai Lin, Bing Xue, Bingxuan Wang, et al. DeepSeek-V4: Towards highly efficient million-token context intelligence, 2026. URL https://arxiv.org/abs/ 2606.19348 .Yifan Ding, Xincheng Wei, Yoshua Y. Li, Ziheng Li, Yuquan Lu, Siyu Zhang, Dongsheng Ma, Rongxiang Weng, Xunliang Cai, and Yun Chen. SAF-OPD: Stable advantage fusion for On-Policy Distillation. arXiv preprint arXiv:2607.29209 , 2026. URL https://arxiv.org/ abs/2607.29209 .Yuqian Fu, Haohuan Huang, Kaiwen Jiang, Jiacai Liu, Zhuo Jiang, Yuanheng Zhu, and Dongbin Zhao. Revisiting On-Policy Distillation: Empirical failure modes and simple fixes. arXiv preprint arXiv:2603.25562 , 2026. URL https://arxiv.org/abs/2603.25562 .GLM-5 Team. GLM-5: from Vibe Coding to Agentic Engineering, 2026. URL https://arxiv. org/abs/2602.15763 .Daya Guo, Dejian Yang, Haowei Zhang, Junxiao Song, Peiyi Wang, Qihao Zhu, et al. DeepSeek-R1 incentivizes reasoning in LLMs through reinforcement learning. Nature , 645(8081):633–638, 2025. doi: 10.1038/s41586-025-09422-z. Bingxiang He, Zekai Qu, Zeyuan Liu, Yinghao Chen, Yuxin Zuo, Cheng Qian, Kaiyan Zhang, Weize Chen, Chaojun Xiao, Ganqu Cui, Ning Ding, and Zhiyuan Liu. JustRL: Scaling a 1.5B LLM with a Simple RL Recipe. In ICLR Blogposts 2026 , 2026. Zhiwei He, Tian Liang, Jiahao Xu, Qiuzhi Liu, Xingyu Chen, Yue Wang, Linfeng Song, Dian Yu, Zhenwen Liang, Wenxuan Wang, Zhuosheng Zhang, Rui Wang, Zhaopeng Tu, Haitao Mi, and Dong Yu. DeepMath-103K: A large-scale, challenging, decontaminated, and verifiable mathe-matical dataset for advancing reasoning. arXiv preprint arXiv:2504.11456 , 2025. Dan Hendrycks, Collin Burns, Saurav Kadavath, Akul Arora, Steven Basart, Eric Tang, Dawn Song, and Jacob Steinhardt. Measuring mathematical problem solving with the MATH dataset. In 
+
+Proceedings of the Neural Information Processing Systems Track on Datasets and Benchmarks ,volume 1, 2021. 10 Preprint Naman Jain, King Han, Alex Gu, Wen-Ding Li, Fanjia Yan, Tianjun Zhang, Sida Wang, Armando Solar-Lezama, Koushik Sen, and Ion Stoica. LiveCodeBench: Holistic and contamination free evaluation of large language models for code. In International Conference on Learning Repre-sentations , 2025. URL https://openreview.net/forum?id=chfJJYC3iL .Nan Jia, Haojin Yang, Xing Ma, Jiesong Lian, Shuailiang Zhang, Weipeng Zhang, Ke Zeng, Xun-liang Cai, and Zequn Sun. Asymmetric On-Policy Distillation: Bridging exploitation and imita-tion at the token level. arXiv preprint arXiv:2605.06387 , 2026. doi: 10.48550/arXiv.2605.06387. URL https://arxiv.org/abs/2605.06387 .Woogyeol Jin, Taywon Min, Yongjin Yang, Swanand Ravindra Kadhe, Yi Zhou, Dennis Wei, Nathalie Baracaldo, and Kimin Lee. Entropy-aware On-Policy Distillation of language models. In Proceedings of the 43rd International Conference on Machine Learning , volume 306. PMLR, 2026. doi: 10.48550/arXiv.2603.07079. URL https://arxiv.org/abs/2603.07079 .Kimi Team, Tongtong Bai, Yifan Bai, Yiping Bao, et al. Kimi K3: Open Frontier Intelligence, 2026. URL https://arxiv.org/abs/2607.24653 .Jongwoo Ko, Sara Abdali, Young Jin Kim, Tianyi Chen, and Pashmina Cameron. Scaling reasoning efficiently via relaxed on-policy distillation, 2026. URL https://arxiv.org/abs/2603. 11137 .Woosuk Kwon, Zhuohan Li, Siyuan Zhuang, Ying Sheng, Lianmin Zheng, Cody Hao Yu, Joseph E. Gonzalez, Hao Zhang, and Ion Stoica. Efficient memory management for large language model serving with PagedAttention. In Proceedings of the ACM SIGOPS 29th Symposium on Operating Systems Principles , 2023. Jia Li, Edward Beeching, Lewis Tunstall, Ben Lipkin, Roman Soletskyi, Shengyi Huang, Kashif Rasul, Longhui Yu, Albert Q Jiang, Ziju Shen, et al. NuminaMath: The largest public dataset in AI4Maths with 860k pairs of competition math problems and solutions. Hugging Face dataset, 2024. URL https://huggingface.co/datasets/AI-MO/NuminaMath-CoT .Yaxuan Li, Yuxin Zuo, Bingxiang He, Jinqian Zhang, Chaojun Xiao, Cheng Qian, Tianyu Yu, Huan-ang Gao, Wenkai Yang, Zhiyuan Liu, and Ning Ding. Rethinking on-policy distillation of large language models: Phenomenology, mechanism, and recipe, 2026. URL https://arxiv. org/abs/2604.13016 .Jiawei Liu, Chunqiu Steven Xia, Yuyao Wang, and Lingming Zhang. Is Your Code Generated by ChatGPT Really Correct? Rigorous Evaluation of Large Language Models for Code Generation. In Advances in Neural Information Processing Systems , volume 36, pp. 21558–21572, 2023. URL 
+
+https://openreview.net/forum?id=1qvx610Cu7 .Shiqi Liu, Zeyu He, Guojian Zhan, Letian Tao, Zhilong Zheng, Jiang Wu, Yinuo Wang, Yang Guan, Kehua Sheng, Bo Zhang, Keqiang Li, Jingliang Duan, and Shengbo Eben Li. STAPO: Stabilizing reinforcement learning for LLMs by silencing rare spurious tokens. arXiv preprint arXiv:2602.15620 , 2026. Kevin Lu and Thinking Machines Lab. On-policy distillation. Thinking Machines Lab: Connectionism, 2025. URL https://thinkingmachines.ai/blog/ on-policy-distillation .Minjae Oh, Sangjun Song, Gyubin Choi, Yunho Choi, and Yohan Jo. KL for a KL: On-Policy Distillation with control variate baseline. arXiv preprint arXiv:2605.07865 , 2026. doi: 10.48550/ arXiv.2605.07865. URL https://arxiv.org/abs/2605.07865 . Presented as a poster at the AI for Math Workshop, ICML 2026. OpenCompass. AIME2025 dataset. https://huggingface.co/datasets/ opencompass/AIME2025 , 2025. Accessed: 2026-08-09. Zhixin Ren, Yau Lyu, Congrong Li, Liping Zhang, and Shengbo Eben Li. Momentum as residual-driven multiplier correction for deep learning optimization, 2026. URL https://arxiv. org/abs/2608.12925 .11 Preprint Zhihong Shao, Peiyi Wang, Qihao Zhu, Runxin Xu, et al. DeepSeekMath: Pushing the limits of mathematical reasoning in open language models. arXiv preprint arXiv:2402.03300 , 2024. URL 
+
+https://arxiv.org/abs/2402.03300 .Guangming Sheng, Chi Zhang, Zilingfeng Ye, Xibin Wu, Wang Zhang, Ru Zhang, Yanghua Peng, Haibin Lin, and Chuan Wu. HybridFlow: A flexible and efficient RLHF framework. In Proceed-ings of the Twentieth European Conference on Computer Systems , pp. 1279–1297, 2025. An Yang, Anfeng Li, Baosong Yang, Beichen Zhang, et al. Qwen3 technical report. arXiv preprint arXiv:2505.09388 , 2025. URL https://arxiv.org/abs/2505.09388 .Wenkai Yang, Weijie Liu, Ruobing Xie, Kai Yang, Saiyong Yang, and Yankai Lin. Learning beyond teacher: Generalized on-policy distillation with reward extrapolation. arXiv preprint arXiv:2602.12125 , 2026a. URL https://arxiv.org/abs/2602.12125 .Zhuolin Yang, Zihan Liu, Yang Chen, Wenliang Dai, Boxin Wang, Sheng-Chieh Lin, Chankyu Lee, Yangyi Chen, Dongfu Jiang, Jiafan He, et al. Nemotron-Cascade 2: Post-training LLMs with cascade RL and multi-domain on-policy distillation. arXiv preprint arXiv:2603.19220 , 2026b. Qiying Yu, Zheng Zhang, Ruofei Zhu, Yufeng Yuan, et al. DAPO: An open-source LLM reinforce-ment learning system at scale. In Advances in Neural Information Processing Systems , volume 38, pp. 125532–125554, 2025. doi: 10.52202/085713-3775. Zhouyang Yu, Guojian Zhan, Yang Guan, Jingliang Duan, Letian Tao, and Shengbo Eben Li. Taming aleatoric impulse in off-policy reinforcement learning. In Proceedings of the 43rd International Conference on Machine Learning , 2026. Guojian Zhan, Xiangteng Zhang, Feihong Zhang, Letian Tao, and Shengbo Eben Li. Bicriteria policy optimization for high-accuracy reinforcement learning. IEEE Transactions on Neural Net-works and Learning Systems , 37(1):312–326, 2026. doi: 10.1109/TNNLS.2025.3605362. Yaocheng Zhang, Jiajun Chai, Yuqian Fu, Songjun Tu, Xiaohan Wang, Wei Lin, Guojun Yin, Qichao Zhang, Yuanheng Zhu, and Dongbin Zhao. Are full rollouts necessary for On-Policy Distillation? 
+
+arXiv preprint arXiv:2605.31490 , 2026. doi: 10.48550/arXiv.2605.31490. URL https:// arxiv.org/abs/2605.31490 .Binbin Zheng, Xing Ma, Yiheng Liang, Jingqing Ruan, Xiaoliang Fu, Kepeng Lin, Benchang Zhu, Ke Zeng, and Xunliang Cai. SCOPE: Signal-calibrated On-Policy Distillation enhancement with dual-path adaptive weighting. arXiv preprint arXiv:2604.10688 , 2026. doi: 10.48550/arXiv.2604. 10688. URL https://arxiv.org/abs/2604.10688 .Ziheng Zhou, Jiaqi Li, Huacong Tang, Ying Nian Wu, and Demetri Terzopoulos. Less is more: Early stopping rollout for On-Policy Distillation. arXiv preprint arXiv:2605.27028 , 2026. doi: 10.48550/arXiv.2605.27028. URL https://arxiv.org/abs/2605.27028 .Qingyun Zou, Yingze Li, Tianen Liu, Bingsheng He, and Weng-Fai Wong. Reward-weighted On-Policy Distillation with an open property-equivalence verifier for NL-to-SVA generation. arXiv preprint arXiv:2605.13501 , 2026. doi: 10.48550/arXiv.2605.13501. URL https://arxiv. org/abs/2605.13501 .12 Preprint 
+
+APPENDIX 
+
+A PROOF OF PROPOSITION 3.1 
+
+Starting from the token-level OPD objective in equation 4b, we have 
+
+Jtoken OPD (θ) = Ex∼D 
+
+" TX
+
+> t=1
+
+Eht∼d¯θ (·| x) [DKL (πθ (· | ht) ∥ π∗(· | ht))] 
+
+#
+
+.
+
+Since the prefix distribution d¯θ (ht | x) is treated with stop-gradient, it is fixed when differentiating with respect to θ. Therefore, the gradient can be moved inside the expectation over prefixes: 
+
+∇θ Jtoken OPD (θ) = Ex∼D 
+
+" TX
+
+> t=1
+
+Eht∼d¯θ (·| x)
+
+"
+
+∇θ
+
+X
+
+> a∈V
+
+πθ (a | ht) (log πθ (a | ht) − log π∗(a | ht)) 
+
+## 
+
+.
+
+(10) For a fixed prefix ht, define 
+
+∆( a; ht) ≜ log πθ (a | ht) − log π∗(a | ht).
+
+This is the full-vocabulary counterpart of the sampled token-level log-ratio ∆t in equation 1a. Then the gradient of the inner next-token KL term is 
+
+∇θ
+
+X
+
+> a∈V
+
+πθ (a | ht)∆( a; ht)= X
+
+> a∈V
+
+∇θ πθ (a | ht)∆( a; ht) + X
+
+> a∈V
+
+πθ (a | ht)∇θ log πθ (a | ht).
+
+(11) The second term in equation 11 vanishes because 
+
+X
+
+> a∈V
+
+πθ (a | ht)∇θ log πθ (a | ht) = X
+
+> a∈V
+
+∇θ πθ (a | ht) = ∇θ
+
+X
+
+> a∈V
+
+πθ (a | ht) = 0 .
+
+Using the score-function identity 
+
+∇θ πθ (a | ht) = πθ (a | ht)∇θ log πθ (a | ht),
+
+we obtain 
+
+∇θ DKL (πθ (· | ht) ∥ π∗(· | ht)) = X
+
+> a∈V
+
+πθ (a | ht)∆( a; ht)∇θ log πθ (a | ht)= Eyt∼πθ (·| ht) [∆ t∇θ log πθ (yt | ht)] ,
+
+(12) where ∆t = ∆( yt; ht) follows from equation 1a. Substituting equation 12 into equation 10 gives 
+
+∇θ Jtoken OPD (θ) = Ex∼D 
+
+" TX
+
+> t=1
+
+Eht∼d¯θ (·| x), y t∼πθ (·| ht) [∆ t∇θ log πθ (yt | ht)] 
+
+#
+
+. (13) When the stop-gradient prefix distribution is evaluated at the current policy, the prefix ht together with the next token yt can be generated by an on-policy trajectory y ∼ πθ (· | x), while gradients are not propagated through the prefix-sampling distribution. Hence, equation 13 can be written as 
+
+∇θ Jtoken OPD (θ) = Ex∼D , y∼πθ (·| x)
+
+" TX
+
+> t=1
+
+∆t∇θ log πθ (yt | ht)
+
+#
+
+,
+
+which is exactly the token-level OPD gradient in equation 5. This proves Proposition 3.1. 13 Preprint 
+
+B PROOF OF PROPOSITION 3.2 
+
+Starting from the sequence-level OPD objective in equation 4a, we expand the reverse KL over complete response trajectories: 
+
+Jseq OPD (θ) = Ex∼D 
+
+ X
+
+> y∈V T
+
+πθ (y | x)∆( y)
+
+ ,
+
+where ∆( y) is the sequence-level log-ratio defined in equation 1b. Taking the gradient with respect to θ gives 
+
+∇θ Jseq OPD (θ) = Ex∼D 
+
+ X
+
+> y∈V T
+
+∇θ πθ (y | x)∆( y) + X
+
+> y∈V T
+
+πθ (y | x)∇θ log πθ (y | x)
+
+ . (14) The second term in equation 14 vanishes because 
+
+X
+
+> y∈V T
+
+πθ (y | x)∇θ log πθ (y | x) = ∇θ
+
+X
+
+> y∈V T
+
+πθ (y | x) = ∇θ 1 = 0 .
+
+Using the score-function identity, 
+
+∇θ πθ (y | x) = πθ (y | x)∇θ log πθ (y | x),
+
+we obtain 
+
+∇θ Jseq OPD (θ) = Ex∼D , y∼πθ (·| x) [∆( y)∇θ log πθ (y | x)] . (15) By the autoregressive factorization and the log-ratio decomposition in equation 1, we have 
+
+∆( y) = 
+
+> T
+
+X
+
+> t′=1
+
+∆t′ , ∇θ log πθ (y | x) = 
+
+> T
+
+X
+
+> t=1
+
+∇θ log πθ (yt | ht). (16) Substituting equation 16 into equation 15 yields 
+
+∇θ Jseq OPD (θ) = Ex∼D , y∼πθ (·| x)
+
+" TX
+
+> t=1
+> T
+
+X
+
+> t′=1
+
+∆t′ ∇θ log πθ (yt | ht)
+
+#
+
+. (17) It remains to remove the terms with t′ < t . For t′ < t , ∆t′ is determined by earlier tokens and is therefore measurable with respect to ht. Hence, conditioning on ht,
+
+Eyt∼πθ (·| ht) [∆ t′ ∇θ log πθ (yt | ht)] = ∆ t′ Eyt∼πθ (·| ht) [∇θ log πθ (yt | ht)] = 0 ,
+
+where the last equality follows from the token-level score identity 
+
+Eyt∼πθ (·| ht) [∇θ log πθ (yt | ht)] = ∇θ
+
+X
+
+> yt∈V
+
+πθ (yt | ht) = 0 .
+
+Therefore, all terms with t′ < t in equation 17 vanish in expectation. Keeping only the terms with 
+
+t′ ≥ t, we obtain 
+
+∇θ Jseq OPD (θ) = Ex∼D , y∼πθ (·| x)
+
+" TX
+
+> t=1
+> T
+
+X
+
+> t′=t
+
+∆t′
+
+!
+
+∇θ log πθ (yt | ht)
+
+#
+
+,
+
+which is exactly the sequence-level gradient in equation 6. This proves Proposition 3.2. 14 Preprint 
+
+C PROOF OF THEOREM 3.3 
+
+Proof. Let Nt = T − t + 1 and define 
+
+eA(0)  
+
+> τ
+
+= A(0)  
+
+> τ
+
+− E
+
+h
+
+A(0) 
+
+> τ
+
+i
+
+.
+
+Since 
+
+eA(0) 
+
+> τ
+> 22
+
+= Var 
+
+
+
+A(0) 
+
+> τ
+
+
+
+≤ E
+
+
+
+A(0) 
+
+> τ
+
+2
+
+≤ σ2∆,
+
+we have eA(0)  
+
+> τ2
+
+≤ σ∆.For the sequence-level OPD credit, the triangle inequality in L2 gives 
+
+r
+
+Var 
+
+
+
+A(1) 
+
+> t
+
+
+
+=
+
+> T
+
+X 
+
+> τ=t
+
+eA(0) 
+
+> τ
+> 2
+
+≤
+
+> T
+
+X 
+
+> τ=t
+
+eA(0)  
+
+> τ2
+
+≤ Ntσ∆.
+
+Therefore, 
+
+Var 
+
+
+
+A(1) 
+
+> t
+
+
+
+≤ N 2 
+
+> t
+
+σ2∆ = ( T − t + 1) 2σ2∆.
+
+This quadratic dependence is attainable in the worst case. In particular, if A(0)  
+
+> τ
+
+= Z for all τ ∈{t, . . . , T }, where E[Z] = 0 and Var( Z) = σ2∆, then 
+
+Var 
+
+
+
+A(1) 
+
+> t
+
+
+
+= Var( NtZ) = N 2 
+
+> t
+
+σ2∆.
+
+For the γOPD credit, similarly, 
+
+r
+
+Var 
+
+
+
+A(γ)
+
+> t
+
+
+
+=
+
+> T
+
+X 
+
+> τ=t
+
+γτ −t eA(0) 
+
+> τ
+> 2
+
+≤ σ∆
+
+> T
+
+X 
+
+> τ=t
+
+γτ −t
+
+= σ∆
+
+1 − γNt
+
+1 − γ ≤ σ∆
+
+1 − γ , ∀γ ∈ [0 , 1) .
+
+Squaring both sides yields 
+
+Var 
+
+
+
+A(γ)
+
+> t
+
+
+
+≤ σ2∆
+
+(1 − γ)2 , ∀γ ∈ [0 , 1) .
+
+Thus, sequence-level OPD can exhibit variance that grows quadratically with the remaining horizon, whereas γOPD admits a horizon-independent variance bound for every fixed γ < 1.
+
+D ALGORITHM 
+
+The complete reward-enhanced γOPD procedure is summarized in Algorithm 1. 15 Preprint Table 4: Training hyperparameters for the OPD-based methods. The RLVR baselines use a rollout group size of 8. 
+
+Hyperparameter Value 
+
+Training framework veRL 
+
+Rollout backend vLLM Math reward function DAPO boxed verifier Code reward function Execution-based verifier Train batch size 1024 Responses per prompt 1PPO mini batch size 1024 PPO micro batch size/GPU 1Max prompt length 2048 Max response length 16384 Optimizer RADAR Weight decay 0.01 Learning rate 1 × 10 −5
+
+Training temperature / top-p 1.0 / 1.0 Validation temperature / top-p 1.0 / 1.0 Rollout tensor parallel size 4
+
+Algorithm 1 Reward-Enhanced Temporal-Credit On-Policy Distillation ( γOPD) 
+
+Require: Dataset D, student policy πθ , teacher policy π∗, discount factor γ, batch size B 
+
+> 1:
+
+for each training iteration do  
+
+> 2:
+
+Sample prompts {xi}Bi=1 ∼ D and responses {yi}Bi=1 ∼ πθ (· | xi) 
+
+> 3:
+
+Evaluate the verifier to obtain {Ri}Bi=1 , where Ri ← R(xi, yi) 
+
+> 4:
+
+for each mini-batch do  
+
+> 5:
+
+for each response (x, y, R ) in the mini-batch do  
+
+> 6:
+
+for t = 1 , . . . , T do  
+
+> 7:
+
+∆t ← log πθ (yt | ht) − log π∗(yt | ht) 
+
+> 8:
+
+end for  
+
+> 9:
+
+Compute { ˆA(γ) 
+
+> t
+
+}Tt=1 according to equation 7 and equation 8  
+
+> 10:
+
+end for  
+
+> 11:
+
+Update θ using equation 9  
+
+> 12:
+
+end for  
+
+> 13:
+
+end for  
+
+> 14:
+
+return final student policy πθ
+
+E EXPERIMENT DETAILS 
+
+All methods, including γOPD , are implemented with veRL (Sheng et al., 2025), using vLLM (Kwon et al., 2023) for rollouts and FSDP for actor training. For mathematical reason-ing, we train on DeepMath-103K (He et al., 2025), retaining examples with difficulty level at least 6. Each prompt is formatted in chat style and appended with “Please output the final answer within 
+
+\boxed {} .” For code reasoning, we train on Eurus-RL-Code (Cui et al., 2026). For both domains, verifier outcomes are mapped to binary rewards in {+1 , −1}. Math responses are evaluated with a DAPO-style boxed-answer verifier (Yu et al., 2025), while code responses are verified through execution-based unit tests. In the multi-teacher setting, each sample is routed to its domain-specific teacher and verifier while sharing the same student policy. OPD uses reverse-KL token advantages without an additional KL reward penalty. Unless other-wise specified, all models use RADAR (Ren et al., 2026) optimizer, a constant learning rate on 32 NVIDIA H20 GPUs, with each training run taking approximately 1–3 days; full hyperparameters are provided in Table 4. 16 Preprint Table 5: Computational and memory overhead of the additional γOPD operations. 
+
+Operation Time (ms/step) Memory (MB) 
+
+Discounted temporal credit 609.85 0.063 Bounded advantage shaping 0.42 0.125 Verifier-reward mixing 0.04 0.188 
+
+Total additional overhead 610.32 0.375 
+
+Vanilla OPD update (reference) 573,669.00 81,254.40 
+
+Relative overhead 0.1064% 0.00046% 
+
+We use temperature 1.0 and top-p 1.0 for all evaluations. For mathematical reasoning, we evalu-ate on AIME24 (Li et al., 2024), AIME25 (OpenCompass, 2025), AMC23 (Li et al., 2024), and MATH500 (Hendrycks et al., 2021), with a maximum prompt length of 2048 and response length of 16384. Following the repeated-sampling convention, AIME24, AIME25, and AMC23 are evaluated with 32 samples per problem, while MATH500, MinervaMath, and OlympiadBench use 4 sam-ples per problem; we report both accuracy and pass rate. All predictions are scored using the same boxed-answer verifier as in training. For code reasoning, we evaluate HumanEval+ and MBPP+ (Liu et al., 2023) with EvalPlus, and the v6 split of LiveCodeBench (Jain et al., 2025). HumanEval+ and MBPP+ use one sample per problem, whereas LiveCodeBench uses four samples with a maximum generation length of 16384 tokens. 
+
+F SUPPLEMENTARY EXPERIMENTAL RESULTS 
+
+F.1 COMPUTATIONAL TIME AND MEMORY ANALYSIS 
+
+We profile the additional computation introduced by γOPD using the same 4B student/teacher mod-els and 32-GPU setup as the main experiments. Statistics are averaged over training steps 2–100 after warm-up. The extra operations include discounted temporal-credit computation, bounded ad-vantage shaping, and verifier-reward mixing. Overall, γOPD adds only 0.1064% computation time and 0.00046% memory relative to a full OPD update, indicating negligible training overhead. F.2 COMPLETE TOKEN -L EVEL ADVANTAGE VISUALIZATION 
+
+This appendix provides the complete token-level visualizations behind Figure 5. Each response is shown as a sequence of consecutive full-width panels rather than as a collection of small subfigures, so that individual tokens and advantage magnitudes remain readable. The upper row in every panel shows the local advantage A(0)  
+
+> t
+
+, while the lower row shows the normalized temporally propagated advantage A(0 .99)  
+
+> t
+
+.As shown in Figure 6, for the correct response, A(0)  
+
+> t
+
+gives a sparse local signal, whereas A(0 .99) 
+
+> t
+
+propagates information from later reasoning steps and assigns stronger positive credit to the key mathematical derivation. As shown in Figure 7, for the incorrect response, A(0)  
+
+> t
+
+penalizes tokens largely unrelated to the actual error, while A(0 .99)  
+
+> t
+
+assigns stronger negative credit to the erroneous formula derivation without excessively penalizing the final end-of-sequence token. 17 Preprint We are given a function $ f(x, y, z) = xyz $ and a region $ W $A (0) 
+
+> t
+
+We are given a function $ f(x, y, z) = xyz $ and a region $ W $A (0.99) 
+
+> t
+
+defined by the inequalities $ 0 \le z \le y \le x \le 1 $. We defined by the inequalities $ 0 \le z \le y \le x \le 1 $. We need to find the average value of $ f $ over this region. The need to find the average value of $ f $ over this region. The average value of a function $ f $ over a region $ W $ is given average value of a function $ f $ over a region $ W $ is given by: $$ \text{Average} = \frac{1}{\text{Volume of } W} by: $$ \text{Average} = \frac{1}{\text{Volume of } W} \iiint_W f(x, y, z) \, dV $$ So, first, we need to compute the \iiint_W f(x, y, z) \, dV $$ So, first, we need to compute the volume of $ W $, and then compute the triple integral of $ f $volume of $ W $, and then compute the triple integral of $ f $over $ W $. --- ### Step 1: Determine the bounds of over $ W $. --- ### Step 1: Determine the bounds of integration The region $ W $ is defined by: $$ 0 \le z \le yA (0) 
+
+> t
+
+integration The region $ W $ is defined by: $$ 0 \le z \le yA (0.99) 
+
+> t
+
+\le x \le 1 $$ This defines a region in the first octant \le x \le 1 $$ This defines a region in the first octant (since all variables are non-negative), and the (since all variables are non-negative), and the inequalities are ordered as $ z \le y \le x \le 1 $. So we inequalities are ordered as $ z \le y \le x \le 1 $. So we need to set up the triple integral with appropriate limits. need to set up the triple integral with appropriate limits. To set up the integral, we can express the integration To set up the integral, we can express the integration order. The order of integration is important here. Since the order. The order of integration is important here. Since the region is bounded by $ z \le y \le x \le 1 $, we can choose an region is bounded by $ z \le y \le x \le 1 $, we can choose an order for the variables. A possible order is: $ z $, $ y $, $A (0) 
+
+> t
+
+order for the variables. A possible order is: $ z $, $ y $, $A (0.99) 
+
+> t
+
+x $. Alternatively, $ x $, $ y $, $ z $. Let's determine x $. Alternatively, $ x $, $ y $, $ z $. Let's determine which is easier. But let's think in terms of the order of the which is easier. But let's think in terms of the order of the variables. Since $ z \le y \le x $, we can fix $ x $, then for variables. Since $ z \le y \le x $, we can fix $ x $, then for each $ x $, $ y $ can range from 0 to $ x $, and for each $ y $, each $ x $, $ y $ can range from 0 to $ x $, and for each $ y $, $ z $ can range from 0 to $ y $. So, the integral can be set up $ z $ can range from 0 to $ y $. So, the integral can be set up as: $$ \iiint_W xyz \, dV = \int_{x=0}^1 \int_{y=0}^x as: $$ \iiint_W xyz \, dV = \int_{x=0}^1 \int_{y=0}^x \int_{z=0}^y xyz \, dz \, dy \, dx $$ Alternatively, we can \int_{z=0}^y xyz \, dz \, dy \, dx $$ Alternatively, we can 
+
+18 Preprint reverse the order of integration, but let's stick with this A (0) 
+
+> t
+
+reverse the order of integration, but let's stick with this A (0.99) 
+
+> t
+
+order for now. --- ### Step 2: Compute the triple integral order for now. --- ### Step 2: Compute the triple integral First, compute the inner integral over $ z $: $$ First, compute the inner integral over $ z $: $$ \int_{z=0}^y xyz \, dz = xy \int_0^y z \, dz = xy \left[ \int_{z=0}^y xyz \, dz = xy \int_0^y z \, dz = xy \left[ \frac{z^2}{2} \right]_0^y = xy \cdot \frac{y^2}{2} =\frac{z^2}{2} \right]_0^y = xy \cdot \frac{y^2}{2} =\frac{x y^3}{2} $$ Now, substitute this into the integral \frac{x y^3}{2} $$ Now, substitute this into the integral over $ y $: $$ \int_{y=0}^x \frac{x y^3}{2} dy = \frac{x}{2} over $ y $: $$ \int_{y=0}^x \frac{x y^3}{2} dy = \frac{x}{2} \int_{0}^x y^3 dy = \frac{x}{2} \cdot \left[ \frac{y^4}{4} \int_{0}^x y^3 dy = \frac{x}{2} \cdot \left[ \frac{y^4}{4} \right]_0^x = \frac{x}{2} \cdot \frac{x^4}{4} =A (0) 
+
+> t
+
+\right]_0^x = \frac{x}{2} \cdot \frac{x^4}{4} =A (0.99) 
+
+> t
+
+\frac{x^5}{8} $$ Now, integrate over $ x $: $$ \int_{x=0}^1 \frac{x^5}{8} $$ Now, integrate over $ x $: $$ \int_{x=0}^1 \frac{x^5}{8} dx = \frac{1}{8} \cdot \left[ \frac{x^6}{6} \frac{x^5}{8} dx = \frac{1}{8} \cdot \left[ \frac{x^6}{6} \right]_0^1 = \frac{1}{8} \cdot \frac{1}{6} =\right]_0^1 = \frac{1}{8} \cdot \frac{1}{6} =\frac{1}{48} $$ So the triple integral of $ f(x, y, z) = xyz $\frac{1}{48} $$ So the triple integral of $ f(x, y, z) = xyz $over $ W $ is $ \frac{1}{48} $. --- ### Step 3: Compute the over $ W $ is $ \frac{1}{48} $. --- ### Step 3: Compute the volume of $ W $ The volume of $ W $ is the triple integral of volume of $ W $ The volume of $ W $ is the triple integral of the constant function $ f(x, y, z) = 1 $ over $ W $, which the constant function $ f(x, y, z) = 1 $ over $ W $, which should be: $$ \iiint_W 1 \, dV = \int_{x=0}^1 \int_{y=0}^x A (0) 
+
+> t
+
+should be: $$ \iiint_W 1 \, dV = \int_{x=0}^1 \int_{y=0}^x A (0.99) 
+
+> t
+
+\int_{z=0}^y 1 \, dz \, dy \, dx $$ Compute inner integral: \int_{z=0}^y 1 \, dz \, dy \, dx $$ Compute inner integral: $$ \int_{z=0}^y 1 dz = y $$ Then: $$ \int_{y=0}^x y dy =$$ \int_{z=0}^y 1 dz = y $$ Then: $$ \int_{y=0}^x y dy =\left[ \frac{y^2}{2} \right]_0^x = \frac{x^2}{2} $$ Then: \left[ \frac{y^2}{2} \right]_0^x = \frac{x^2}{2} $$ Then: $$ \int_{x=0}^1 \frac{x^2}{2} dx = \frac{1}{2} \cdot $$ \int_{x=0}^1 \frac{x^2}{2} dx = \frac{1}{2} \cdot \left[ \frac{x^3}{3} \right]_0^1 = \frac{1}{2} \cdot \left[ \frac{x^3}{3} \right]_0^1 = \frac{1}{2} \cdot \frac{1}{3} = \frac{1}{6} $$ So the volume of $ W $ is $\frac{1}{3} = \frac{1}{6} $$ So the volume of $ W $ is $\frac{1}{6} $. --- ### Step 4: Compute the average value \frac{1}{6} $. --- ### Step 4: Compute the average value 
+
+19 Preprint Now, average value is: $$ \frac{1}{\text{Volume}} \times A (0) 
+
+> t
+
+Now, average value is: $$ \frac{1}{\text{Volume}} \times A (0.99) 
+
+> t
+
+\text{Triple integral} = \frac{1}{1/6} \cdot \frac{1}{48} \text{Triple integral} = \frac{1}{1/6} \cdot \frac{1}{48} = 6 \cdot \frac{1}{48} = \frac{6}{48} = \frac{1}{8} $$ = 6 \cdot \frac{1}{48} = \frac{6}{48} = \frac{1}{8} $$ Wait, let me check that again: Wait, the triple integral of $Wait, let me check that again: Wait, the triple integral of $xyz $ is $ 1/48 $, the volume is $ 1/6 $, so the average value xyz $ is $ 1/48 $, the volume is $ 1/6 $, so the average value is: $$ \frac{1/48}{1/6} = \frac{1}{48} \cdot \frac{6}{1} =is: $$ \frac{1/48}{1/6} = \frac{1}{48} \cdot \frac{6}{1} =\frac{6}{48} = \frac{1}{8} $$ Yes, that's correct. --- ### \frac{6}{48} = \frac{1}{8} $$ Yes, that's correct. --- ### Final Answer: $$ \boxed{\dfrac{1}{8}} $$<|im_end|> Final Answer: $$ \boxed{\dfrac{1}{8}} $$<|im_end|>     
+
+> -1.0 -0.5 0.0 0.5 1.0
+
+At
+
+Figure 6. Complete token-level advantage visualization for the correct response. The response is shown in token order across seven consecutive panels, with A(0) 
+
+t in the upper row and A(0 .99) 
+
+t in the lower row. Blue and red indicate negative and positive advantages, respectively. We are asked to evaluate the sum: $$ \sum_{k=1}^{6} \tan^2 A (0) 
+
+> t
+
+We are asked to evaluate the sum: $$ \sum_{k=1}^{6} \tan^2 A (0.99) 
+
+> t
+
+\left( \frac{k\pi}{7} \right) $$ --- ### Step 1: Use a known \left( \frac{k\pi}{7} \right) $$ --- ### Step 1: Use a known trigonometric identity There is a useful identity trigonometric identity There is a useful identity involving the sum of squares of tangent functions at equally involving the sum of squares of tangent functions at equally spaced angles: $$ \sum_{k=1}^{n-1} \tan^2 \left( spaced angles: $$ \sum_{k=1}^{n-1} \tan^2 \left( \frac{k\pi}{n} \right) = \frac{(n-1)(n-2)}{3} $$ This \frac{k\pi}{n} \right) = \frac{(n-1)(n-2)}{3} $$ This identity works for integer $ n > 2 $. Let's verify it for identity works for integer $ n > 2 $. Let's verify it for small $ n $. --- ### Step 2: Apply the identity In our case, $small $ n $. --- ### Step 2: Apply the identity In our case, $n = 7 $, so the sum becomes: $$ \sum_{k=1}^{6} \tan^2 \left( A (0) 
+
+> t
+
+n = 7 $, so the sum becomes: $$ \sum_{k=1}^{6} \tan^2 \left( A (0.99) 
+
+> t
+
+\frac{k\pi}{7} \right) = \frac{(7-1)(7-2)}{3} = \frac{6 \frac{k\pi}{7} \right) = \frac{(7-1)(7-2)}{3} = \frac{6 \cdot 5}{3} = \frac{30}{3} = 10 $$ --- ### Final Answer: $$ \cdot 5}{3} = \frac{30}{3} = 10 $$ --- ### Final Answer: $$ \boxed{10} $$<|im_end|> \boxed{10} $$<|im_end|>     
+
+> -1.0 -0.5 0.0 0.5 1.0
+
+At
+
+Figure 7. Complete token-level advantage visualization for the incorrect response. The two consec-utive panels show how A(0) 
+
+t can penalize tokens unrelated to the actual error, whereas A(0 .99) 
+
+t assigns stronger negative credit to the erroneous formula derivation. 
+
+20
