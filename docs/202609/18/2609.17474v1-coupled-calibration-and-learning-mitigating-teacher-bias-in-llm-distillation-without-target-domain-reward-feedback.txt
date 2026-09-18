@@ -1,0 +1,7751 @@
+Title: Coupled Calibration and Learning: Mitigating Teacher Bias in LLM Distillation without Target-Domain Reward Feedback
+
+URL Source: https://arxiv.org/pdf/2609.17474v1
+
+Published Time: Wed, 16 Sep 2026 01:39:57 GMT
+
+Number of Pages: 67
+
+Markdown Content:
+# Coupled Calibration and Learning: Mitigating Teacher Bias in LLM Distillation without Target-Domain Reward Feedback 
+
+Haichen Hu ♮
+
+MIT Yuheng Zhang †
+
+UIUC David Simchi-Levi ∗
+
+MIT 
+
+Abstract 
+
+Large language model (LLM) distillation aims to transfer the capabilities of a pow-erful teacher to a smaller student. Direct imitation, however, can also transfer the teacher’s systematic bias and errors. This challenge is particularly pronounced under covariate shift, when the teacher’s reliability on target questions is uncertain and target-domain reward feedback is unavailable. We propose Coupled Calibration and Learning (CCL), an LLM distillation algorithm that couples teacher calibration with student up-dates through token-level branching, using reward feedback only on source questions. Each iteration calibrates the teacher using source feedback and then uses the calibrated teacher to train the student on target questions. The updated student, in turn, informs subsequent calibration. In an autoregressive policy framework, we prove that the output student’s expected average Kullback-Leibler divergence to the oracle student converges to zero at a polynomial rate in the number of iterations. The oracle maximizes the true reference-regularized target reward within the student class, which need not repre-sent the unrestricted optimal policy. Our analysis quantifies the progress of projected student gradient updates while controlling the error in teacher calibration. We further establish a separation from regularized direct matching: its error relative to the oracle student can remain bounded away from zero even when the teacher achieves higher regularized target reward than every student policy. These results demonstrate that LLM distillation can overcome persistent teacher bias and recover the optimal student through coupled calibration and learning, without target-domain reward feedback. 
+
+# 1 Introduction 
+
+Large language models (LLMs) have become a central component of modern artificial intelligence, with applications ranging from language understanding and content generation to mathematical reasoning and program synthesis (OpenAI, 2023; Gemini Team, 2023; Grattafiori et al., 2024; Qwen Team, 2024; DeepSeek-AI, 2025). As these models increasingly supply predictions, decisions, and training data for other systems, understanding their statistical behavior has become an important research problem.     
+
+> ♮Email: huhc@mit.edu
+> †Email: yuhengz2@illinois.edu
+> ∗Email: dslevi@mit.edu
+
+1arXiv:2609.17474v1 [cs.LG] 15 Sep 2026 Statistical learning theory provides a principled framework for understanding the capabilities and limitations of modern AI. It studies when overparameterized predictors generalize, how model pre-dictions can support valid statistical inference, and how to evaluate black-box prediction procedures. For language models, theoretical analyzes also examine how pretraining benefits downstream tasks, how transformers learn from examples in context, and how preference feedback guides policy learn-ing. These questions have motivated progress in generalization theory, statistical inference, and the analysis of language-model training (Bartlett et al., 2020; Angelopoulos et al., 2023; Saunshi et al., 2021; Bai et al., 2023; Kim et al., 2024a; Ye et al., 2024; Wainwright, 2025; Hu and Simchi-Levi, 2025b,a, 2026). Within this broader program, a central challenge is to explain when information from an existing model can support the reliable training of another model. Knowledge distillation is a prominent approach to this challenge. A larger or more capable teacher supplies output probabilities or generated responses to train a student, often with substantially lower deployment costs. This idea underlies both classical model compression and recent methods for transferring language and reasoning capabilities to smaller models (Hinton et al., 2015; Gu et al., 2024; DeepSeek-AI, 2025). The teacher provides a rich source of synthetic supervision, making distillation particularly attractive when collecting task-specific demonstrations is difficult. A central difficulty, however, is the propagation of teacher-bias. Matching the teacher’s predictions can reproduce its systematic errors as well as its useful knowledge. For example, image-classification experiments show that distillation can amplify teacher errors on difficult classes even when average student accuracy improves (Lukasik et al., 2022). This concern is especially relevant under covariate shift, where the target questions differ from the source questions on which reliable supervision is available. Strong source performance does not by itself certify the teacher’s accuracy on the target questions. Related experiments with LLMs show substantial accuracy losses when in-context demonstrations and evaluation examples come from different topic domains (Roussinov et al., 2025). Nevertheless, the teacher may retain useful knowledge acquired from source data. The statistical challenge is therefore to exploit that information while correcting the errors that direct imitation can propagate (Yamamoto and Wainwright, 2026). The absence of reliable target feedback makes this problem more difficult. A reward model or verifier developed for one collection of questions need not remain reliable on another: multilingual evaluations, for example, find lower reward-model accuracy and inconsistent preferences across lan-guages (Gureja et al., 2025). Constructing new feedback can also require substantial resources. Training mathematical process verifiers has involved extensive human step annotations (Lightman et al., 2024), while executable code evaluation relies on task-specific tests and execution infras-tructure (Chen et al., 2021). These considerations motivate a setting in which trusted reward feedback is available on source questions, but only the questions themselves are available in the target dataset. The learner must then use source feedback to address target teacher bias, without evaluating target answers against their true rewards. This leads to the following question: 
+
+Can we distill a near optimal student from a biased teacher under covariate shift, using reward feedback only on source questions and none on the target questions? 
+
+Our contribution. We answer this question affirmatively by proposing Coupled Calibration and Learning (CCL), an LLM distillation algorithm that learns from a biased teacher using reward feedback only on source questions. In an autoregressive policy framework, our benchmark is the oracle student: the policy within the student class that maximizes the true target reward with KL regularization to a pre-trained reference policy. 2Our algorithm couples teacher calibration with student updates in an iterative procedure. Each iteration calibrates the teacher using source reward feedback and then uses the calibrated teacher to train the student on target questions. The updated student, in turn, informs the next calibration step so that teacher calibration and student learning proceed together throughout training. We prove that the expected average KL divergence from the student returned by CCL to the oracle student converges to zero at a polynomial rate in the number of iterations. The analysis uses student gradient progress near the oracle and exploration outside a fixed near-optimal region, while controlling calibration and finite-rollout errors. We further establish a separation: direct distillation can retain a strictly positive KL divergence between the oracle student and the trained student policy even when the teacher achieves a higher true regularized reward than every policy in the student class. Thus, our method can eliminate a persistent error of direct imitation and recover the optimal student without target-domain reward feedback. 
+
+Paper structure. Our paper is organized with the following structure. Section 3 introduces the distillation problem, the autoregressive policy model, and the oracle student benchmark. Section 4 presents our algorithm and explains how it couples teacher calibration with student updates. Then, Section 5 establishes convergence to the optimal oracle student and outlines the main steps of the analysis. Section 6 establishes a separation from regularized direct teacher matching to show that our bound is strictly better than direct distillation. 
+
+Notation. We write EX [·] and PX (·) for expectation and probability with respect to the ran-dom variable X, respectively. Conditional expectation and probability are denoted by E[· | F ]
+
+and P(· | F ) for a sigma-algebra F. We use σ(X1, . . . , Xk ) for the sigma-algebra generated by 
+
+(Xi)ki=1, and F ∨ G for the smallest sigma-algebra containing both F and G. For a vector v, ∥v∥2
+
+denotes its Euclidean norm; for a matrix A, ∥A∥op denotes its induced Euclidean operator norm. For probability distributions P , Q on a common finite set Z, their Kullback-Leibler divergence is denoted by KL (P ∥Q) = ∑ 
+
+> z∈Z
+
+P (z) log (P (z)/Q(z)) , where terms with P (z) = 0 are zero, and the divergence is +∞ if P (z) > 0 = Q(z) for some z. For a nonempty closed convex set 
+
+C, Proj C (v) := arg min u∈C ∥u − v∥22 denotes Euclidean projection. The notation Unif (C) denotes the uniform distribution over C. For two sequences (ak )k≥1 and (bk )k≥1 with bk > 0, we write 
+
+ak = O(bk ) if there exist constants C > 0 and k0 such that |ak| ≤ Cb k for all k ≥ k0, and 
+
+ak = o(bk ) if |ak|/bk → 0 as k → ∞ .
+
+# 2 Related Work 
+
+Statistical theory of distillation and imitation learning. Statistical analyzes of distillation study the benefits of teacher-generated supervision and the propagation of teacher error. Menon et al. (2021) explain the bias–variance tradeoff of soft labels, while Ildiz et al. (2025) characterize high-dimensional distillation risk under model and covariate shift. Xie et al. (2026) identify set-tings where a risk-minimizing teacher preserves the restricted student’s optimum and improves the statistical efficiency of averaged SGD. To correct imperfect supervision, Dao et al. (2021) develop cross-fitting and loss corrections, and Iliopoulos et al. (2022) analyze student-dependent reweight-ing of noisy pseudo-labels. Relatedly, Xia and Wainwright (2024) construct pseudo-responses us-ing training-only helper covariates and obtain prediction bounds combining an oracle rate with surrogate error. For sequential prediction, Ross et al. (2011) establish a no-regret foundation 3for learning from expert feedback at learner-visited states, while Czarnecki et al. (2019) analyze policy-distillation updates and convergence in tabular settings. Foster et al. (2024) show that, under realizability, online expert access need not improve worst-case statistical complexity over offline behavior cloning with logarithmic loss. With noisy expert feedback, Sriraman et al. (2026) establish an offline on-policy separation for learning a realizable clean expert. Beyond realizability, Zhang et al. (2026) study how student misspecification and alignment between expert scores and rewards affect the benefits of online imitation, and give finite-sample guarantees using base-policy sampling. Closest to our motivation, Yamamoto and Wainwright (2026) study bias propagation under source-target covariate shift. Their method refits teachers to student residuals and achieves a provable separation from direct soft matching. Our work instead couples source-reward-based teacher calibration with target-side LLM distillation. We establish convergence to the regularized oracle within the student class and separation from regularized direct matching, without target reward feedback or requiring the student to represent the unrestricted optimal policy. 
+
+Reinforcement learning and LLM post-training. Reinforcement learning plays an impor-tant role in modern deep learning, with a substantial theoretical literature on exploration, policy optimization, and learning with function approximation (Jiang et al., 2017; Jin et al., 2020; Agar-wal et al., 2021; Xie et al., 2021, 2023; Zhang et al., 2023; Qian et al., 2024; Hu et al., 2026). For preference-based learning, Zhu et al. (2023) connect reward estimation to policy performance and establish guarantees for pessimistic learning. Xiong et al. (2024) develop offline, online, and hybrid algorithms for KL-regularized preference learning with finite-sample guarantees. Xie et al. (2025) in-troduce exploration bonuses for provably sample-efficient preference optimization, while Zhao et al. (2025) characterize how KL regularization and reference-policy coverage affect sample complexity. For LLM post-training, Chen et al. (2026) study how pre-training provides response coverage for downstream improvement, and Foster et al. (2025) distinguish the statistical and computational roles of base-model coverage. Huang et al. (2025) analyze self-improvement through sharpening, where training amortizes the selection of high-likelihood responses. Related inference-time analyses characterize Best-of-N through win-rate guarantees (Sriraman and Block, 2026) and use pessimistic scoring to mitigate reward hacking (Yu et al., 2026). For outcome-supervised learning, Jia et al. (2025) connect outcome feedback to process-level learning, Yuan et al. (2025) develop trajectory Bellman residual minimization for KL-regularized policy learning, and Chen et al. (2025) establish sample-complexity guarantees for outcome-based online RL. Kim et al. (2026) analyze coverage improvement and convergence in on-policy preference learning and reward distillation, explicitly accounting for reward-model error in the latter. These works study how feedback and coverage support policy improvement and response selection. Our work addresses biased-teacher LLM dis-tillation under source-target covariate shift. We couple source-reward-based teacher calibration with target-side student learning and prove convergence in average target KL to the regularized oracle within the student class, together with separation from regularized direct matching, without target reward feedback. 
+
+Transfer learning under covariate shift. Transfer-learning theory studies how source super-vision supports prediction on a different target distribution. Under covariate shift, linear and kernel regression analyzes quantify this transfer through source-target covariance geometry and distribu-tional overlap (Lei et al., 2021; Ma et al., 2023). In well-specified parametric models, Ge et al. (2024) establish minimax guarantees for source-only maximum likelihood estimation, with transfer difficulty governed by source and target Fisher information rather than a bounded density ratio. Pseudo-labeling methods further use unlabeled target covariates to select source-trained estimators 4in kernel ridge regression and kernel generalized linear models (Wang, 2026; Weill and Wang, 2026). Beyond covariate shift, Xia and Klusowski (2026) study oversampling under label shift, separat-ing balanced-data risk from the cost of estimating the minority-class distribution. These results characterize prediction under distribution shift, but do not study LLM distillation without target feedback. Under shared policy realizability and joint source identification, our analysis controls the student’s error on fixed target questions using reward feedback confined to source questions. 
+
+# 3 Model setup 
+
+In this section, we formulate LLM distillation for post-training under a fixed source–target design. We model autoregressive generation as a finite-horizon, token-level Markov decision process 
+
+M = ( S, A, P , R, H),
+
+where S is the prefix-state space, A is a finite token vocabulary, P is the deterministic transition kernel, R is the terminal answer reward, and H ≥ 1 is the generation horizon. Denote X as a context space representing the set of potential questions. Each x ∈ X represents a question presented to the LLM, including its instructions and any accompanying context; we refer to this complete input as a prompt. Generation starts at s1 = ( x, ∅). At step h, the state sh = ( x, a1:h−1)
+
+records the question and all previously generated answer tokens. The LLM acts as a policy π: it selects a legal token ah ∼ π(· | sh) and appends it to the prefix, so 
+
+P (s′ | sh, ah) = 1{s′ = ( x, a1:h)}, h = 1, . . . , H.
+
+The reward is evaluated on the completed answer and is specified below. We first make precise which tokens and answers are feasible. 
+
+Definition 3.1 (Legal tokens and feasible trajectories) . Let A contain EOS and null . For 1 ≤ h ≤
+
+H, define the legal-token set at sh = ( x, a1:h−1) by 
+
+B(sh) :=
+
+> {
+
+A \ { null }, EOS /∈ { a1, . . . , ah−1},
+
+{null }, EOS ∈ { a1, . . . , ah−1}.
+
+The state space S consists of the prefixes generated from (x, ∅), x ∈ X , by repeatedly appending legal tokens, up to length H. States sH+1 are terminal, with B(sH+1) := ∅. For a reachable state 
+
+sh with h ≤ H, define 
+
+A(sh) := {
+
+bh:H ∈ A H−h+1 : bk ∈ B (( x, a1:h−1, bh:k−1)) for k = h, . . . , H
+
+> }
+
+.
+
+Here (x, a1:h−1, bh:k−1) appends bh:k−1 to the existing prefix, with empty blocks omitted. Set 
+
+A(sH+1) := {∅}, A(x) := A(( x, ∅)) .
+
+Thus B(sh) contains individual legal tokens, A(sh) contains feasible remaining token sequences, and A(x) contains full feasible answers. Generation ends at EOS or horizon H, with null padding after EOS . This convention gives every answer length H, and feasibility is independent of reward. A policy assigns probability zero to 5illegal tokens; on each nonterminal state, its probabilities over B(sh) sum to one. The deterministic transitions and successive token choices induce the full-answer law 
+
+π(a1:H | x) = 
+
+> H∏
+> h=1
+
+π(ah | x, a1:h−1), a1:H ∈ A (x). (3.1) The same notation π therefore describes both the token policy and its induced distribution over complete answers. Post-training seeks to improve answer quality while retaining the behavior of a pretrained model. We study this task under covariate shift, with a fixed source dataset of training questions and a fixed target dataset of questions that the student is intended to answer: 
+
+Dsrc = {xi}ni=1, Dtar = {˜xj }mj=1, n, m ≥ 1. 
+
+Here xi is the ith source question and ˜xj is the jth target question, each including its associated context. Reward supervision is available for candidate answers to source questions, whereas the learning objective concerns the student’s answers to target questions. The two datasets may contain different mixtures of question types. We condition throughout on these fixed datasets; randomness comes from policy sampling and the training algorithm. The terminal reward is a deterministic function 
+
+R : {(x, a1:H ) : x ∈ X , a1:H ∈ A (x)} −→ [0, 1 ].
+
+We only have access to an exact verifier on the source prompts : given xi and any a1:H ∈ A (xi), it returns R(xi, a1:H ). Source supervision is therefore supplied by evaluations of candidate answers, and the dataset itself contains only prompts. Reward feedback is unavailable on the target prompts; 
+
+R(˜xj , a1:H ) denotes their latent true answer quality and is never queried during training. This re-striction reflects the difficulty of extending reliable reward evaluation to new questions. Developing a target-domain reward model can require expert-designed rubrics, labeled answers, and careful validation of the grading criteria. These requirements make target reward very costly to obtain. Let πpre be the frozen pretrained reference policy, with positive probability on every legal token. For λ > 0, our target post-training objective is 
+
+Jλ,m(π) := 1
+
+m
+
+> m∑
+> j=1
+
+Ea1:H ∼π(·| ˜xj )
+
+> 
+
+R(˜xj , a1:H ) − λ
+
+> H∑
+> h=1
+
+log π(ah | ˜xj , a1:h−1)
+
+πpre (ah | ˜xj , a1:h−1)
+
+> 
+
+. (3.2) The first term measures answer quality; the second penalizes deviation from the pretrained policy. By (3.1), the expected log-ratio sum equals the full-answer KL: KL (π(· | x) ∥ πpre (· | x)) = Ea1:H ∼π(·| x) 
+
+> [H∑
+> h=1
+
+log π(ah | x, a1:h−1)
+
+πpre (ah | x, a1:h−1)
+
+> ]
+
+.
+
+Thus λ controls the tradeoff between reward and proximity to the reference. The objective specifies the desired target behavior, although its reward term is unavailable during training. We address this information constraint through teacher distillation: source reward feedback calibrates an available teacher model, whose likelihoods then supervise the student on the target prompts. To formalize the teacher, its calibration, and the student, we use linear-softmax policy classes. Fix 6known feature maps ϕ : S × A → RD and ϕstu : S × A → Rd, where D, d ≥ 1, with 
+
+∥ϕ(s, a)∥2 ≤ 1, ∥ϕstu (s, a)∥2 ≤ 1. 
+
+The features may depend on the entire prefix, preserving the autoregressive dependence of the policy. For every nonterminal state s and legal token a ∈ B (s), define 
+
+πw (a | s) = exp (w⊤ϕ(s, a))  
+
+> ∑
+> b∈B (s)
+
+exp (w⊤ϕ(s, b)) , πstu, θ (a | s) = exp (θ⊤ϕstu (s, a))  
+
+> ∑
+> b∈B (s)
+
+exp (θ⊤ϕstu (s, b)) . (3.3) Both policies assign zero probability to illegal tokens. For B > 0, the calibration parameter belongs to a nonempty compact convex set W , and the student parameter belongs to the closed ball Θ:
+
+W ⊆ { w ∈ RD : ∥w∥2 ≤ B}, Θ := {θ ∈ Rd : ∥θ∥2 ≤ B}.
+
+The given teacher is πtea = πwtea with wtea ∈ W . Its proposal policy remains frozen, while calibration adjusts a separate parameter within W , initialized at wtea . The teacher may be biased relative to the optimal target behavior. The reference πpre need not belong to either softmax class, and we impose neither sparsity nor an upper bound relating D to H.For the performance metric, our benchmark is the best post-trained policy within the student class. Specifically, we choose 
+
+θ† 
+
+> λ,m
+
+∈ argmax 
+
+> θ∈Θ
+
+Jλ,m(πstu, θ ).
+
+θ† 
+
+> λ,m
+
+exists because Θ is compact, and the objective is continuous in θ. We call πstu, θ†
+
+> λ,m
+
+an oracle student: it optimizes the true target objective using the same class available to the learned student. For comparison, at each source or target prompt x, we define the unrestricted optimal policy by 
+
+π⋆λ(· | x) ∈ argmax 
+
+> π(·| x)∈∆(A(x))
+
+Ea1:H ∼π(·| x)
+
+> 
+
+R(x, a1:H ) − λ
+
+> H∑
+> h=1
+
+log π(ah | x, a1:h−1)
+
+πpre (ah | x, a1:h−1)
+
+> 
+
+. (3.4) Here ∆(A(x)) is the simplex of distributions over full feasible answers. Token conditionals are obtained from prefix marginals. Lemma B.1 establishes that this optimum is unique and assigns positive probability to every feasible answer. The student class may be unable to represent this unrestricted optimum. We connect source reward information to target behavior through the following realizability as-sumption. 
+
+Assumption 3.2 (Realizability) . There exists a single parameter w⋆λ ∈ W such that, at every legal nonterminal prefix state s of every source or target prompt, 
+
+π⋆λ(a | s) = πw⋆λ (a | s) for every a ∈ B (s).
+
+This assumption provides the shared structure needed for transfer: source and target prompts use the same optimal calibration coefficients, evaluated through their respective prefix features. Realizability is imposed on the calibration class and allows the student class to remain misspecified. Our fixed-design analysis uses this shared structure rather than a density-ratio assumption. 7For a calibrated parameter w ∈ W , define the target distillation cost 
+
+Cw (θ) := λm
+
+> m
+
+∑
+
+> j=1
+
+KL (πstu, θ (· | ˜xj ) ∥ πw (· | ˜xj )) . (3.5) Its integrand is computable from the student and calibrated-policy likelihoods, so the cost can be estimated using student rollouts on the fixed target prompts. Under realizability, Lemma B.1 gives 
+
+argmax 
+
+> θ∈Θ
+
+Jλ,m(πstu, θ ) = argmin 
+
+> θ∈Θ
+
+Cw⋆λ (θ).
+
+This identity makes the role of calibration explicit: at the true calibration parameter, distillation targets exactly the regularized oracle student. We impose the following uniqueness assumption on the oracle student. 
+
+Assumption 3.3. The function Cw⋆λ has a unique minimizer over Θ, argmin θ∈Θ Cw⋆λ (θ) = {θ†
+
+> λ,m
+
+}.This assumption uniquely determines the oracle parameter θ† 
+
+> λ,m
+
+and hence its induced answer law on every target question. Neither interiority nor a positive student Hessian is required. For a learned calibration wt and student θt, write Ct(θ) := Cwt (θ) and define 
+
+εt := Ct(θt) − min  
+
+> θ∈Θ
+
+Ct(θ),
+
+∆λ,m(θ) := Cw⋆λ (θ) − Cw⋆λ (θ†
+
+> λ,m
+
+),
+
+Kλ,m(θ) := 1
+
+m
+
+> m
+
+∑
+
+> j=1
+
+KL 
+
+(
+
+πstu, θ (· | ˜xj )
+
+∥∥∥∥ πstu, θ†
+
+> λ,m
+
+(· | ˜xj )
+
+)
+
+.
+
+(3.6) The first quantity measures optimization error for the current calibrated objective; the second measures excess cost under the true calibration; and the third measures the average KL from the learned student to the oracle student. Our goal is to drive E[Kλ,m(θT )] to zero. This compares policies within the student class, allowing the minimum distillation cost itself to remain positive. Finally, source comparisons must contain enough information to identify the shared calibration parameter. For a teacher-generated prefix si,h = ( xi, ai,1 :h−1), compare its next token ai,h with a legal alternative b. The difference ϕ(si,h, ai,h) − ϕ(si,h, b) determines the calibration direction observed in that comparison. For each h = 1, . . . , H, define the source information matrix Gh by 
+
+Gh := 1
+
+n
+
+> n
+
+∑
+
+> i=1
+
+Eai,1 :h∼πtea (·| xi)
+
+ 1
+
+|B (si,h)|
+
+∑
+
+> b∈B (si,h)
+
+(
+
+ϕ(si,h, ai,h) − ϕ(si,h, b))
+
+×
+
+(
+
+ϕ(si,h, ai,h) − ϕ(si,h, b))⊤
+
+,
+
+(3.7) The expectation is over the teacher’s output ai,1 :h, and the inner average is uniform over legal tokens. We impose the following identification condition on their average across token positions. 
+
+Assumption 3.4. Define the joint source information matrix as Gjoint := 1
+
+> H
+
+∑Hh=1 Gh. We assume that it is positive definite, i.e., 
+
+μjoint := λmin (Gjoint ) > 0. 
+
+This assumption requires comparisons across all token positions to identify every calibration direc-tion; individual matrices Gh may be singular. At a padded state, the only legal token is null , so its feature difference and information contribution are zero. 84 Algorithm 
+
+In this section, we present the CCL algorithm and provide a detailed explanation of its steps. The algorithm couples two components: teacher calibration using source reward feedback, and student distillation using the calibrated teacher on target prompts. Calibration adjusts the teacher’s predictions toward the regularized optimal policy, while distillation uses these adjusted predictions to train the student. The student also participates in calibration by supplying alternatives to the teacher’s proposed tokens. These components therefore interact throughout training: calibration changes the student’s training objective, and the updated student changes the comparisons used for subsequent calibration. The central mechanism for estimating the calibration update is token-level branching. We select a token position in a teacher-generated source answer and retain the preceding prefix. At that prefix, we pair the teacher’s next token with an alternative sampled from the current student. This creates a comparison between two token choices in the same context. We then select one of these choices using the reference policy, complete the selected branch with that policy, and evaluate the resulting answer using the source reward oracle. A reward-dependent acceptance rule turns this observation into a statistical signal for estimating the calibration update. Repeating this construction at different token positions gathers information about the calibration coefficients across the generation process. The calibrated teacher subsequently provides supervision for student distillation on the target prompts. Under our model, the calibration learned from source comparisons also applies to target questions. The student update uses a batch of sampled answers and policy likelihoods to estimate its gradient and take one projected step. We compare this proposal with a randomly sampled student. After evaluating these two candidates, the selected student supplies token alternatives for the next calibration round. This coupled procedure transfers source reward information into target-side training through the calibrated teacher. The full pseudocode is given in Algorithm 1. CCL (Algorithm 1) maintains two trainable parameters: wt for the calibrated teacher πcal, t = πwt ,and θt for the student πstu, θt . Line 1 initializes the calibration from the teacher. Each round first uses source rewards and a current-student alternative to update wt, then uses the updated calibrated teacher to train and select the next student. The frozen πtea supplies the source proposals, and 
+
+πpre supplies the reference-weighted branch and completion. To obtain information for the calibration update, Lines 3-7 construct a token-level comparison. At a randomly selected position in a teacher answer, we retain the teacher prefix and compare its next token with a current-student alternative: 
+
+st = ( xit , at,1 :ht−1), ct,1 = at,ht , ct,0 ∼ πstu, θt (· | st).
+
+This comparison provides information about the calibration coefficients because the softmax pa-rameterization gives 
+
+zt := ϕ(st, ct,1 ) − ϕ(st, ct,0 ), log πw (ct,1 | st)
+
+πw (ct,0 | st) = z⊤ 
+
+> t
+
+w.
+
+Thus, learning the optimal relative probabilities of these two tokens constrains the coefficients along 
+
+zt. Sampling the branching position across all H steps collects the joint source information in (3.7). The next step uses source reward feedback to obtain a label for this comparison. Lines 8-13 select 9Algorithm 1 Coupled Calibration and Learning (CCL) via Token-Level Branching 
+
+Require: Source and target datasets {xi}ni=1, {˜xj }mj=1; source reward oracle R; teacher πtea = πwtea and 
+
+πpre ; features ϕ, ϕstu and sets W , Θ; wtea ∈ W , θ0 ∈ Θ; λ, γ > 0, integer T ≥ 1; schedules (4.3) .All draws use fresh randomness conditional on the preceding variables. 
+
+1: w0 ← wtea , πcal,0 ← πw0 .
+
+2: for t = 0, . . . , T − 1 do 
+
+Token-Level branching on source 
+
+3: Draw independently it ∼ Unif {1, . . . , n} and ht ∼ Unif {1, . . . , H}.
+
+4: Draw at,1 :H ∼ πtea (· | xit ) autoregressively. 
+
+5: st ← (xit , at,1 :ht−1), ct,1 ← at,ht . ▷ Teacher prefix and token. 
+
+6: Draw ct,0 ∼ πstu, θt (· | st). ▷ Student alternative. 
+
+7: zt ← ϕ(st, ct,1 ) − ϕ(st, ct,0 ).
+
+Teacher calibration. 
+
+8: Yt ∼ Bernoulli 
+
+( πpre (ct,1 | st)
+
+πpre (ct,1 | st) + πpre (ct,0 | st)
+
+)
+
+.
+
+9: apre  
+
+> t,1 :ht−1
+
+← at,1 :ht−1, apre  
+
+> t,ht
+
+← ct,Yt . ▷ Construct the selected branch. 
+
+10: Draw apre  
+
+> t,ht+1:H
+
+∼ πpre (· | xit , apre  
+
+> t,1 :ht
+
+) autoregressively. 
+
+11: Rt ← R(xit , apre  
+
+> t,1 :H
+
+). ▷ Exactly one source reward query. 
+
+12: Draw Ut ∼ Unif [0, 1 ].
+
+13: It ← 1{Ut ≤ exp (( Rt − 1)/λ)}.
+
+14: gt ← Itzt[σ(z⊤ 
+
+> t
+
+wt) − Yt]. ▷ One trial; rejection gives gt = 0.
+
+15: wt+1 ← Proj W (wt − ηtgt).
+
+16: πcal, t+1 ← πwt+1 .
+
+Student gradient update. 
+
+17: Define Zt+1(θ, x, a1:H ) := λ log πstu ,θ (a1:H |x)  
+
+> πcal ,t+1(a1:H|x)
+
+, Sstu, θ (x, a1:H ) := ∇θ log πstu, θ (a1:H | x), ∀θ ∈ Θ.
+
+18: Draw independent prompt-answer pairs for ℓ = 1, . . . , bt+1:
+
+jg 
+
+> t+1, ℓ
+
+∼ Unif {1, . . . , m}, ag 
+
+> t+1, ℓ,1 :H
+
+| jg 
+
+> t+1, ℓ
+
+∼ πstu, θt (· | ˜xjg
+
+> t+1, ℓ
+
+).
+
+19: ̂ g stu  
+
+> t+1
+
+← 1
+
+bt+1
+
+> bt+1
+
+∑
+
+> ℓ=1
+
+Sstu, θt (˜xjg
+
+> t+1, ℓ
+
+, ag 
+
+> t+1, ℓ,1 :H
+
+)Zt+1(θt; ˜xjg
+
+> t+1, ℓ
+
+, ag 
+
+> t+1, ℓ,1 :H
+
+).
+
+20: ϑt+1,1 ← Proj Θ
+
+(θt − αt+1̂g stu 
+
+> t+1
+
+); independently draw ϑt+1,2 ∼ Unif (Θ).
+
+Candidate student evaluation and selection. 
+
+21: for k = 1, 2 do 
+
+22: Draw fresh independent prompt-answer pairs for ℓ = 1, . . . , qt+1:
+
+jt+1, k,ℓ ∼ Unif {1, . . . , m}, aval  
+
+> t+1, k,ℓ,1 :H
+
+| jt+1, k,ℓ ∼ πstu, ϑt+1, k (· | ˜xjt+1, k,ℓ ).
+
+23: ̂ Ct+1, k ← 1
+
+qt+1
+
+> qt+1
+
+∑
+
+> ℓ=1
+
+Zt+1(ϑt+1, k; ˜xjt+1, k,ℓ , aval  
+
+> t+1, k,ℓ,1 :H
+
+).
+
+24: end for 
+
+25: ̂ kt+1 ← min argmin k∈{ 1,2 }̂ Ct+1, k, θt+1 ← ϑt+1, ̂ kt+1 .
+
+26: end for 
+
+27: return πstu, θT .
+
+one reference-weighted branch, complete it with πpre , and query its reward Rt. The acceptance indicator satisfies 
+
+Pr (It = 1 | F t, st, ct,1 , ct,0 , Yt, Rt) = exp (( Rt − 1)/λ).
+
+Here Ft denotes the history before round t. The algorithm samples the branch and completion using the reference policy, and determines acceptance using the observed source reward. Under 10 Assumption 3.2, Lemma B.2 shows that the resulting accepted branch index satisfies 
+
+Pr (Yt = 1 | It = 1, Ft, st, ct,1 , ct,0 ) = π⋆λ(ct,1 | st)
+
+π⋆λ(ct,1 | st) + π⋆λ(ct,0 | st) = σ(z⊤ 
+
+> t
+
+w⋆λ).
+
+This identity characterizes the unknown parameter underlying the accepted labels. Algorithm 1 learns this parameter from the sampled labels by evaluating the logistic gradient at the current estimate gt = Itzt
+
+[
+
+σ(z⊤ 
+
+> t
+
+wt) − Yt
+
+]
+
+. Thus, source reward feedback provides logistic supervision for estimating w⋆λ. This observation motivates the calibration update in Lines 14-15: 
+
+gt = Itzt[σ(z⊤ 
+
+> t
+
+wt) − Yt], wt+1 = Proj W (wt − ηtgt), πcal, t+1 = πwt+1 .
+
+Here gt is the stochastic gradient of the acceptance-weighted logistic loss. The projection keeps the updated calibration parameter in W .The calibrated teacher then defines the student’s training objective on the target prompts: 
+
+Ct+1(θ) := λm
+
+> m
+
+∑
+
+> j=1
+
+KL (πstu, θ (· | ˜xj ) ∥ πwt+1 (· | ˜xj )) . (4.1) Assumption 3.2 links source calibration to this target objective: the same w⋆λ represents the reg-ularized optimal policy on both datasets. The source-identification condition in (3.7) makes this parameter identifiable from source comparisons, and the known feature map evaluates the learned policy at target prefixes. Moreover, Lemma B.1 gives 
+
+arg min  
+
+> θ∈Θ
+
+Cw⋆λ (θ) = arg max  
+
+> θ∈Θ
+
+Jλ,m(πstu, θ ).
+
+Thus, the calibration aligns the distillation objective with the regularized oracle-student objective. To update the student, Lines 18-19 estimate the gradient of Ct+1 using bt+1 independent current-student rollouts. The required quantities are the full-answer score and the sampled log-ratio cost: 
+
+Sstu, θ (x, a1:H ) := ∇θ log πstu, θ (a1:H | x) = 
+
+> H
+
+∑
+
+> h=1
+
+ϕstu (sh, ah) − ∑
+
+> b∈B (sh)
+
+πstu, θ (b | sh)ϕstu (sh, b)
+
+ ,
+
+Zt+1(ϑ; x, a1:H ) := λ log πstu, ϑ(a1:H | x)
+
+πwt+1 (a1:H | x) = λ
+
+> H
+
+∑
+
+> h=1
+
+log πstu, ϑ(ah | x, a1:h−1)
+
+πwt+1 (ah | x, a1:h−1) ,
+
+where sh = ( x, a1:h−1) and B(sh) is the legal-token set defined in the model setup. The score measures how the answer’s log probability changes with the student parameters. The cost Zt+1
+
+measures its log-likelihood discrepancy from the calibrated teacher. For each ℓ ∈ { 1, . . . , bt+1}, we draw a fresh uniform target index jg 
+
+> t+1, ℓ
+
+and then sample an answer 
+
+ag 
+
+> t+1, ℓ,1 :H
+
+from the current student at that question. The bt+1 prompt-answer pairs are independent conditional on the history and the calibration update. Averaging their score-cost products gives ̂
+
+gstu  
+
+> t+1
+
+= 1
+
+bt+1
+
+> bt+1
+
+∑
+
+> ℓ=1
+
+Sstu, θt (˜xjg 
+
+> t+1, ℓ
+
+, ag 
+
+> t+1, ℓ,1 :H
+
+)Zt+1(θt; ˜xjg 
+
+> t+1, ℓ
+
+, ag 
+
+> t+1, ℓ,1 :H
+
+).
+
+11 Lemma B.6 shows that 
+
+E
+
+[̂ 
+
+gstu 
+
+> t+1
+
+∣∣∣ wt+1, θt
+
+]
+
+= ∇θCt+1(θ)|θ=θt .
+
+The calibrated teacher is held fixed throughout this batch. Averaging preserves unbiasedness and reduces the conditional gradient variance by a factor of bt+1.Line 20 uses this estimate to form two student candidates: 
+
+ϑt+1,1 = Proj Θ
+
+(
+
+θt − αt+1̂ gstu 
+
+> t+1
+
+)
+
+, ϑt+1,2 ∼ Unif (Θ).
+
+The projected-gradient candidate takes one step using the averaged gradient, with a constant step size justified by the smoothness bound in Lemma B.7. The random candidate explores the full pa-rameter ball uniformly. In Lemma B.9, exploration provides progress outside a fixed neighborhood of the oracle student, while the gradient candidate provides quantitative progress near the oracle student. Each round thus constructs one projected-gradient proposal and the batch improves the accuracy of this update. To compare these candidates, the validation steps ending at Line 23 average Zt+1 over qt+1 fresh rollouts from each candidate, k ∈ { 1, 2 }, by Monte Carlo simulation: ̂
+
+Ct+1, k = 1
+
+qt+1
+
+> qt+1
+
+∑
+
+> ℓ=1
+
+Zt+1
+
+(
+
+ϑt+1, k; ˜xjt+1, k,ℓ , aval 
+
+> t+1, k,ℓ,1 :H
+
+)
+
+.
+
+Since the target indices are uniform and each answer is sampled from the candidate being evaluated, 
+
+E
+
+[̂ 
+
+Ct+1, k
+
+∣∣∣ wt+1, ϑt+1, k
+
+]
+
+= 1
+
+m
+
+> m
+
+∑
+
+> j=1
+
+Ea1:H ∼πstu, ϑt+1, k (·| ˜xj )[Zt+1(ϑt+1, k; ˜xj , a1:H )] = Ct+1(ϑt+1, k ).
+
+The sampled token log ratios therefore estimate the KL in the required student-to-calibrated-teacher direction. The algorithm selects the smallest estimated cost: ̂
+
+kt+1 = min argmin 
+
+> k∈{ 1,2 }
+
+̂ Ct+1, k, θt+1 = ϑt+1, ̂kt+1 .
+
+The same quantity Zt+1 consequently serves as both the weight in the student gradient estimate and the validation cost. Both quantities are computed from policy likelihoods and target rollouts, so target reward feedback is not required. The selected student supplies the alternative-token distribution in the next source comparison, completing the coupling between teacher calibration and student distillation. For the calibration step size and its analysis, let σ(u) = ( 1 + e−u)−1 and define 
+
+γ := e−1/λe−2B σ′(2B)μjoint > 0. (4.2) This constant quantifies the source-calibration information used in the convergence analysis. The algorithm uses γ to set its calibration step size. Define 
+
+Lst := λH (1 + 8BH ), αstu := 12Lst 
+
+.
+
+Lemma B.7 proves that Lst is a uniform smoothness bound for the student objectives. For t =
+
+12 0, . . . , T − 1, we use 
+
+ηt = 1
+
+γ(t + 2) , αt+1 = αstu , bt+1 = t + 2, qt+1 = ( t + 2)2, (4.3) where γ = e−1/λe−2B σ′(2B)μjoint > 0 is defined in (4.2). These schedules specify the calibration step size, student step size, gradient batch size, and validation budget per candidate, respectively. The increasing gradient batch makes its sampling error vanish while the student step size remains fixed. All draws use fresh randomness conditional on their stated sampling laws, and the two validation batches are independent conditional on the history and candidate parameters. Thus target update t + 1 uses bt+1 + 2qt+1 full-answer rollouts: bt+1 for its gradient estimate and qt+1 for each candidate evaluation. Over T rounds, the algorithm makes exactly T source reward queries and uses O(T 3) target rollouts, of which O(T 2) estimate student gradients. Each round forms one projected student-gradient candidate. 
+
+# 5 Theoretical guarantee 
+
+In this section, we establish a finite-iteration convergence guarantee for CCL (Algorithm 1). We bound the average KL divergence between the returned student and the oracle student, accounting for teacher calibration, stochastic student gradients, and finite-rollout evaluation of the two student candidates. Throughout this section, the source and target datasets are fixed, and expectations include the complete adaptive randomness of the algorithm. 
+
+Theorem 5.1. Under the model and assumptions in Section 3, there exist fixed-model constants 
+
+Cλ,m > 0 and pλ,m ≥ 1, independent of T , such that the output of Algorithm 1 satisfies, for every integer T ≥ 1,
+
+E 
+
+> 
+
+1
+
+m
+
+> m∑
+> j=1
+
+KL 
+
+> (
+
+πstu, θT (· | ˜xj ) 
+
+> ∥∥∥∥
+
+πstu, θ†
+
+> λ,m
+
+(· | ˜xj ) 
+
+> )
+
+≤ Cλ,m(T + 1)−1/(4pλ,m). (5.1) 
+
+Proof sketch. We first identify the objective that the student should minimize. The true regu-larized return equals a constant minus Cw⋆λ (θ). Hence, its minimizer over Θ is exactly the oracle student. We study the excess true cost ∆λ,m(θ) = Cw⋆λ (θ) − Cw⋆λ (θ†
+
+> λ,m
+
+).We next control the source calibration update. The accepted branch index is a logistic observation with parameter w⋆λ. Source identification then gives 
+
+E
+
+> [
+
+∥wt − w⋆λ∥22
+
+> ]
+
+≤ 4
+
+γ2(t + 2) , t ≥ 1. 
+
+This bound holds for the adaptive teacher sequence generated by CCL. For the student update, we first analyze a population projected gradient step for Cw⋆λ . The softmax model gives a uniform smoothness bound. Analyticity and the uniqueness of the oracle yield a local Lojasiewicz inequality, which implies that this gradient step decreases the excess cost by at least a positive constant times its square in a fixed near-optimal region. Outside that region, the uniform candidate has a fixed positive probability of proposing a student with lower true cost. The population gradient step never increases the true cost, so selecting the better of the gradient 13 and uniform proposals combines these two sources of progress. Thus gradient descent supplies the improvement near the oracle, while exploration supplies progress outside that region. The algorithm uses a sampled gradient of Cwt instead of the population gradient of Cw⋆λ . We control this difference using the minibatch variance and the calibration bound above. Fresh validation controls the error when comparing candidates. With et := E[∆λ,m(θt)] , the resulting recursion is 
+
+et ≤ et−1 − κopt e2 
+
+> t−1
+
++ 16 αstu λ2B2H3
+
+√t + 1
+
+︸ ︷︷ ︸
+
+> gradient estimation
+
++ 16 αstu λ2BH 3 + 8λH γ√t + 2
+
+︸ ︷︷ ︸
+
+> calibration
+
++ 16 λBH t + 1︸ ︷︷ ︸
+
+> validation
+
+,
+
+where κopt > 0 is independent of t. An induction then gives eT ≤ Kopt (T + 1)−1/4 for a fixed constant Kopt > 0.Finally, recall the average oracle-policy KL Kλ,m from (3.6). Its zero set contains the zero set of ∆λ,m, and both functions are analytic on the compact parameter ball. A second Lojasiewicz inequality therefore gives 
+
+∆λ,m(θ) ≥ aλ,m[Kλ,m(θ)] pλ,m , aλ,m > 0, pλ,m ≥ 1. 
+
+Applying Jensen’s inequality, we obtain 
+
+E[Kλ,m(θT )] ≤
+
+( E[∆λ,m(θT )] 
+
+aλ,m
+
+)1/pλ,m
+
+≤
+
+( Kopt 
+
+aλ,m
+
+)1/pλ,m
+
+(T + 1)−1/(4pλ,m).
+
+This proves the stated rate with Cλ,m = ( Kopt /aλ,m)1/pλ,m . Appendix B gives the constants and the complete proof. Theorem 5.1 establishes that LLM distillation can recover the optimal student from a biased teacher, even when true reward feedback is entirely unavailable on the target dataset. Under some regularity assumptions, the expected average KL distance to the oracle student vanishes at a polynomial rate. Crucially, this oracle is defined by the true reference-regularized target objective, so the guarantee concerns the student’s actual target performance rather than its agreement with the teacher. The benchmark also respects the student’s limited capacity: the student class need not represent the unrestricted optimal policy. The result, therefore, connects source reward feedback to optimal target-side learning within a fixed student class. Through coupled calibration and distillation, source supervision corrects the policy that guides target training, allowing the student to overcome errors in the original teacher. Consequently, teacher bias need not impose a persistent loss relative to the best achievable student, and recovering this benchmark does not require collecting reward feedback on the target questions. 
+
+# 6 Separation from Direct Teacher Matching 
+
+In this section, to illustrate the power of our algorithm, we show that regularized direct matching can retain a positive error relative to the oracle student. Specifically, we construct a target instance in which the teacher is better than any model in the student model class; yet, direct matching learns a student policy that is strictly separated from the oracle student. The distillation problem that we consider is a LLM-as-judge setting. Fix H = 2, 1 ≤ d < D , λ > 0,14 and α ∈ [1/2, 1 ). Each prompt contains a question and a candidate answer to be assessed. At 
+
+h = 1, the model outputs a verdict: 1 declares the candidate correct, 0 declares it incorrect, and 
+
+null expresses abstention due to uncertainty. Then when h = 2, it outputs EOS to terminate the answer. This setting models the practical task of distilling a compact LLM judge for automatic response evaluation. Training such judges on feedback from stronger models has been demonstrated using GPT-4-generated judgments and feedback (Zhu et al., 2025; Kim et al., 2024b). Our formulation captures the verdict-generation component of this task, including an explicit abstention option. The fixed target dataset consists of m = 2d distinct prompts Dtar = {˜xi,+, ˜xi,− : i ∈ [d]}. For an equivalent single-index enumeration, set ˜x2i−1 := ˜xi,+ and ˜x2i := ˜xi,−. Let X = Dtar and 
+
+A = {0, 1, null , EOS }. The legal-token sets are 
+
+B(( x, ∅)) = {0, 1, null }, B(( x, a1)) = {EOS }, a1 ∈ { 0, 1, null }.
+
+The state transition appends the selected token, and the state (x, a1, EOS ) is terminal. Thus 
+
+A(x) = {(0, EOS ), (1, EOS ), (null , EOS )}. (6.1) Here null is a first-step abstention verdict; the legal-token sets above specify this task’s output format. Every policy therefore satisfies 
+
+π(EOS | x, a1) = 1, π(( a1, EOS ) | x) = π(a1 | x, ∅), a1 ∈ { 0, 1, null }.
+
+Now, we model the ground truth verifier. We set that the candidate answer is correct at ˜xi,+ and incorrect at ˜xi,−. Hence, we define its ground-truth verdict and the exact evaluation reward by 
+
+y(˜xi,+) = 1, y(˜xi,−) = 0, R(x, (a1, EOS )) := 1{a1 = y(x)}. (6.2) That is, a correct judgment receives reward 1. An incorrect judgment or abstention receives reward 
+
+0. In particular, the verdict 0 receives reward 1 when the candidate answer is incorrect. These target labels and rewards define the true benchmark; direct matching has access only to the target prompts and policy likelihoods. We assume that our pre-trained reference policy πpre is uniform over {0, 1, null },
+
+πpre (a1 | x, ∅) = 13 , πpre (EOS | x, a1) = 1, a1 ∈ { 0, 1, null }.
+
+Let u1, . . . , uD be an orthonormal basis of RD, and let e1, . . . , ed be the standard basis of Rd. For the linear softmax teacher class, the feature vector is specified 
+
+a = 1 a = 0 a = null 
+
+ϕ(( ˜xi,+, ∅), a) u1/√2 u2/√2 0
+
+ϕ(( ˜xi,−, ∅), a) u2/√2 u1/√2 0
+
+(6.3) For ϵ ∈ { +, −} , we define the student features by 
+
+ϕstu (( ˜xi,ϵ, ∅), a) = ei1{a = 1}, a ∈ { 0, 1, null }. (6.4) For student and teacher classes, we set both feature maps to zero at every second-step state, and 15 set all unspecified feature values to zero. Every feature has norm at most one. Set 
+
+B :=
+
+√d + 2
+
+λ , W := {w ∈ RD : ∥w∥2 ≤ B}, Θ := {θ ∈ Rd : ∥θ∥2 ≤ B}.
+
+We use the linear-softmax policies 
+
+πw (a | s) = exp (w⊤ϕ(s, a)) 
+
+∑ 
+
+> c∈B (s)
+
+exp (w⊤ϕ(s, c)) , πstu, θ (a | s) = exp (θ⊤ϕstu (s, a)) 
+
+∑ 
+
+> c∈B (s)
+
+exp (θ⊤ϕstu (s, c)) . (6.5) At the second step, the single legal token EOS has probability e0/e0 = 1. We set that our frozen teacher has parameter 
+
+wtea := α√2
+
+λ u1 ∈ W , πtea := πwtea . (6.6) The objective function in this post-training process is 
+
+Jλ,m(π) := 1
+
+m
+
+> m
+
+∑
+
+> j=1
+
+Ea1:2∼π(·| ˜xj )
+
+R(˜xj , a1:2) − λ
+
+> 2
+
+∑
+
+> h=1
+
+log π(ah | ˜xj , a1:h−1)
+
+πpre (ah | ˜xj , a1:h−1)
+
+. (6.7) The oracle student policy has the parameter θ† 
+
+> λ,m
+
+∈ argmax θ∈Θ Jλ,m(πstu, θ ).At each target prompt, we use π⋆λ to denote the unrestricted maximizer of the corresponding reward-minus-reference-KL objective over all laws in ∆(A(x)) .In the next proposition, we compute the optimal parameter θ† 
+
+> λ,m
+
+for the oracle student policy explicitly. It also verifies that the teacher is stronger than this oracle student, although the teacher itself is biased. 
+
+Proposition 6.1. For the setting above, the unique oracle parameter is θ† 
+
+> λ,m
+
+= 14λ 1d ∈ int (Θ).For every i ∈ [d], ϵ ∈ { +, −} , and feasible answer, 
+
+πstu, θ†
+
+> λ,m
+
+(( a1, EOS ) | ˜xi,ϵ) = exp (1{a1 = 1}/(4λ)) 
+
+e1/(4λ) + 2 . (6.8) The unrestricted optimal policy is π⋆λ = πw⋆λ with w⋆λ = ( √2/λ)u1 ∈ W . The student class cannot represent it, and 
+
+Jλ,m(πtea ) > J λ,m(πstu, θ†
+
+> λ,m
+
+). (6.9) However, in direct matching distillation, we do not have the golden answers to the prompts, and thus we do not have access to the reward verifier function R. Therefore, we train our student based on the synthetic outputs from the fixed teacher model πtea .The student maximizes the teacher-student log-likelihood ratio minus the reference penalty: 
+
+JSM (θ) := 1
+
+m
+
+> m
+
+∑
+
+> j=1
+
+Ea1:2∼πstu, θ (·| ˜xj )
+
+[
+
+log πtea (a1:2 | ˜xj )
+
+πstu, θ (a1:2 | ˜xj ) − λ log πstu, θ (a1:2 | ˜xj )
+
+πpre (a1:2 | ˜xj )
+
+]
+
+. (6.10) 16 Equivalently, it minimizes the cost 
+
+CSM (θ) := −JSM (θ) = 1
+
+m
+
+> m
+
+∑
+
+> j=1
+
+[
+
+KL (πstu, θ (· | ˜xj ) ∥ πtea (· | ˜xj )) + λKL (πstu, θ (· | ˜xj ) ∥ πpre (· | ˜xj )) 
+
+]
+
+.
+
+(6.11) For a feasible answer a1:2, we define the evaluable cost and student score: 
+
+ZSM (θ; x, a1:2) := log πstu, θ (a1:2 | x)
+
+πtea (a1:2 | x) + λ log πstu, θ (a1:2 | x)
+
+πpre (a1:2 | x) , Sstu, θ (x, a1:2) := ∇θ log πstu, θ (a1:2 | x).
+
+(6.12) For the step size in the direct matching distillation algorithm, we set κSM = σ′(B + log 2 ) >
+
+0, GSM = ( 2 + λ)B, μSM = (1+λ)κSM  
+
+> d
+
+, ηSM  
+
+> t
+
+= 1 
+
+> μSM (t+2)
+
+. The pseudocode for the regularized direct-matching baseline is given in Algorithm 2. 
+
+Algorithm 2 Direct Teacher Matching 
+
+Require: Fixed target prompts {˜xj }mj=1; frozen πtea , πpre ; student class Θ; λ > 0; stepsizes ηSM  
+
+> t
+
+; T ≥ 1. 
+
+> 1:
+
+θSM 0 ← 0. 
+
+> 2:
+
+for t = 0, . . . , T − 1 do  
+
+> 3:
+
+Draw jSM  
+
+> t
+
+∼ Unif {1, . . . , m}. 
+
+> 4:
+
+Draw aSM  
+
+> t,1 :2
+
+∼ πstu, θSM  
+
+> t
+
+(· | ˜xjSM  
+
+> t
+
+) autoregressively. 
+
+> 5:
+
+̂ g SM  
+
+> t
+
+← Sstu, θSM  
+
+> t
+
+(˜xjSM  
+
+> t
+
+, aSM 
+
+> t,1 :2
+
+)ZSM (θSM  
+
+> t
+
+; ˜xjSM  
+
+> t
+
+, aSM 
+
+> t,1 :2
+
+). ▷ Estimate the cost gradient.  
+
+> 6:
+
+θSM  
+
+> t+1
+
+← Proj Θ(θSM  
+
+> t
+
+− ηSM 
+
+> t
+
+̂ g SM  
+
+> t
+
+). 
+
+> 7:
+
+end for  
+
+> 8:
+
+return πstu, θSM 
+
+> T
+
+.
+
+Now, we compare the output of direct matching with the explicit oracle student in Proposition 6.1. We will show that there is a separation between the trained student and the oracle student policy. Specifically, our next theorem shows that their KL divergence is lower bounded by a constant. 
+
+Theorem 6.2. For the target setting in Section 6, for every T ≥ 1, Algorithm 2 satisfies 
+
+E
+
+ 1
+
+m
+
+> m
+
+∑
+
+> j=1
+
+KL 
+
+(
+
+πstu, θSM 
+
+> T
+
+(· | ˜xj )
+
+∥∥∥∥ πstu, θ†
+
+> λ,m
+
+(· | ˜xj )
+
+) ≥ κSM 
+
+2d
+
+[ √d(1 − α)
+
+4λ − GSM 
+
+μSM 
+
+√T + 1
+
+]2
+
+> +
+
+. (6.13) Here [u]+ := max {u, 0 }. In particular, for every integer T ≥
+
+⌈ 64 λ2dG 2SM 
+
+> (1+λ)2κ2SM (1−α)2
+
+⌉
+
+, the expected average KL divergence is at least κSM (1 − α)2/(128 λ2).Therefore, we conclude that direct matching retains a nonvanishing distillation error relative to the oracle student πstu ,θ†
+
+> λ,m
+
+.This theorem highlights the importance of teacher calibration in CCL. Regularized direct match-ing can retain teacher bias in the learned student, whereas CCL iteratively calibrates the policy that defines the student’s training objective. It complements Theorem 5.1: CCL converges under the source-calibration assumptions, whereas teacher quality alone does not guarantee that direct imitation recovers the oracle student. 17 7 Discussion 
+
+We developed Coupled Calibration and Learning (CCL) and a statistical framework for mitigating teacher bias in LLM distillation when reward feedback is available only for source questions. CCL couples teacher calibration with student updates through token-level branching, using source feed-back to guide distillation on target questions. Each student update selects between a minibatch projected-gradient proposal and a uniformly sampled candidate using fresh target rollouts. We established its polynomial convergence in expected average KL divergence to the oracle student for the reference-regularized target objective. The proof quantifies progress from the student gradient update near the oracle and uses exploration to obtain progress outside a fixed near-optimal region. It also controls the errors from teacher calibration and finite-rollout estimation. This benchmark accounts for the limitations of the student class and does not require it to represent the unrestricted optimal policy. We also established a separation from regularized direct matching, which can re-tain a nonvanishing error even when the teacher outperforms every student policy. Together, these results identify coupled calibration and learning as a mechanism for recovering the optimal student without target-domain reward feedback. Several directions remain for future investigation. First, computational experiments with pretrained LLMs on coding and mathematical reasoning tasks would help assess the method under realistic rollout budgets, reward-evaluation costs, and source-target shifts. Such experiments could also examine the contributions of calibration, student updates, and candidate selection to practical performance. Second, our algorithm updates the calibration parameter and the student in every iteration. It would be useful to study less frequent calibration, with multiple student updates between successive calibration steps. The central question is whether such schedules preserve convergence to the oracle student while reducing calibration costs, and how their relative update frequencies affect the rate. Finally, our analysis gives an explicit one-quarter exponent for the excess true cost, while conversion to oracle-policy KL still uses a model-dependent Lojasiewicz exponent. The constants also depend on the local geometry and the probability of exploring a fixed near-optimal region. Deriving explicit bounds on these quantities is an important theoretical direction. A sharper analysis may exploit the stronger local gradient inequality before its quadratic relaxation, reduce the gradient and validation budgets, and clarify the dependence on the horizon and model dimensions. 
+
+# References 
+
+Alekh Agarwal, Sham M. Kakade, Jason D. Lee, and Gaurav Mahajan. On the theory of policy gra-dient methods: Optimality, approximation, and distribution shift. Journal of Machine Learning Research , 22(98):1–76, 2021. Anastasios N. Angelopoulos, Stephen Bates, Clara Fannjiang, Michael I. Jordan, and Tijana Zrnic. Prediction-powered inference. Science , 382(6671):669–674, 2023. Yu Bai, Fan Chen, Huan Wang, Caiming Xiong, and Song Mei. Transformers as statisticians: Prov-able in-context learning with in-context algorithm selection. In Advances in Neural Information Processing Systems , volume 36, pages 57125–57211, 2023. Peter L Bartlett, Philip M Long, G´ abor Lugosi, and Alexander Tsigler. Benign overfitting in linear regression. Proceedings of the National Academy of Sciences , 117(48):30063–30070, 2020. 18 Edward Bierstone and Pierre D. Milman. Semianalytic and subanalytic sets. Publications Math´ ematiques de l’IH ´ES , 67:5–42, 1988. J´ erˆ ome Bolte, Aris Daniilidis, and Adrian Lewis. The lojasiewicz inequality for nonsmooth sub-analytic functions with applications to subgradient dynamical systems. SIAM Journal on Opti-mization , 17(4):1205–1223, 2007. Fan Chen, Zeyu Jia, Alexander Rakhlin, and Tengyang Xie. Outcome-based online reinforcement learning: Algorithms and fundamental limits. In Advances in Neural Information Processing Systems , volume 38, 2025. Fan Chen, Audrey Huang, Noah Golowich, Sadhika Malladi, Adam Block, Jordan T. Ash, Akshay Krishnamurthy, and Dylan J. Foster. The coverage principle: How pre-training enables post-training. In The Fourteenth International Conference on Learning Representations , 2026. Mark Chen, Jerry Tworek, Heewoo Jun, Qiming Yuan, Henrique Ponde de Oliveira Pinto, et al. Evaluating large language models trained on code, 2021. arXiv preprint arXiv:2107.03374. Wojciech M. Czarnecki, Razvan Pascanu, Simon Osindero, Siddhant Jayakumar, Grzegorz Swirszcz, and Max Jaderberg. Distilling policy distillation. In Proceedings of the Twenty-Second Interna-tional Conference on Artificial Intelligence and Statistics , volume 89 of Proceedings of Machine Learning Research , pages 1331–1340, 2019. Tri Dao, Govinda M. Kamath, Vasilis Syrgkanis, and Lester Mackey. Knowledge distillation as semiparametric inference. In International Conference on Learning Representations , 2021. DeepSeek-AI. DeepSeek-R1: Incentivizing reasoning capability in LLMs via reinforcement learning, 2025. arXiv preprint arXiv:2501.12948. Dylan J. Foster, Adam Block, and Dipendra Misra. Is behavior cloning all you need? understanding horizon in imitation learning. In Advances in Neural Information Processing Systems , volume 37, pages 120602–120666, 2024. Dylan J. Foster, Zakaria Mhammedi, and Dhruv Rohatgi. Is a good foundation necessary for efficient reinforcement learning? the computational role of the base model in exploration. In Proceedings of Thirty Eighth Conference on Learning Theory , volume 291 of Proceedings of Machine Learning Research , pages 2026–2142, 2025. Jiawei Ge, Shange Tang, Jianqing Fan, Cong Ma, and Chi Jin. Maximum likelihood estimation is all you need for well-specified covariate shift. In The Twelfth International Conference on Learning Representations , 2024. Gemini Team. Gemini: A family of highly capable multimodal models. arXiv preprint arXiv:2312.11805 , 2023. Aaron Grattafiori, Abhimanyu Dubey, Abhinav Jauhri, et al. The Llama 3 herd of models. arXiv preprint arXiv:2407.21783 , 2024. Yuxian Gu, Li Dong, Furu Wei, and Minlie Huang. MiniLLM: Knowledge distillation of large language models. In The Twelfth International Conference on Learning Representations , 2024. 19 Srishti Gureja, Lester James V. Miranda, Shayekh Bin Islam, Rishabh Maheshwary, Drishti Sharma, Gusti Winata, Nathan Lambert, Sebastian Ruder, Sara Hooker, and Marzieh Fadaee. M-RewardBench: Evaluating reward models in multilingual settings. In Proceedings of the 63rd Annual Meeting of the Association for Computational Linguistics (Volume 1: Long Papers) ,pages 43–58, 2025. Geoffrey Hinton, Oriol Vinyals, and Jeff Dean. Distilling the knowledge in a neural network, 2015. arXiv preprint arXiv:1503.02531. Haichen Hu and David Simchi-Levi. Perturbing the derivative: Doubly wild refitting for model-free evaluation of opaque machine learning predictors, 2025a. Haichen Hu and David Simchi-Levi. Perturbing the derivative: Wild refitting for model-free eval-uation of machine learning models under bregman losses, 2025b. Haichen Hu and David Simchi-Levi. Interleaved resampling and refitting: Data and compute-efficient evaluation of black-box predictors. arXiv preprint arXiv:2603.14218 , 2026. Haichen Hu, Jian Qian, and David Simchi-Levi. Model-based reinforcement learning with double oracle efficiency in policy optimization and offline estimation, 2026. Audrey Huang, Adam Block, Dylan J. Foster, Dhruv Rohatgi, Cyril Zhang, Max Simchowitz, Jor-dan T. Ash, and Akshay Krishnamurthy. Self-improvement in language models: The sharpening mechanism. In The Thirteenth International Conference on Learning Representations , 2025. Muhammed Emrullah Ildiz, Halil Alperen Gozeten, Ege Onur Taga, Marco Mondelli, and Samet Oymak. High-dimensional analysis of knowledge distillation: Weak-to-strong generalization and scaling laws. In The Thirteenth International Conference on Learning Representations , 2025. Fotis Iliopoulos, Vasilis Kontonis, Cenk Baykal, Gaurav Menghani, Khoa Trinh, and Erik Vee. Weighted distillation with unlabeled examples. In Advances in Neural Information Processing Systems , volume 35, 2022. Zeyu Jia, Alexander Rakhlin, and Tengyang Xie. Do we need to verify step by step? rethinking process supervision from a theoretical perspective. In Proceedings of the 42nd International Conference on Machine Learning , volume 267 of Proceedings of Machine Learning Research ,pages 27373–27398, 2025. Nan Jiang, Akshay Krishnamurthy, Alekh Agarwal, John Langford, and Robert E. Schapire. Con-textual decision processes with low Bellman rank are PAC-learnable. In Proceedings of the 34th International Conference on Machine Learning , volume 70 of Proceedings of Machine Learning Research , pages 1704–1713, 2017. Chi Jin, Zhuoran Yang, Zhaoran Wang, and Michael I Jordan. Provably efficient reinforcement learning with linear function approximation. In Conference on learning theory , pages 2137–2143. PMLR, 2020. Juno Kim, Tai Nakamaki, and Taiji Suzuki. Transformers are minimax optimal nonparametric in-context learners. In Advances in Neural Information Processing Systems , volume 37, pages 106667–106713, 2024a. 20 Juno Kim, Jihun Yun, Jason D. Lee, and Kwang-Sung Jun. Coverage improvement and fast convergence of on-policy preference learning. In Proceedings of the 43rd International Conference on Machine Learning , 2026. Seungone Kim, Jamin Shin, Yejin Cho, Joel Jang, Shayne Longpre, Hwaran Lee, Sangdoo Yun, Seongjin Shin, Sungdong Kim, James Thorne, and Minjoon Seo. Prometheus: Inducing fine-grained evaluation capability in language models. In International Conference on Learning Rep-resentations , 2024b. Qi Lei, Wei Hu, and Jason D. Lee. Near-optimal linear regression under distribution shift. In 
+
+Proceedings of the 38th International Conference on Machine Learning , volume 139 of Proceedings of Machine Learning Research , pages 6164–6174, 2021. Hunter Lightman, Vineet Kosaraju, Yuri Burda, Harrison Edwards, Bowen Baker, Teddy Lee, Jan Leike, John Schulman, Ilya Sutskever, and Karl Cobbe. Let’s verify step by step. In The Twelfth International Conference on Learning Representations , 2024. Michal Lukasik, Srinadh Bhojanapalli, Aditya Krishna Menon, and Sanjiv Kumar. Teacher’s pet: understanding and mitigating biases in distillation. Transactions on Machine Learning Research ,2022. Cong Ma, Reese Pathak, and Martin J. Wainwright. Optimally tackling covariate shift in RKHS-based nonparametric regression. The Annals of Statistics , 51(2):738–761, 2023. Aditya Krishna Menon, Ankit Singh Rawat, Sashank J. Reddi, Seungyeon Kim, and Sanjiv Kumar. A statistical perspective on distillation. In Proceedings of the 38th International Conference on Machine Learning , volume 139 of Proceedings of Machine Learning Research , pages 7632–7642, 2021. OpenAI. GPT-4 technical report, 2023. arXiv preprint arXiv:2303.08774. Jian Qian, Haichen Hu, and David Simchi-Levi. Offline oracle-efficient learning for contextual mdps via layerwise exploration-exploitation tradeoff. arXiv preprint arXiv:2405.17796 , 2024. Qwen Team. Qwen2.5 technical report. arXiv preprint arXiv:2412.15115 , 2024. Stephane Ross, Geoffrey Gordon, and Drew Bagnell. A reduction of imitation learning and struc-tured prediction to no-regret online learning. In Proceedings of the Fourteenth International Conference on Artificial Intelligence and Statistics , volume 15 of Proceedings of Machine Learn-ing Research , pages 627–635, 2011. Dmitri Roussinov, Serge Sharoff, and Nadezhda Puchnina. Controlling out-of-domain gaps in LLMs for genre classification and generated text detection. In Proceedings of the 31st International Conference on Computational Linguistics , pages 3329–3344, 2025. Nikunj Saunshi, Sadhika Malladi, and Sanjeev Arora. A mathematical exploration of why language models help solve downstream tasks. In International Conference on Learning Representations ,2021. Ved Sriraman and Adam Block. Revisiting the (sub)optimality of best-of-N for inference-time align-ment. In Proceedings of Thirty Ninth Conference on Learning Theory , volume 336 of Proceedings of Machine Learning Research , pages 5980–6028, 2026. 21 Ved Sriraman, Peihan Liu, Daniel Hsu, and Adam Block. Behavior cloning is not all you need: The optimality of on-policy distillation for noisy expert feedback, 2026. Martin J Wainwright. Wild refitting for black box prediction. arXiv preprint arXiv:2506.21460 ,2025. Kaizheng Wang. Pseudo-labeling for kernel ridge regression under covariate shift. The Annals of Statistics , 54(1):252–276, 2026. Nathan Weill and Kaizheng Wang. Pseudo-labeling for unsupervised domain adaptation with kernel GLMs, 2026. Eric Xia and Jason M. Klusowski. Classification imbalance as transfer learning, 2026. Eric Xia and Martin J. Wainwright. Prediction aided by surrogate training, 2024. Audrey Xie, Ludwig Schmidt, and John Duchi. Two mathematical models of knowledge distillation. In Proceedings of The 29th International Conference on Artificial Intelligence and Statistics ,volume 300 of Proceedings of Machine Learning Research , pages 4726–4734, 2026. Tengyang Xie, Ching-An Cheng, Nan Jiang, Paul Mineiro, and Alekh Agarwal. Bellman-consistent pessimism for offline reinforcement learning. In Advances in Neural Information Processing Sys-tems , volume 34, pages 6683–6694, 2021. Tengyang Xie, Dylan J. Foster, Yu Bai, Nan Jiang, and Sham M. Kakade. The role of coverage in online reinforcement learning. In The Eleventh International Conference on Learning Represen-tations , 2023. Tengyang Xie, Dylan J. Foster, Akshay Krishnamurthy, Corby Rosset, Ahmed H. Awadallah, and Alexander Rakhlin. Exploratory preference optimization: Harnessing implicit Q*-approximation for sample-efficient RLHF. In The Thirteenth International Conference on Learning Representa-tions , 2025. Wei Xiong, Hanze Dong, Chenlu Ye, Ziqi Wang, Han Zhong, Heng Ji, Nan Jiang, and Tong Zhang. Iterative preference learning from human feedback: Bridging theory and practice for RLHF under KL-constraint. In Proceedings of the 41st International Conference on Machine Learning , volume 235 of Proceedings of Machine Learning Research , pages 54715–54754, 2024. Kakei Yamamoto and Martin J. Wainwright. Residual-as-teacher: Mitigating bias propagation in student–teacher estimation, 2026. Chenlu Ye, Wei Xiong, Yuheng Zhang, Hanze Dong, Nan Jiang, and Tong Zhang. Online iterative reinforcement learning from human feedback with general preference model. In Advances in Neural Information Processing Systems , volume 37, 2024. Zhuohao Yu, Zhiwei Steven Wu, and Adam Block. From curiosity to caution: Mitigating reward hacking for best-of-N with pessimism. In The Fourteenth International Conference on Learning Representations , 2026. Yurun Yuan, Fan Chen, Zeyu Jia, Alexander Rakhlin, and Tengyang Xie. Trajectory Bellman residual minimization: A simple value-based method for LLM reasoning. In Advances in Neural Information Processing Systems , volume 38, 2025. 22 Huaqing Zhang, Jingchu Gai, Juno Kim, Bingbin Liu, and Andrej Risteski. When does online imitation learning help in LLM post-training? the role of (non-)realizability beyond horizon, 2026. Yuheng Zhang, Yu Bai, and Nan Jiang. Offline learning in Markov games with general function approximation. In Proceedings of the 40th International Conference on Machine Learning , volume 202 of Proceedings of Machine Learning Research , pages 40804–40829, 2023. Heyang Zhao, Chenlu Ye, Quanquan Gu, and Tong Zhang. Sharp analysis for KL-regularized con-textual bandits and RLHF. In Advances in Neural Information Processing Systems , volume 38, 2025. Banghua Zhu, Michael I. Jordan, and Jiantao Jiao. Principled reinforcement learning with human feedback from pairwise or K-wise comparisons. In Proceedings of the 40th International Con-ference on Machine Learning , volume 202 of Proceedings of Machine Learning Research , pages 43037–43067, 2023. Lianghui Zhu, Xinggang Wang, and Xinlong Wang. JudgeLM: Fine-tuned large language models are scalable judges. In International Conference on Learning Representations , 2025. 
+
+# A Mathematical Tools 
+
+Lemma A.1 (Lojasiewicz inequality Bierstone and Milman (1988)) . Let K ⊆ Rq be nonempty, and let f , g : K → R. Suppose that their graphs are compact subanalytic subsets of Rq+1 and that 
+
+{x ∈ K : f (x) = 0} ⊆ { x ∈ K : g(x) = 0}.
+
+Then there are constants c > 0 and ρ > 0 for which 
+
+|f (x)| ≥ c|g(x)|ρ (x ∈ K).
+
+In particular, if f , g ≥ 0 on K, we choose any M ≥ max {1, sup x∈K g(x)}. Then, the same constants 
+
+c, ρ defined above yield 
+
+f (x) ≥ a[g(x)] p, p := max {1, ρ} ≥ 1, a := cM ρ−p > 0. 
+
+To quantify the progress of a projected student step near the oracle, we use the following subgradient form of the Lojasiewicz inequality. The domain in this result can include the boundary of the student parameter ball. 
+
+Lemma A.2 (Bolte et al., 2007, Theorem 3.1) . Let f : Rd → R ∪ { +∞} have a subanalytic graph and closed domain, and suppose that f is continuous on its domain. If ¯θ is a critical point, meaning 
+
+0 ∈ ∂f ( ¯θ), then there are a neighborhood U of ¯θ, c > 0, and ρ ∈ [0, 1 ) such that 
+
+dist (0, ∂f (θ)) ≥ c |f (θ) − f ( ¯θ)|ρ for θ ∈ U ∩ dom f with f (θ)̸ = f ( ¯θ).
+
+Here ∂f is the limiting subdifferential and dist (0, ∂f (θ)) := inf v∈∂f (θ) ∥v∥2.23 B Proofs in Section 5 
+
+In this appendix, we provide the proof of Theorem 5.1. Specifically, we will first provide a sequence of lemmas that are useful and finally, we will show how to combine them together to prove the main convergence rate theorem. We begin by identifying the correct distillation objective: the following lemma shows that maxi-mizing the regularized student return is equivalent to minimizing the KL cost against πw⋆λ .
+
+Lemma B.1. For each source or target prompt x, define 
+
+Zλ(x) := ∑ 
+
+> b1:H∈A (x)
+
+πpre (b1:H | x)eR(x,b1:H )/λ.
+
+The unique unrestricted optimal answer policy is 
+
+π⋆λ(a1:H | x) = πpre (a1:H | x)eR(x,a1:H )/λ
+
+Zλ(x) . (B.1) Moreover, for every student parameter, 
+
+Jλ,m(πstu, θ ) = λm
+
+> m
+
+∑
+
+> j=1
+
+log Zλ(˜xj ) − Cw⋆λ (θ). (B.2) The Gibbs representation in Lemma B.1 lets us identify the distribution of accepted branch in-dices. The following lemma shows that these indices form logistic observations with parameter w⋆λ,providing the statistical basis for the source update. We now define a filtration {F t}Tt=1. We treat the source and target datasets, the reward oracle, the policy features, the frozen policies, and the algorithmic schedules as fixed. Let Ft denote the information available immediately before the source sampling in round t. Formally, set F0 =
+
+σ(w0, θ0). For every t > 0, we define Ft recursively 
+
+Ft+1 = Ft ∨ σ
+
+(
+
+it, ht, at,1 :H , ct,0 , Yt, apre  
+
+> t,1 :H
+
+, Ut,
+
+(
+
+jg
+
+> t+1, ℓ
+
+, ag
+
+> t+1, ℓ,1 :H
+
+)bt+1 
+
+> ℓ=1
+
+, ϑt+1,2 ,
+
+(
+
+jt+1, k,ℓ, aval 
+
+> t+1, k,ℓ,1 :H
+
+)
+
+> k∈{ 1,2 }
+> ℓ=1, ... ,qt+1
+
+)
+
+.
+
+The three lines collect the source samples, the student-gradient batch, and the exploration candidate and candidate-validation samples, respectively. All other quantities computed in round t, including st, ct,1 , zt, Rt, It, gt, the gradient candidate 
+
+ϑt+1,1 , and the selected student, are measurable functions of Ft and these samples. In particu-lar, wt and θt are Ft-measurable, whereas wt+1 and θt+1 are Ft+1-measurable. For deterministic initialization, F0 is the trivial sigma-algebra. Throughout the following lemmas, conditioning on 
+
+Ft, st, ct,1 , ct,0 means conditioning on Ft ∨ σ(st, ct,1 , ct,0 ). Then, we have the following lemma. 
+
+Lemma B.2. Under Assumption 3.2, for every round t ≥ 0, Algorithm 1 satisfies, almost surely, 
+
+Pr (It = 1 | F t, st, ct,1 , ct,0 ) ≥ e−1/λ. (B.3) 24 Moreover, conditional on acceptance, the branch index satisfies 
+
+Pr (Yt = 1 | It = 1, Ft, st, ct,1 , ct,0 ) = π⋆λ(ct,1 | st)
+
+π⋆λ(ct,1 | st) + π⋆λ(ct,0 | st) = σ(z⊤ 
+
+> t
+
+w⋆λ), (B.4) where 
+
+zt = ϕ(st, ct,1 ) − ϕ(st, ct,0 ), σ(u) = 11 + e−u .
+
+These statements also hold when the two proposal tokens coincide, including prefixes after EOS .The random variable Yt denotes the branch index, not the token value. Combining the accepted-label identity in Lemma B.2 with joint source identification, we obtain convergence of the calibration updates despite the adaptive student proposals. The bounds below will control both the calibration error and the changes in the target objective across rounds. 
+
+Lemma B.3. With Gjoint and γ defined in (3.7)-(4.2), every round t ≥ 0 satisfies 
+
+E
+
+[
+
+ztz⊤ 
+
+> t
+
+| F t
+
+]
+
+⪰ e−2B Gjoint , ∥zt∥2 ≤ 2, (B.5) 
+
+E
+
+[
+
+(wt − w⋆λ)⊤gt
+
+∣∣∣ Ft
+
+]
+
+≥ γ∥wt − w⋆λ∥22, ∥gt∥2 ≤ 2. (B.6) Consequently, for every integer t ≥ 1, the projected updates in Algorithm 1 satisfies 
+
+E
+
+[
+
+∥wt − w⋆λ∥22
+
+]
+
+≤ 4
+
+γ2(t + 2) , (B.7) 
+
+∥wt − wt−1∥2 ≤ 2
+
+γ(t + 1) . (B.8) Having controlled the source updates, we turn to the quantities estimated from target rollouts. We first bound the log-ratio cost of a single answer, which will be used to control the population cost and the error in its Monte Carlo evaluation. 
+
+Lemma B.4. For t = 0, . . . , T , wt ∈ W , ϑ ∈ Θ, and a feasible answer a1:H ∈ A (x) at a target prompt x, define 
+
+Zt(ϑ; x, a1:H ) := λ log πstu, ϑ(a1:H | x)
+
+πwt (a1:H | x) = λ
+
+> H
+
+∑
+
+> h=1
+
+log πstu, ϑ(ah | x, a1:h−1)
+
+πwt (ah | x, a1:h−1) .
+
+Then, uniformly over these choices, 
+
+|Zt(ϑ; x, a1:H )| ≤ 4λBH . (B.9) The preceding trajectory bound gives a uniform bound on its expected cost. We also quantify sensitivity to the student and calibration parameters, so that parameter changes can be translated into cost changes in the optimization analysis. 
+
+Lemma B.5. For w ∈ W and θ ∈ Θ, define Cw (θ) := λm
+
+∑mj=1 KL (πstu, θ (· | ˜xj ) ∥ πw (· | ˜xj )) .The cost used in round t is Ct(θ) := Cwt (θ) = 1
+
+> m
+
+∑mj=1 Ea1:H ∼πstu, θ (·| ˜xj )[Zt(θ; ˜xj , a1:H )] , where Zt is 25 defined in Lemma B.4. For every w, v ∈ W and θ, ϑ ∈ Θ,
+
+0 ≤ Cw (θ) ≤ 4λBH , (B.10) 
+
+|Cw (θ) − Cw (ϑ)| ≤ 4λBH 3/2∥θ − ϑ∥2, (B.11) 
+
+sup 
+
+> θ∈Θ
+
+|Cw (θ) − Cv (θ)| ≤ 2λH ∥w − v∥2. (B.12) In particular, these bounds apply to Ct by setting w = wt.For the newly calibrated objective Ct+1, we next verify that the algorithm’s fresh target batch provides an unbiased gradient estimate. We also bound its variance, which controls the error in the projected-gradient proposal. 
+
+Lemma B.6. Let Ft be the history before the source draws in round t, so that θt is Ft-measurable, and set Gt+1 := Ft ∨ σ(wt+1). Define the score 
+
+Sstu, θ (x, a1:H ) := ∇θ log πstu, θ (a1:H | x).
+
+Conditional on Gt+1, independently for ℓ = 1, . . . , bt+1, draw 
+
+jg 
+
+> t+1, ℓ
+
+∼ Unif {1, . . . , m}, ag 
+
+> t+1, ℓ,1 :H
+
+∼ πstu, θt (· | ˜xjg 
+
+> t+1, ℓ
+
+),
+
+and define ̂
+
+gstu  
+
+> t+1, ℓ
+
+:= Sstu, θt (˜xjg 
+
+> t+1, ℓ
+
+, ag 
+
+> t+1, ℓ,1 :H
+
+)Zt+1(θt; ˜xjg 
+
+> t+1, ℓ
+
+, ag 
+
+> t+1, ℓ,1 :H
+
+),̂ gstu  
+
+> t+1
+
+:= 1
+
+bt+1
+
+> bt+1
+
+∑
+
+> ℓ=1
+
+̂
+
+gstu 
+
+> t+1, ℓ
+
+.
+
+Here Zt+1 and Ct+1 = Cwt+1 are defined in Lemmas B.4 and B.5, respectively. For every t =
+
+0, . . . , T − 1, almost surely, we have 
+
+E
+
+[̂ 
+
+gstu 
+
+> t+1
+
+∣∣∣ Gt+1
+
+]
+
+= E
+
+[̂ 
+
+gstu 
+
+> t+1
+
+∣∣∣ wt+1, θt
+
+]
+
+= ∇θCt+1(θt), (B.13) 
+
+E
+
+[∥∥∥̂ gstu  
+
+> t+1
+
+− ∇ θCt+1(θt)
+
+∥∥∥22
+
+∣∣∣∣ Gt+1
+
+]
+
+≤ 16 λ2B2H3
+
+bt+1
+
+. (B.14) The preceding bounds control the size of the student gradient. We next bound its variation, both as the student parameter changes and as the calibrated teacher changes. These bounds determine a fixed student step size and control the error caused by using the current calibration. 
+
+Lemma B.7. Recall the cost Cw in (3.5) and the oracle-policy average KL divergence Kλ,m in (3.6). For any answer laws Qj that are positive on A(˜xj ), the function θ 7 → m−1 ∑mj=1 KL (πstu, θ (· | 
+
+˜xj )∥Qj ) is real analytic on Rd. In particular, this holds for Cw and Kλ,m. Define 
+
+Lst := λH (1 + 8BH ), αstu := 12Lst 
+
+.
+
+26 For all w, v ∈ W and θ, ϑ ∈ Θ, we have 
+
+∥∇ 2
+
+> θ
+
+Cw (θ)∥op ≤ Lst , (B.15) 
+
+∥∇ θCw (θ) − ∇ θCw (ϑ)∥2 ≤ Lst ∥θ − ϑ∥2, (B.16) 
+
+∥∇ θCw (θ) − ∇ θCv (θ)∥2 ≤ 2λH 3/2∥w − v∥2. (B.17) After constructing the candidates, the algorithm chooses among them using sampled costs. The uniform log-ratio bound in Lemma B.4 allows the following lemma to control how far the selected candidate’s true cost can exceed the better of the two proposals. 
+
+Lemma B.8. For each target update t ≥ 1, define Ht := Ft−1 ∨ σ(wt, ϑt,1 , ϑt,2 ). Define the nonnegative, proof-only comparison error ξt := 2 max k∈{ 1,2 } |̂ Ct,k − Ct(ϑt,k )|. Then, we have 
+
+Ct(θt) ≤ min  
+
+> k∈{ 1,2 }
+
+Ct(ϑt,k ) + ξt, E[ξt | H t] ≤ 16 λBH t + 1 . (B.18) The next lemma combines two sources of improvement for the fixed true cost. A projected gradient step provides progress near the oracle; uniform exploration provides progress when the current cost is bounded away from the minimum. The exact true gradient is used only to define the comparison step in this lemma. 
+
+Lemma B.9. Let F (θ) := Cw⋆λ (θ) and ∆λ,m(θ) := F (θ) − F (θ†
+
+> λ,m
+
+). Define 
+
+y(θ) := Proj Θ (θ − αstu ∇θF (θ)) , ϑunif ∼ Unif (Θ), Mopt := 8λB 2H3/2.
+
+Under Assumption 3.3, there is a fixed-model constant 0 < κ opt ≤ 1/(4Mopt ) such that, for every 
+
+θ ∈ Θ,
+
+Eϑunif 
+
+[
+
+F (θ) − min 
+
+{
+
+F (y(θ)) , F (ϑunif )}] 
+
+≥ κopt [∆λ,m(θ)] 2. (B.19) The constant does not depend on the iteration number. We now compare the actual student update with the population update in Lemma B.9. The preceding gradient and selection bounds control the difference between these updates. This gives a recursion for the excess true cost, with separate contributions from gradient estimation, calibration, and validation. 
+
+Lemma B.10. Recall ∆λ,m(θ) and εt from (3.6). Let κopt > 0 be the constant in Lemma B.9, chosen so that κopt ≤ 1/(4Mopt ), where Mopt := 8λB 2H3/2. Define 
+
+Eopt := 16 αstu λ2B2H3 + 16 αstu λ2BH 3 + 8λH γ + 16 λBH ,
+
+Kopt := max 
+
+{
+
+Mopt ,
+
+√
+
+2Eopt 
+
+κopt 
+
+, 12κopt 
+
+}
+
+.
+
+Then Algorithm 1 satisfies, for every integer T ≥ 1,
+
+E[∆λ,m(θT )] ≤ Kopt (T + 1)−1/4, E[εT ] ≤ Kopt (T + 1)−1/4 + 8λH γ√T + 2 . (B.20) Lemma B.10 controls the expected excess true cost, whereas Theorem 5.1 concerns KL divergence 27 to the oracle student. Under uniqueness of the optimal student policy, the following lemma uses analyticity and compactness to connect these two errors. 
+
+Lemma B.11. Under the model setup and Assumption 3.3, fix θ† 
+
+> λ,m
+
+∈ argmin θ∈Θ Cw⋆λ (θ). Recall the excess true cost and the average oracle-policy KL from (3.6): 
+
+∆λ,m(θ) := Cw⋆λ (θ) − Cw⋆λ (θ†
+
+> λ,m
+
+),
+
+Kλ,m(θ) := 1
+
+m
+
+> m
+
+∑
+
+> j=1
+
+KL 
+
+(
+
+πstu, θ (· | ˜xj )
+
+∥∥∥∥ πstu, θ†
+
+> λ,m
+
+(· | ˜xj )
+
+)
+
+.
+
+There exist constants aλ,m > 0 and pλ,m ≥ 1 such that 
+
+∆λ,m(θ) ≥ aλ,m[Kλ,m(θ)] pλ,m for every θ ∈ Θ. (B.21) These constants depend on the fixed model and target design, but not on the iteration number. Combining Lemmas B.10 and B.11 through Jensen’s inequality now yields the convergence rate in Theorem 5.1, as shown in the proof below. 
+
+Proof of Theorem 5.1. Starting from the left-hand side of (5.1), the definition in (3.6) gives 
+
+E
+
+ 1
+
+m
+
+> m
+
+∑
+
+> j=1
+
+KL 
+
+(
+
+πstu, θT (· | ˜xj )
+
+∥∥∥∥ πstu, θ†
+
+> λ,m
+
+(· | ˜xj )
+
+) = E[Kλ,m(θT )] .
+
+We first apply Lemma B.11 to compare this policy error with the excess true cost. Its inequality holds for every θ ∈ Θ, and hence on every sample path at θT :
+
+aλ,m[Kλ,m(θT )] pλ,m ≤ ∆λ,m(θT ).
+
+Dividing by aλ,m > 0 and taking the increasing power 1/pλ,m yields 
+
+Kλ,m(θT ) ≤ a−1/pλ,m 
+
+> λ,m
+
+[∆λ,m(θT )] 1/pλ,m .
+
+The excess cost is bounded by Lemma B.5, so the expectations below are finite. Since pλ,m ≥ 1,the function u 7 → u1/pλ,m is concave: for u > 0,
+
+d2
+
+du 2 u1/pλ,m = 1
+
+pλ,m
+
+( 1
+
+pλ,m
+
+− 1
+
+)
+
+u1/pλ,m−2 ≤ 0, 
+
+and continuity extends concavity to zero. Taking expectations and applying Jensen’s inequality therefore gives 
+
+E[Kλ,m(θT )] ≤ a−1/pλ,m 
+
+> λ,m
+
+E
+
+[
+
+[∆λ,m(θT )] 1/pλ,m
+
+]
+
+≤ a−1/pλ,m 
+
+> λ,m
+
+(E[∆λ,m(θT )]) 1/pλ,m =
+
+( E[∆λ,m(θT )] 
+
+aλ,m
+
+)1/pλ,m
+
+.
+
+Next, we use Lemma B.10 to bound the numerator by Kopt (T + 1)−1/4. This bound already combines the student gradient progress, calibration error, and finite-rollout errors. Substituting it 28 into the increasing power gives 
+
+E[Kλ,m(θT )] ≤
+
+( Kopt (T + 1)−1/4
+
+aλ,m
+
+)1/pλ,m
+
+=
+
+( Kopt 
+
+aλ,m
+
+)1/pλ,m
+
+(T + 1)−1/(4pλ,m).
+
+Taking Cλ,m := ( Kopt /aλ,m)1/pλ,m proves (5.1). All constants are independent of T , and pλ,m ≥ 1
+
+is finite, so the bound converges to zero. 
+
+# C Proofs in Appendix B 
+
+In this appendix, we provide the proofs of the lemmas in Appendix B 
+
+Proof of Lemma B.1. We fix x first and call the right-hand side of (B.1) as ¯πλ(a1:H | x).Since R ∈ [0, 1 ] and the pre-trained policy πpre is a probability law, we have 
+
+1 ≤ eR(x,a1:H )/λ ≤ e1/λ =⇒ 1 ≤ Zλ(x) ≤ e1/λ.
+
+Thus, ¯πλ is positive and sums to one. By the definition of an autoregressive policy, we have that 
+
+¯πλ(ah | x, a1:h−1) = ¯πλ(a1:h | x)
+
+¯πλ(a1:h−1 | x) .
+
+Thus, ¯πλ is an admissible autoregressive policy. For any competing policy π, by the autoregressive product in (3.1) gives, we have that 
+
+> H
+
+∑
+
+> h=1
+
+log π(ah | x, a1:h−1)
+
+πpre (ah | x, a1:h−1) = log π(a1:H | x)
+
+πpre (a1:H | x) . (C.1) Recall that ¯πλ(a1:H |x) = πpre (a1:H |x)eR(x,a1:H )/λ 
+
+> Zλ(x)
+
+. Taking the logarithm on both sides and rearrange, we obtain 
+
+R(x, a1:H ) = λ log ¯πλ(a1:H | x)
+
+πpre (a1:H | x) + λ log Zλ(x). (C.2) Theerfore, we Subtract (C.1) from both sides of (C.2) and then take expectation to get 
+
+Ea1:H ∼π(·| x)
+
+[
+
+R(x, a1:H ) − λ
+
+> H
+
+∑
+
+> h=1
+
+log π(ah | x, a1:h−1)
+
+πpre (ah | x, a1:h−1)
+
+]
+
+= λ log Zλ(x) − λEa1:H ∼π(·| x)
+
+[
+
+log π(a1:H | x)
+
+¯πλ(a1:H | x)
+
+]
+
+= λ log Zλ(x) − λKL (π(· | x) ∥ ¯πλ(· | x)) .
+
+The second is by the definition of KL. The KL divergence is nonnegative and KL (p∥p) = 0, Thus, the preceding objective is uniquely maximized by π = ¯πλ, which proves (B.1). Average the identity over the target prompts and substitute π⋆λ = πw⋆λ from Assumption 3.2. This proves (B.2) and the equivalence of the original regularized benchmark and the minimum of Cw⋆λ . The unknown target rewards appear in the analysis, not in an algorithmic query. 29 Let Ft be the history immediately before the source step of round t, containing all source and target random draws from rounds 0, . . . , t − 1 and the initial parameters. At t = 0, there are no preceding rounds. Thus wt and θt are Ft-measurable. The source draws in round t are fresh conditional on this history. In particular, the student may depend on every preceding calibration update, exploration draw, and target evaluation. 
+
+Proof of Lemma B.2. We show that the acceptance rule reweights the two branch indices by exactly the factors appearing in the regularized optimal policy. Fix the history Ft, the selected prefix st = ( xit , at,1 :ht−1), and the two legal proposal tokens ct,1 
+
+and ct,0 . Here Ft is the history before round t. After additionally conditioning on Yt = k, the first 
+
+ht tokens are fixed: 
+
+apre  
+
+> t,1 :ht
+
+= ( at,1 :ht−1, ct,k ).
+
+The algorithm then generates only the remaining suffix at random: 
+
+apre  
+
+> t,ht+1:H
+
+∼ πpre (· | st, ct,k ).
+
+Thus, although the reward function R is deterministic, 
+
+Rt = R
+
+(
+
+xit , (at,1 :ht−1, ct,k, apre  
+
+> t,ht+1:H
+
+))
+
+is random because the reference-generated suffix is random. For k ∈ { 0, 1 }, define the expected exponential reward 
+
+Mt,k := Ebht+1:H ∼πpre (·| st,ct,k )
+
+[
+
+exp 
+
+( R(xit , (at,1 :ht−1, ct,k, bht+1:H )) 
+
+λ
+
+)] 
+
+.
+
+The expectation is only over the reference-generated suffix; the prompt, prefix, and candidate token are held fixed. Equivalently, 
+
+Mt,k = E
+
+[
+
+eRt/λ ∣∣∣ Ft, st, ct,1 , ct,0 , Yt = k
+
+]
+
+.
+
+To make this expectation explicit, let bht+1:H = ( bht+1, . . . , bH ) denote a possible suffix, whose reference probability is 
+
+πpre (bht+1:H | st, ct,k ) = 
+
+> H
+
+∏
+
+> h=ht+1
+
+πpre (bh | xit , (at,1 :ht−1, ct,k, bht+1:h−1)) .
+
+By the definition of expectation for a finite distribution, we can compute Mt,k as 
+
+Mt,k = ∑    
+
+> bht+1:H:
+> (at,1 :ht−1,ct,k,bht+1:H)∈A (xit)
+
+πpre (bht+1:H | st, ct,k ) × exp 
+
+( R(xit , (at,1 :ht−1, ct,k, bht+1:H )) 
+
+λ
+
+)
+
+.
+
+The feasibility condition ensures that the concatenated sequence is a legal full answer. If ht = H,there is one empty suffix, with probability one. 30 Since R takes values in [0, 1 ], and the suffix probabilities sum to one, we have that 
+
+1 ≤ Mt,k ≤ e1/λ, k ∈ { 0, 1 }. (C.3) We next calculate how acceptance changes the branch distribution. Recall that 
+
+It = 1
+
+{
+
+Ut ≤ e(Rt−1)/λ}
+
+, Ut ∼ Unif [0, 1 ],
+
+where Ut is independent uniform distribution random variables. Conditioned on Ft, st, ct,1 , ct,0 ,
+
+Yt, Rt, the acceptance threshold is fixed. Moreover, notice that 0 ≤ Rt ≤ 1 implies e(Rt−1)/λ ∈
+
+[e−1/λ, 1 ].By the independence and the uniform density of Ut, we obtain 
+
+Pr (It = 1 | F t, st, ct,1 , ct,0 , Yt, Rt) = Pr 
+
+(
+
+Ut ≤ e(Rt−1)/λ ∣∣∣ Ft, st, ct,1 , ct,0 , Yt, Rt
+
+)
+
+=
+
+∫ 10
+
+1
+
+{
+
+u ≤ e(Rt−1)/λ}
+
+du = e(Rt−1)/λ.
+
+This calculation averages over Ut only; it does not yet average over the reference suffix. Now conditioned only on Ft, st, ct,1 , ct,0 , Yt = k, the selected branch is fixed, but Rt still depends on the random reference suffix. Recall that It is an indicator and we apply the law of iterated expectation to get 
+
+Pr (It = 1 | F t, st, ct,1 , ct,0 , Yt = k) = E[It | F t, st, ct,1 , ct,0 , Yt = k]= E[E[It | F t, st, ct,1 , ct,0 , Yt, Rt] | F t, st, ct,1 , ct,0 , Yt = k]= E
+
+[
+
+e(Rt−1)/λ ∣∣∣ Ft, st, ct,1 , ct,0 , Yt = k
+
+]
+
+.
+
+The third uses the acceptance probability computed above. Finally, e(Rt−1)/λ = e−1/λeRt/λ, and the factor e−1/λ is deterministic. Hence, we have 
+
+E
+
+[
+
+e(Rt−1)/λ ∣∣∣ Ft, st, ct,1 , ct,0 , Yt = k
+
+]
+
+= e−1/λE
+
+[
+
+eRt/λ ∣∣∣ Ft, st, ct,1 , ct,0 , Yt = k
+
+]
+
+= e−1/λMt,k.
+
+The last equality is the definition of Mt,k. Thus the acceptance probability for branch k is the average of its suffix-specific acceptance probabilities, weighted by the reference suffix law. The branch-selection rule in the algorithm is 
+
+Pr (Yt = k | F t, st, ct,1 , ct,0 ) = πpre (ct,k | st)
+
+πpre (ct,1 | st) + πpre (ct,0 | st) .
+
+By the property of conditional probability, we have 
+
+Pr (Yt = k, It = 1 | F t, st, ct,1 , ct,0 ) = Pr (It = 1|F t, st, ct,1 , ct,0 , Yt = k) · Pr (Yt = k|F t, st, ct,1 , ct,0 )= e−1/λ πpre (ct,k | st)Mt,k
+
+πpre (ct,1 | st) + πpre (ct,0 | st) . (C.4) All denominators are positive because the reference policy is positive. 31 Summing (C.4) over the two branch indices Yt = 0, 1 and using Mt,k ≥ 1, we obtain 
+
+Pr (It = 1 | F t, st, ct,1 , ct,0 ) = e−1/λ πpre (ct,1 | st)Mt,1 + πpre (ct,0 | st)Mt,0 
+
+πpre (ct,1 | st) + πpre (ct,0 | st)
+
+≥e−1/λ πpre (ct,1 | st) + πpre (ct,0 | st)
+
+πpre (ct,1 | st) + πpre (ct,0 | st) = e−1/λ. (C.5) This proves (B.3). By Bayes’ rule, we have that 
+
+Pr (Yt = 1 | It = 1, Ft, st, ct,1 , ct,0 ) = Pr (Yt = 1, It = 1|F t, st, ct,1 , ct,0 )
+
+Pr (It = 1|F t, st, ct,1 , ct,0 )= πpre (ct,1 | st)Mt,1 
+
+πpre (ct,1 | st)Mt,1 + πpre (ct,0 | st)Mt,0 
+
+. (C.6) It remains to present this distribution in terms of the regularized truth. By Lemma B.1, the optimal policy is 
+
+π⋆λ(a1:H | x) = πpre (a1:H | x)eR(x,a1:H )/λ
+
+Zλ(x) .
+
+Its probability of the prefix (at,1 :ht−1, ct,k ) is obtained by summing over all feasible suffixes. The corresponding full-answer events are disjoint, and their union is precisely the prefix event. Hence, by marginalization and Lemma B.1, we have 
+
+π⋆λ(at,1 :ht−1, ct,k | xit )= ∑    
+
+> bht+1:H:
+> (at,1 :ht−1,ct,k,bht+1:H)∈A (xit)
+
+π⋆λ(( at,1 :ht−1, ct,k, bht+1:H ) | xit )= ∑    
+
+> bht+1:H:
+> (at,1 :ht−1,ct,k,bht+1:H)∈A (xit)
+
+πpre (( at,1 :ht−1, ct,k, bht+1:H ) | xit )
+
+Zλ(xit ) × exp 
+
+( R(xit , (at,1 :ht−1, ct,k, bht+1:H )) 
+
+λ
+
+)
+
+.
+
+(C.7) We now expand this sum. For every feasible suffix bht+1:H , the autoregressive chain rule separates the full-answer probability into the prefix, the selected token, and the suffix: 
+
+πpre (( at,1 :ht−1, ct,k, bht+1:H ) | xit )=
+
+
+
+> ht−1
+
+∏
+
+> h=1
+
+πpre (at,h | xit , at,1 :h−1)
+
+ πpre (ct,k | xit , at,1 :ht−1) ×
+
+
+
+> H
+
+∏
+
+> h=ht+1
+
+πpre (bh | xit , (at,1 :ht−1, ct,k, bht+1:h−1)) 
+
+ .
+
+The first product is the probability of generating the fixed prefix. The middle factor is the condi-tional probability of the selected token. The last product is the conditional probability of generating the suffix after that token. More explicitly, using st = ( xit , at,1 :ht−1), we have 
+
+> ht−1
+
+∏
+
+> h=1
+
+πpre (at,h | xit , at,1 :h−1) = πpre (at,1 :ht−1 | xit ), πpre (ct,k | xit , at,1 :ht−1) = πpre (ct,k | st),
+
+32 H∏
+
+> h
+
+=ht+1
+
+πpre (bh | xit , (at,1 :ht−1, ct,k, bht+1:h−1)) = πpre (bht+1:H | st, ct,k ).
+
+Thus, we have the factorization 
+
+πpre (( at,1 :ht−1, ct,k, bht+1:H ) | xit ) = πpre (at,1 :ht−1 | xit ) πpre (ct,k | st) πpre (bht+1:H | st, ct,k ).
+
+This is a factorization into conditional probabilities, not an independence assumption on the three parts of the answer. At ht = 1 or ht = H, the corresponding empty product is one. Substituting this factorization into (C.7) gives 
+
+π⋆λ(at,1 :ht−1, ct,k | xit )= ∑ 
+
+> bht+1:H:
+
+(at,1 :ht−1,ct,k ,bht+1:H )∈A (xit )
+
+πpre (at,1 :ht−1 | xit ) πpre (ct,k | st)
+
+Zλ(xit ) × πpre (bht+1:H | st, ct,k )
+
+× exp 
+
+( R(xit , (at,1 :ht−1, ct,k, bht+1:H )) 
+
+λ
+
+)
+
+.
+
+Here the summation variable is only bht+1:H . The quantities πpre (at,1 :ht−1 | xit ), πpre (ct,k |
+
+st), Zλ(xit ) do not depend on this suffix. Thus, we factor them out of the sum, and retain exactly the same feasible suffixes to obtain 
+
+π⋆λ(at,1 :ht−1, ct,k | xit )= πpre (at,1 :ht−1 | xit ) πpre (ct,k | st)
+
+Zλ(xit )
+
+×
+
+ ∑ 
+
+> bht+1:H:
+
+(at,1 :ht−1,ct,k ,bht+1:H )∈A (xit )
+
+πpre (bht+1:H | st, ct,k ) × exp 
+
+( R(xit , (at,1 :ht−1, ct,k, bht+1:H )) 
+
+λ
+
+).
+
+The expression in square brackets is precisely the defining suffix sum for Mt,k. Therefore, we get 
+
+π⋆λ(at,1 :ht−1, ct,k | xit ) = πpre (at,1 :ht−1 | xit )
+
+Zλ(xit ) πpre (ct,k | st)Mt,k.
+
+Recall the conditional token probability π⋆λ(ct,k | st) = π⋆λ(at,1 :ht−1,ct,k |xit )
+
+> π⋆λ
+
+(at,1 :ht−1|xit ) . The denominator and the preceding prefix factor are common to both branch indices and are positive. They therefore cancel and we get 
+
+π⋆λ(ct,1 | st)
+
+π⋆λ(ct,1 | st) + π⋆λ(ct,0 | st) = πpre (ct,1 | st)Mt,1 
+
+πpre (ct,1 | st)Mt,1 + πpre (ct,0 | st)Mt,0 
+
+.
+
+Together with (C.6), this proves the first equality in (B.4). Finally, Assumption 3.2 gives π⋆λ = πw⋆λ . The common softmax normalizer cancels, so we have 
+
+π⋆λ(ct,1 | st)
+
+π⋆λ(ct,1 | st) + π⋆λ(ct,0 | st) = e(w⋆λ)⊤ϕ(st,ct,1 )
+
+e(w⋆λ)⊤ϕ(st,ct,1 ) + e(w⋆λ)⊤ϕ(st,ct,0 ) = 11 + e(−(w⋆λ)⊤[ϕ(st,ct,1 )−ϕ(st,ct,0 )]) = σ(z⊤ 
+
+> t
+
+w⋆λ).
+
+33 This establishes teh second equality in (B.4). If ct,1 = ct,0 , the two branch indices have identical reference-completion laws, hence Mt,1 = Mt,0 .Their prior and accepted probabilities are both 1/2, consistent with zt = 0 and σ(0) = 1/2. After 
+
+EOS , both candidates are null , so the same argument applies. 
+
+Proof of Lemma B.3. We first recall the random definition vector zt from Algorithm 1. The history 
+
+Ft contains all randomness before round t, so θt is fixed conditional on Ft. After choosing the source index it and branching time ht, the algorithm draws at,1 :H ∼ πtea (· | xit ) and sets st =(xit , at,1 :ht−1), ct,1 = at,ht is the teacher token, and ct,0 ∼ πstu, θt (· | st) is a fresh student token at the same state. The vector in the lemma is 
+
+zt := ϕ(st, ct,1 ) − ϕ(st, ct,0 ) ∈ RD.
+
+First, we fix the history Ft and a legal nonterminal state s, so that B(s) is nonempty. Recall that 
+
+B > 0 is the scalar bound on the parameter norm, whereas B(s) is the set of legal next tokens at 
+
+s. Both b and c below denote individual tokens, not trajectories. The current student policy is then explicitly 
+
+πstu, θt (b | s) = 
+
+
+
+exp 
+
+(
+
+θ⊤ 
+
+> t
+
+ϕstu (s, b))∑
+
+> c∈B (s)
+
+exp 
+
+(
+
+θ⊤ 
+
+> t
+
+ϕstu (s, c)) , b ∈ B (s),0, b ∈ A \ B (s).
+
+Here θt ∈ Rd is the current student parameter, and ϕstu (s, c) ∈ Rd is the student feature vector of the state-token pair (s, c). Since θt is Ft-measurable, it is fixed after we condition on the history. The model bounds are 
+
+∥θt∥2 ≤ B, ∥ϕstu (s, c)∥2 ≤ 1, ∀c ∈ B (s).
+
+Consequently, by the Cauchy-Schwarz inequality, for each legal token c, we have 
+
+∣∣∣θ⊤ 
+
+> t
+
+ϕstu (s, c)
+
+∣∣∣ ≤ ∥ θt∥2 ∥ϕstu (s, c)∥2 ≤ B.
+
+Equivalently, −B ≤ θ⊤ 
+
+> t
+
+ϕstu (s, c) ≤ B. Because u 7 → eu is increasing, we have 
+
+e−B ≤ exp 
+
+(
+
+θ⊤ 
+
+> t
+
+ϕstu (s, c))
+
+≤ eB , c ∈ B (s).
+
+Now fix any b ∈ B (s). Applying these bounds to the full softmax expression yields 
+
+πstu, θt (b | s) = exp 
+
+(
+
+θ⊤ 
+
+> t
+
+ϕstu (s, b))∑
+
+> c∈B (s)
+
+exp 
+
+(
+
+θ⊤ 
+
+> t
+
+ϕstu (s, c)) ≥ e−B
+
+∑
+
+> c∈B (s)
+
+exp 
+
+(
+
+θ⊤ 
+
+> t
+
+ϕstu (s, c))
+
+≥ e−B
+
+∑
+
+> c∈B (s)
+
+eB = e−B
+
+|B (s)|eB = e−2B
+
+|B (s)| .
+
+(C.8) The first equality is the definition of the student policy. The first inequality replaces its numerator 34 by the lower bound e−B , leaving the positive denominator unchanged. The second inequality increases each denominator term to its upper bound eB ; increasing a positive denominator decreases the fraction. The lower bound applies only to legal tokens; illegal tokens have probability zero. At an absorbing prefix before the terminal horizon, B(s) = {null }, and the softmax formula gives 
+
+πstu, θt (null | s) = exp 
+
+(
+
+θ⊤ 
+
+> t
+
+ϕstu (s, null ))
+
+exp (θ⊤ 
+
+> t
+
+ϕstu (s, null )) = 1 ≥ e−2B .
+
+Thus (C.8) also holds at these prefixes. To prove the matrix inequality, fix a deterministic vector v ∈ RD and notice v⊤ztz⊤ 
+
+> t
+
+v = ( v⊤zt)2.Conditional expectation is linear, and v is fixed, so we have 
+
+v⊤E
+
+[
+
+ztz⊤ 
+
+> t
+
+| F t
+
+]
+
+v = E
+
+[
+
+v⊤ztz⊤ 
+
+> t
+
+v | F t
+
+]
+
+= E
+
+[
+
+(v⊤zt)2 | F t
+
+]
+
+.
+
+We now expand this expectation in the order of sampling. The source index it and branching time 
+
+ht are fresh, independent, uniform draws. Hence, we have Pr (it = i, ht = h | F t) = 1 
+
+> nH
+
+.The conditional law of total expectation gives us 
+
+E
+
+[
+
+(v⊤zt)2 | F t
+
+]
+
+=
+
+> n
+
+∑
+
+> i=1
+> H
+
+∑
+
+> h=1
+
+Pr (it = i, ht = h | F t) E
+
+[
+
+(v⊤zt)2 | F t, it = i, ht = h
+
+]
+
+= 1
+
+nH 
+
+> n
+
+∑
+
+> i=1
+> H
+
+∑
+
+> h=1
+
+E
+
+[
+
+(v⊤zt)2 | F t, it = i, ht = h
+
+]
+
+.
+
+For fixed i, h, let ai,1 :h denote a possible realization of the first h teacher tokens, and define si,h :=(xi, ai,1 :h−1). Conditioning on it = i, ht = h, at,1 :h = ai,1 :h, the definitions of st and ct,1 yield 
+
+st = si,h and ct,1 = ai,h. The only remaining randomness in zt is the fresh student token. For each 
+
+b ∈ B (si,h), its conditional probability is 
+
+Pr (ct,0 = b | F t, it = i, ht = h, at,1 :h = ai,1 :h) = πstu, θt (b | si,h).
+
+If ct,0 = b, substitution into the recalled definition gives 
+
+zt = ϕ(si,h, ai,h) − ϕ(si,h, b).
+
+Thus, we have 
+
+E
+
+[
+
+(v⊤zt)2 | F t, it = i, ht = h, at,1 :h = ai,1 :h
+
+]
+
+= ∑
+
+> b∈B (si,h)
+
+πstu, θt (b | si,h) (
+
+v⊤[ϕ(si,h, ai,h) − ϕ(si,h, b)] )2
+
+.
+
+The frozen teacher’s prefix law is πtea (ai,1 :h | xi) = ∏hk=1 πtea (ai,k | xi, ai,1 :k−1). The remaining teacher suffix at,h+1:H is absent from zt; summing its conditional probabilities gives one. For fixed it = i and ht = h, the preceding calculation conditions on the teacher tokens at,1 :h = ai,1 :h
+
+and averages over the student token ct,0 . We now average over all possible teacher token sequences 35 ai,1 :h, each weighted by its probability πtea (ai,1 :h | xi). By the law of total expectation, this removes the conditioning on at,1 :h and gives E[( v⊤zt)2 | F t, it = i, ht = h].
+
+v⊤E
+
+[
+
+ztz⊤ 
+
+> t
+
+| F t
+
+]
+
+v
+
+= 1
+
+nH 
+
+> n
+
+∑
+
+> i=1
+> H
+
+∑
+
+> h=1
+
+Eai,1 :h∼πtea (·| xi)
+
+ ∑
+
+> b∈B (si,h)
+
+πstu, θt (b | si,h) (
+
+v⊤[ϕ(si,h, ai,h) − ϕ(si,h, b)] )2 ∣∣∣∣ Ft
+
+
+
+≥ e−2B
+
+nH 
+
+> n
+
+∑
+
+> i=1
+> H
+
+∑
+
+> h=1
+
+Eai,1 :h∼πtea (·| xi)
+
+ 1
+
+|B (si,h)|
+
+∑
+
+> b∈B (si,h)
+
+(
+
+v⊤[ϕ(si,h, ai,h) − ϕ(si,h, b)] )2 ∣∣∣∣ Ft
+
+
+
+= e−2B v⊤
+
+( 1
+
+H
+
+> H
+
+∑
+
+> h=1
+
+Gh
+
+)
+
+v = e−2B v⊤Gjoint v.
+
+The inequality holds by (C.8), and the second equality is by definition (3.7). The final equality uses Gjoint = H−1 ∑Hh=1 Gh.Here ai,1 :h is an integration variable, not an additional rollout: each round still draws only one source index and one teacher answer. Since the calculation holds for every v, it proves the matrix inequality in (B.5). The feature norm bound also gives 
+
+∥zt∥2 = ∥ϕ(st, ct,1 ) − ϕ(st, ct,0 )∥2 ≤ ∥ ϕ(st, ct,1 )∥2 + ∥ϕ(st, ct,0 )∥2 ≤ 2. 
+
+Thus, we have proved (B.5), and we will prove the drift bound (B.6) next. Starting from the definition of the actual stochastic update in Algorithm 1, we have 
+
+gt := Itzt
+
+[
+
+σ(z⊤ 
+
+> t
+
+wt) − Yt
+
+]
+
+.
+
+Recall that It ∈ { 0, 1 } is the acceptance indicator, Yt ∈ { 0, 1 } is the selected branch index, and 
+
+σ(u) = ( 1 + e−u)−1.Conditioned on Ft, st, ct,1 , ct,0 , the parameter wt is Ft-measurable, w⋆λ is fixed, and zt = ϕ(st, ct,1 ) −
+
+ϕ(st, ct,0 ) is also determined. Thus, wt, zt, and σ(z⊤ 
+
+> t
+
+wt) are measurable under this conditioning and It and Yt are still randomized. First, by definition of gt, we have 
+
+(wt − w⋆λ)⊤gt = ( wt − w⋆λ)⊤ {
+
+Itzt[σ(z⊤ 
+
+> t
+
+wt) − Yt]}
+
+= It
+
+[
+
+(wt − w⋆λ)⊤zt
+
+]
+
+[σ(z⊤ 
+
+> t
+
+wt) − Yt] = z⊤ 
+
+> t
+
+(wt − w⋆λ) It[σ(z⊤ 
+
+> t
+
+wt) − Yt].
+
+Taking conditional expectations and pulling out the measurable scalars, we have 
+
+E
+
+[
+
+(wt − w⋆λ)⊤gt | F t, st, ct,1 , ct,0 
+
+]
+
+= z⊤ 
+
+> t
+
+(wt − w⋆λ) E
+
+[
+
+It[σ(z⊤ 
+
+> t
+
+wt) − Yt] | F t, st, ct,1 , ct,0 
+
+]
+
+.
+
+We evaluate the remaining expectation by splitting the two possible values of It. When It = 0 the 36 product is zero; when It = 1 it is σ(z⊤ 
+
+> t
+
+wt) − Yt. By the conditional law of total expectation, 
+
+E
+
+[
+
+It[σ(z⊤ 
+
+> t
+
+wt) − Yt] | F t, st, ct,1 , ct,0 
+
+]
+
+= Pr (It = 0 | F t, st, ct,1 , ct,0 ) · 0 + Pr (It = 1 | F t, st, ct,1 , ct,0 ) × E
+
+[
+
+σ(z⊤ 
+
+> t
+
+wt) − Yt | It = 1, Ft, st, ct,1 , ct,0 
+
+]
+
+= Pr (It = 1 | F t, st, ct,1 , ct,0 ) ×
+
+[
+
+σ(z⊤ 
+
+> t
+
+wt) − E[Yt | It = 1, Ft, st, ct,1 , ct,0 ]
+
+]
+
+.
+
+Because Yt is binary, its conditional expectation is the conditional probability that it equals one. By Lemma B.2, we have that 
+
+E[Yt | It = 1, Ft, st, ct,1 , ct,0 ]=0 · Pr (Yt = 0 | It = 1, Ft, st, ct,1 , ct,0 ) + 1 · Pr (Yt = 1 | It = 1, Ft, st, ct,1 , ct,0 )= Pr (Yt = 1 | It = 1, Ft, st, ct,1 , ct,0 ) = σ(z⊤ 
+
+> t
+
+w⋆λ).
+
+Plugging this back, we obtain 
+
+E
+
+[
+
+(wt − w⋆λ)⊤gt | F t, st, ct,1 , ct,0 
+
+]
+
+= z⊤ 
+
+> t
+
+(wt − w⋆λ) Pr (It = 1 | F t, st, ct,1 , ct,0 ) ×
+
+[
+
+σ(z⊤ 
+
+> t
+
+wt) − σ(z⊤ 
+
+> t
+
+w⋆λ)]
+
+.
+
+(C.9) Finally, we pull out the fixed vector zt instead of the scalar inner product, which gives the corre-sponding vector conditional mean: 
+
+E[gt | F t, st, ct,1 , ct,0 ] = zt E
+
+[
+
+It[σ(z⊤ 
+
+> t
+
+wt) − Yt] | F t, st, ct,1 , ct,0 
+
+]
+
+= Pr (It = 1 | F t, st, ct,1 , ct,0 ) zt ×
+
+[
+
+σ(z⊤ 
+
+> t
+
+wt) − σ(z⊤ 
+
+> t
+
+w⋆λ)]
+
+. (C.10) By direct differentiation, we have σ′(u) = e−u 
+
+> (1+e−u)2
+
+= 12+eu+e−u > 0. The denominator is even and nondecreasing in |u|, because its derivative on [0, ∞) is eu − e−u ≥ 0. Hence σ′(u) ≥ σ′(2B)
+
+whenever |u| ≤ 2B. For r ∈ [0, 1 ], convexity of W places w⋆λ + r(wt − w⋆λ) in W , and therefore we have ∣∣∣z⊤ 
+
+> t
+
+[w⋆λ + r(wt − w⋆λ)] 
+
+∣∣∣ ≤ ∥ zt∥2 ∥w⋆λ + r(wt − w⋆λ)∥2 ≤ 2B.
+
+Now, we apply the fundamental theorem of calculus along this segment to get 
+
+σ(z⊤ 
+
+> t
+
+wt) − σ(z⊤ 
+
+> t
+
+w⋆λ) = 
+
+∫ 10
+
+ddr σ
+
+(
+
+z⊤ 
+
+> t
+
+[w⋆λ + r(wt − w⋆λ)] )
+
+dr 
+
+=
+
+∫ 10
+
+σ′(
+
+z⊤ 
+
+> t
+
+[w⋆λ + r(wt − w⋆λ)] )
+
+z⊤ 
+
+> t
+
+(wt − w⋆λ) dr 
+
+= z⊤ 
+
+> t
+
+(wt − w⋆λ)
+
+∫ 10
+
+σ′(
+
+z⊤ 
+
+> t
+
+[w⋆λ + r(wt − w⋆λ)] )
+
+dr .
+
+37 Multiplying the equality by z⊤ 
+
+> t
+
+(wt − w⋆λ) gives 
+
+z⊤ 
+
+> t
+
+(wt − w⋆λ) [
+
+σ(z⊤ 
+
+> t
+
+wt) − σ(z⊤ 
+
+> t
+
+w⋆λ)]
+
+= [
+
+z⊤ 
+
+> t
+
+(wt − w⋆λ)]2 ∫ 10
+
+σ′(
+
+z⊤ 
+
+> t
+
+[w⋆λ + r(wt − w⋆λ)] )
+
+dr 
+
+≥
+
+[
+
+z⊤ 
+
+> t
+
+(wt − w⋆λ)]2 ∫ 10
+
+σ′(2B) dr 
+
+= σ′(2B) [
+
+z⊤ 
+
+> t
+
+(wt − w⋆λ)]2
+
+≥ 0. (C.11) Recall that It = 1{Ut ≤ e(Rt−1)/λ} and that Lemma B.2, (B.3) already establishes 
+
+Pr (It = 1 | F t, st, ct,1 , ct,0 ) ≥ e−1/λ.
+
+Combining all these together, we obtain 
+
+E
+
+[
+
+(wt − w⋆λ)⊤gt | F t, st, ct,1 , ct,0 
+
+]
+
+= Pr (It = 1 | F t, st, ct,1 , ct,0 ) z⊤ 
+
+> t
+
+(wt − w⋆λ) [
+
+σ(z⊤ 
+
+> t
+
+wt) − σ(z⊤ 
+
+> t
+
+w⋆λ)]
+
+≥ Pr (It = 1 | F t, st, ct,1 , ct,0 ) σ′(2B) [
+
+z⊤ 
+
+> t
+
+(wt − w⋆λ)]2
+
+≥ e−1/λσ′(2B) [
+
+z⊤ 
+
+> t
+
+(wt − w⋆λ)]2
+
+.
+
+The equality was derived by (C.9). The first inequality uses (C.11) and The second one is by (C.5). Now, we apply the tower property once more to obtain 
+
+E
+
+[
+
+(wt − w⋆λ)⊤gt | F t
+
+]
+
+= E
+
+[
+
+E
+
+[
+
+(wt − w⋆λ)⊤gt | F t, st, ct,1 , ct,0 
+
+] ∣ ∣∣ Ft
+
+]
+
+≥ E
+
+[
+
+e−1/λσ′(2B) [
+
+z⊤ 
+
+> t
+
+(wt − w⋆λ)]2 ∣∣∣∣ Ft
+
+]
+
+= e−1/λσ′(2B)E
+
+[[
+
+z⊤ 
+
+> t
+
+(wt − w⋆λ)]2 ∣∣∣∣ Ft
+
+]
+
+.
+
+Notice that 
+
+[
+
+z⊤ 
+
+> t
+
+(wt − w⋆λ)]2
+
+= ( wt − w⋆λ)⊤ztz⊤ 
+
+> t
+
+(wt − w⋆λ). Because wt − w⋆λ is Ft-measurable, by the linearity of conditional expectation, we have 
+
+E
+
+[[
+
+z⊤ 
+
+> t
+
+(wt − w⋆λ)]2 ∣∣∣∣ Ft
+
+]
+
+= ( wt − w⋆λ)⊤E
+
+[
+
+ztz⊤ 
+
+> t
+
+| F t
+
+]
+
+(wt − w⋆λ).
+
+Using the matrix lower bound (B.5), followed by Gjoint ⪰ μjoint ID, we have 
+
+E
+
+[
+
+(wt − w⋆λ)⊤gt
+
+∣∣∣ Ft
+
+]
+
+≥ e−1/λσ′(2B)( wt − w⋆λ)⊤E
+
+[
+
+ztz⊤ 
+
+> t
+
+| F t
+
+]
+
+(wt − w⋆λ)
+
+≥ e−1/λe−2B σ′(2B)( wt − w⋆λ)⊤Gjoint (wt − w⋆λ)
+
+≥ e−1/λe−2B σ′(2B)μjoint ∥wt − w⋆λ∥22
+
+= γ∥wt − w⋆λ∥22.
+
+Here ID is the D-dimensional identity matrix. The final equality uses the definition of γ in (4.2). By the Cauchy-Schwarz inequality, we have ∥gt∥2 = It∥zt∥2 |σ(z⊤ 
+
+> t
+
+wt) − Yt| ≤ 2. We prove (B.6). For any u ∈ RD, let p = Proj W (u). Since W is compact and convex, p exists and is unique. For any r ∈ W , the segment p + v(r − p), 0 ≤ v ≤ 1, lies in W . The right derivative at zero of its 38 squared distance to u is nonnegative: 
+
+0 ≤ ddv ∥p + v(r − p) − u∥22
+
+∣∣∣∣v=0+
+
+= 2⟨p − u, r − p⟩.
+
+Thus ⟨u − p, r − p⟩ ≤ 0. Taking r = w⋆λ and expanding a square gives 
+
+∥u − w⋆λ∥22 = ∥u − p∥22 + ∥p − w⋆λ∥22 + 2⟨u − p, p − w⋆λ⟩ ≥ ∥ p − w⋆λ∥22,
+
+because the cross term and the first squared norm are nonnegative. We use this inequality with 
+
+u = wt − gt/[γ(t + 2)] and p = wt+1 to get 
+
+∥wt+1 − w⋆λ∥22 ≤
+
+∥∥∥∥wt − w⋆λ − gt
+
+γ(t + 2)
+
+∥∥∥∥
+
+> 22
+
+= ∥wt − w⋆λ∥22 − 2(wt − w⋆λ)⊤gt
+
+γ(t + 2) + ∥gt∥22
+
+γ2(t + 2)2 .
+
+Conditioning on Ft, we apply (B.5) and (B.6) to get 
+
+E
+
+[
+
+∥wt+1 − w⋆λ∥22
+
+∣∣∣ Ft
+
+]
+
+≤
+
+(
+
+1 − 2
+
+t + 2
+
+)
+
+∥wt − w⋆λ∥22 + 4
+
+γ2(t + 2)2 = tt + 2 ∥wt − w⋆λ∥22 + 4
+
+γ2(t + 2)2 .
+
+(C.12) We now prove (B.7) by induction. At t = 0 the first coefficient is zero. Taking expectations gives 
+
+E
+
+[
+
+∥w1 − w⋆λ∥22
+
+]
+
+≤ 1
+
+γ2 ≤ 43γ2 .
+
+This is the base case of (B.7). Suppose its assertion holds at some t ≥ 1. By (C.12), we have 
+
+E
+
+[
+
+∥wt+1 − w⋆λ∥22
+
+]
+
+≤ tt + 24
+
+γ2(t + 2) + 4
+
+γ2(t + 2)2 = 4(t + 1)
+
+γ2(t + 2)2 ≤ 4
+
+γ2(t + 3) .
+
+The final inequality follows from (t + 1)( t + 3) = ( t + 2)2 − 1 ≤ (t + 2)2. This proves (B.7). For the increment bound, apply the same projection variational inequality with r = wt ∈ W and the same u, p as above. It implies 
+
+∥wt+1 − wt∥22 ≤ ⟨ u − wt, wt+1 − wt⟩ ≤ ∥ u − wt∥2 ∥wt+1 − wt∥2 = ∥gt∥2
+
+γ(t + 2) ∥wt+1 − wt∥2.
+
+Thus, we obtain that ∥wt+1 − wt∥2 ≤ 2 
+
+> γ(t+2)
+
+for every t ≥ 0.
+
+Proof of Lemma B.4. Recall the common feasible sets and the two softmax policies. The set B(s)
+
+contains the legal next tokens at a nonterminal prefix s, and A(x) contains the feasible complete answers of length H for prompt x. These sets are finite and do not depend on either parameter. Every nonterminal reachable state has at least one legal token. For a ∈ B (s),
+
+πw (a | s) = exp (w⊤ϕ(s, a)) 
+
+∑ 
+
+> b∈B (s)
+
+exp (w⊤ϕ(s, b)) , πstu, θ (a | s) = exp (θ⊤ϕstu (s, a)) 
+
+∑ 
+
+> b∈B (s)
+
+exp (θ⊤ϕstu (s, b)) .
+
+39 The feature maps are fixed and satisfy 
+
+∥ϕ(s, a)∥2 ≤ 1, ∥ϕstu (s, a)∥2 ≤ 1, ∥w∥2 ≤ B, ∥θ∥2 ≤ B.
+
+For a fixed feasible answer, sh = ( x, a1:h−1), the autoregressive definition gives 
+
+πw (a1:H | x) = 
+
+> H
+
+∏
+
+> h=1
+
+πw (ah | sh), πstu, θ (a1:H | x) = 
+
+> H
+
+∏
+
+> h=1
+
+πstu, θ (ah | sh).
+
+Both probabilities are strictly positive on A(x).Starting from the definition of Zt and the autoregressive product, 
+
+Zt(ϑ; x, a1:H ) = λ log πstu, ϑ(a1:H | x)
+
+πwt (a1:H | x) = λ log 
+
+∏Hh=1 πstu, ϑ(ah | sh)
+
+∏Hh=1 πwt (ah | sh)=λ
+
+> H
+
+∑
+
+> h=1
+
+[log πstu, ϑ(ah | sh) − log πwt (ah | sh)] =λ
+
+> H
+
+∑
+
+> h=1
+
+ϑ⊤ϕstu (sh, ah) − w⊤ 
+
+> t
+
+ϕ(sh, ah) − log 
+
+ ∑
+
+> b∈B (sh)
+
+eϑ⊤ϕstu (sh,b)
+
+ + log 
+
+ ∑
+
+> b∈B (sh)
+
+ew⊤ 
+
+> tϕ(sh,b)
+
+.
+
+We now bound the token log ratios in this exact expression. The calculation is uniform in the parameters, so we carry it out for arbitrary w ∈ W and θ ∈ Θ before substituting w = wt and 
+
+θ = ϑ. By the Cauchy-Schwarz inequality, for every legal token b, we have that 
+
+|w⊤ϕ(s, b)| ≤ ∥ w∥2∥ϕ(s, b)∥2 ≤ B, |θ⊤ϕstu (s, b)| ≤ ∥ θ∥2∥ϕstu (s, b)∥2 ≤ B.
+
+Exponentiation preserves these inequalities, so we get 
+
+e−B ≤ exp (w⊤ϕ(s, b)) ≤ eB , e−B ≤ exp (θ⊤ϕstu (s, b)) ≤ eB .
+
+Summing the lower and upper bounds over all legal tokens gives 
+
+|B (s)|e−B ≤ ∑
+
+> b∈B (s)
+
+exp (w⊤ϕ(s, b)) ≤ |B (s)|eB , |B (s)|e−B ≤ ∑
+
+> b∈B (s)
+
+exp (θ⊤ϕstu (s, b)) ≤ |B (s)|eB .
+
+The numerators and denominators are positive. Therefore, substituting the preceding bounds yields 
+
+πw (a | s) ≥ e−B
+
+|B (s)|eB = e−2B
+
+|B (s)| , πw (a | s) ≤ eB
+
+|B (s)|e−B = e2B
+
+|B (s)| , (C.13) 
+
+πstu, θ (a | s) ≥ e−B
+
+|B (s)|eB = e−2B
+
+|B (s)| , πstu, θ (a | s) ≤ eB
+
+|B (s)|e−B = e2B
+
+|B (s)| . (C.14) Hence, for πstu ,θ and πw, we have 
+
+πstu, θ (a | s)
+
+πw (a | s) ≥ e−2B /|B (s)|
+
+e2B /|B (s)| = e−4B , πstu, θ (a | s)
+
+πw (a | s) ≤ e2B /|B (s)|
+
+e−2B /|B (s)| = e4B .
+
+We thus obtain −4B ≤ log πstu, θ (a|s)  
+
+> πw(a|s)
+
+≤ 4B. Finally, we have that 40 ∣∣∣∣log πstu, θ (a1:H | x)
+
+πw (a1:H | x)
+
+∣∣∣∣ =
+
+∣∣∣∣∣log 
+
+> H
+
+∏
+
+> h=1
+
+πstu, θ (ah | sh)
+
+πw (ah | sh)
+
+∣∣∣∣∣ =
+
+∣∣∣∣∣
+
+> H
+
+∑
+
+> h=1
+
+log πstu, θ (ah | sh)
+
+πw (ah | sh)
+
+∣∣∣∣∣ ≤
+
+> H
+
+∑
+
+> h=1
+
+∣∣∣∣log πstu, θ (ah | sh)
+
+πw (ah | sh)
+
+∣∣∣∣ ≤ 4BH .
+
+In particular, setting w = wt and θ = ϑ gives 
+
+|Zt(ϑ; x, a1:H )| = λ
+
+∣∣∣∣log πstu, ϑ(a1:H | x)
+
+πwt (a1:H | x)
+
+∣∣∣∣ ≤ 4λBH .
+
+This proves (B.9). 
+
+Proof of Lemma B.5. Starting from the definition of Cw (θ), applying Lemma B.4, we have 
+
+Cw (θ) = λm
+
+> m
+
+∑
+
+> j=1
+
+∑ 
+
+> a1:H∈A (
+
+˜xj )
+
+πstu, θ (a1:H | ˜xj ) log πstu, θ (a1:H | ˜xj )
+
+πw (a1:H | ˜xj )
+
+≤ λm
+
+> m
+
+∑
+
+> j=1
+
+∑ 
+
+> a1:H∈A (
+
+˜xj )
+
+πstu, θ (a1:H | ˜xj )
+
+∣∣∣∣∣log πstu, θ (a1:H | ˜xj )
+
+πw (a1:H | ˜xj )
+
+∣∣∣∣∣
+
+≤ 4λBH m
+
+> m
+
+∑
+
+> j=1
+
+∑ 
+
+> a1:H∈A (
+
+˜xj )
+
+πstu, θ (a1:H | ˜xj )
+
+︸ ︷︷ ︸
+
+> =1
+
+= 4λBH .
+
+For the lower bound, apply the KL non-negativity and we immediately observe that 
+
+Cw (θ) = λm
+
+> m
+
+∑
+
+> j=1
+
+KL (πstu, θ (· | ˜xj ) ∥ πw (· | ˜xj )) ≥ 0. 
+
+Here λ/m > 0, so summing the nonnegative divergences preserves the inequality. Together with the upper bound, this proves (B.10). Now, we bound the derivative of Cw, define the trajectory score 
+
+Sstu, θ (x, a1:H ) := ∇θ log πstu, θ (a1:H | x).
+
+We first bound Sstu ,θ. Fix a prompt x and parameter θ, by direct differentiation, we have 
+
+Sstu, θ (x, a1:H ) = ∇θ log πstu, θ (a1:H | x) = ∇θ log 
+
+> H
+
+∏
+
+> h=1
+
+πstu, θ (ah | sh) = 
+
+> H
+
+∑
+
+> h=1
+
+∇θ log πstu, θ (ah | sh).
+
+41 We evaluate each derivative in this expression, by the linear softmax parametrization, we have 
+
+log πstu, θ (ah | sh) = θ⊤ϕstu (sh, ah) − log 
+
+ ∑
+
+> b∈B (sh)
+
+eθ⊤ϕstu (sh,b)
+
+ ,
+
+∇θ log πstu, θ (ah | sh) = ϕstu (sh, ah) −
+
+∑ 
+
+> b∈B (sh)
+
+eθ⊤ϕstu (sh,b)ϕstu (sh, b)
+
+∑ 
+
+> c∈B (sh)
+
+eθ⊤ϕstu (sh,c)
+
+= ϕstu (sh, ah) − ∑
+
+> b∈B (sh)
+
+eθ⊤ϕstu (sh,b)
+
+∑ 
+
+> c∈B (sh)
+
+eθ⊤ϕstu (sh,c) ϕstu (sh, b)= ϕstu (sh, ah) − ∑
+
+> b∈B (sh)
+
+πstu, θ (b | sh)ϕstu (sh, b)=: Dθ,h(x, a1:h).
+
+Substituting the computed token derivative into the score expansion at the start of this step yields 
+
+Sstu, θ (x, a1:H ) = 
+
+> H
+
+∑
+
+> h=1
+
+∇θ log πstu, θ (ah | sh) = 
+
+> H
+
+∑
+
+> h=1
+
+Dθ,h(x, a1:h).
+
+The pointwise norm of each increment is bounded by 
+
+∥Dθ,h(x, a1:h)∥2 =
+
+∥∥∥∥∥∥ϕstu (sh, ah) − ∑
+
+> b∈B (sh)
+
+πstu, θ (b | sh)ϕstu (sh, b)
+
+∥∥∥∥∥∥2
+
+≤ ∥ ϕstu (sh, ah)∥2 +
+
+∥∥∥∥∥∥∑
+
+> b∈B (sh)
+
+πstu, θ (b | sh)ϕstu (sh, b)
+
+∥∥∥∥∥∥2
+
+≤ 1 + ∑
+
+> b∈B (sh)
+
+πstu, θ (b | sh)∥ϕstu (sh, b)∥2
+
+≤ 1 + ∑
+
+> b∈B (sh)
+
+πstu, θ (b | sh) = 2. 
+
+Consequently, we have 
+
+∥Sstu, θ (x, a1:H )∥2 =
+
+∥∥∥∥∥
+
+> H
+
+∑
+
+> h=1
+
+Dθ,h(x, a1:h)
+
+∥∥∥∥∥2
+
+≤
+
+> H
+
+∑
+
+> h=1
+
+∥Dθ,h(x, a1:h)∥2 ≤ 2H. (C.15) To obtain the sharper second-moment bound, we use the conditional centering of the increments. 42 Given x, a1:h−1, the next token has law ah ∼ πstu, θ (· | sh). Hence, we have 
+
+Eah∼πstu, θ (·| sh)[Dθ,h(x, a1:h) | x, a1:h−1]= ∑
+
+> b∈B
+
+(sh)
+
+πstu, θ (b | sh)
+
+ϕstu (sh, b) − ∑
+
+> c∈B
+
+(sh)
+
+πstu, θ (c | sh)ϕstu (sh, c)
+
+
+
+= ∑
+
+> b∈B
+
+(sh)
+
+πstu, θ (b | sh)ϕstu (sh, b) −
+
+ ∑
+
+> b∈B
+
+(sh)
+
+πstu, θ (b | sh)
+
+ ∑
+
+> c∈B
+
+(sh)
+
+πstu, θ (c | sh)ϕstu (sh, c)
+
+
+
+= ∑
+
+> b∈B
+
+(sh)
+
+πstu, θ (b | sh)ϕstu (sh, b) − ∑
+
+> c∈B
+
+(sh)
+
+πstu, θ (c | sh)ϕstu (sh, c) = 0. 
+
+The second equality uses that the probabilities sum to one. For the conditional second moment, expanding the square using ∥u − v∥22 = ∥u∥22 − 2u⊤v + ∥v∥22, we get 
+
+Eah∼πstu, θ (·| sh)
+
+[
+
+∥Dθ,h(x, a1:h)∥22
+
+∣∣∣ x, a1:h−1
+
+]
+
+= ∑
+
+> b∈B
+
+(sh)
+
+πstu, θ (b | sh)
+
+∥∥∥∥∥∥ϕstu (sh, b) − ∑
+
+> c∈B
+
+(sh)
+
+πstu, θ (c | sh)ϕstu (sh, c)
+
+∥∥∥∥∥∥
+
+> 22
+
+= ∑
+
+> b∈B
+
+(sh)
+
+πstu, θ (b | sh)∥ϕstu (sh, b)∥22 − 2
+
+ ∑
+
+> b∈B
+
+(sh)
+
+πstu, θ (b | sh)ϕstu (sh, b)
+
+ 
+
+> ⊤
+
+ ∑
+
+> c∈B
+
+(sh)
+
+πstu, θ (c | sh)ϕstu (sh, c)
+
+
+
++
+
+ ∑
+
+> b∈B
+
+(sh)
+
+πstu, θ (b | sh)
+
+∥∥∥∥∥∥∑
+
+> c∈B
+
+(sh)
+
+πstu, θ (c | sh)ϕstu (sh, c)
+
+∥∥∥∥∥∥
+
+> 22
+
+= ∑
+
+> b∈B
+
+(sh)
+
+πstu, θ (b | sh)∥ϕstu (sh, b)∥22 − 2
+
+∥∥∥∥∥∥∑
+
+> c∈B
+
+(sh)
+
+πstu, θ (c | sh)ϕstu (sh, c)
+
+∥∥∥∥∥∥
+
+> 22
+
++
+
+∥∥∥∥∥∥∑
+
+> c∈B
+
+(sh)
+
+πstu, θ (c | sh)ϕstu (sh, c)
+
+∥∥∥∥∥∥
+
+> 22
+
+= ∑
+
+> b∈B
+
+(sh)
+
+πstu, θ (b | sh)∥ϕstu (sh, b)∥22 −
+
+∥∥∥∥∥∥∑
+
+> c∈B
+
+(sh)
+
+πstu, θ (c | sh)ϕstu (sh, c)
+
+∥∥∥∥∥∥
+
+> 22
+
+≤ ∑
+
+> b∈B
+
+(sh)
+
+πstu, θ (b | sh)∥ϕstu (sh, b)∥22 ≤ ∑
+
+> b∈B
+
+(sh)
+
+πstu, θ (b | sh) = 1. 
+
+If h < k , then Dθ,h(x, a1:h) is already determined by x, a1:k−1. Marginalizing the suffix after time 43 k and then applying iterated expectation, we get 
+
+Ea1:H ∼πstu, θ (·| x)
+
+[
+
+Dθ,h(x, a1:h)⊤Dθ,k (x, a1:k )]
+
+=Ea1:k−1∼πstu, θ (·| x)
+
+Eak ∼πstu, θ (·| sk )
+
+[
+
+Dθ,h(x, a1:h)⊤Dθ,k (x, a1:k )
+
+∣∣∣ x, a1:k−1
+
+] 
+
+=Ea1:k−1∼πstu, θ (·| x)
+
+Dθ,h(x, a1:h)⊤Eak ∼πstu, θ (·| sk )[Dθ,k (x, a1:k ) | x, a1:k−1]
+
+
+
+=Ea1:k−1∼πstu, θ (·| x)
+
+[
+
+Dθ,h(x, a1:h)⊤0
+
+]
+
+= 0. 
+
+Pulling the earlier increment outside the inner expectation is valid precisely because the earlier increment is measurable given that prefix. By the linearity of conditional means, we further have 
+
+Ea1:H ∼πstu, θ (·| x)[Sstu, θ (x, a1:H )] = 
+
+H∑
+
+h=1
+
+Ea1:h−1∼πstu, θ (·| x)
+
+Eah∼πstu, θ (·| sh)[Dθ,h(x, a1:h) | x, a1:h−1]
+
+
+
+=
+
+H∑
+
+h=1
+
+Ea1:h−1∼πstu, θ (·| x)[0] = 0. 
+
+When h = 1, the prefix is empty and its expectation has just one possible value. Expanding the square of the sum of the increments, including all cross terms, gives 
+
+Ea1:H ∼πstu, θ (·| x)
+
+[
+
+∥Sstu, θ (x, a1:H )∥22
+
+]
+
+=Ea1:H ∼πstu, θ (·| x)
+
+∥∥∥∥∥
+
+H∑
+
+h=1
+
+Dθ,h(x, a1:h)
+
+∥∥∥∥∥
+
+22
+
+
+
+=
+
+H∑
+
+h=1
+
+Ea1:H ∼πstu, θ (·| x)
+
+[
+
+∥Dθ,h(x, a1:h)∥22
+
+]
+
++ 2 ∑
+
+1≤h<k ≤H
+
+Ea1:H ∼πstu, θ (·| x)
+
+[
+
+Dθ,h(x, a1:h)⊤Dθ,k (x, a1:k )]︸ ︷︷ ︸
+
+=0
+
+=
+
+H∑
+
+h=1
+
+Ea1:h−1∼πstu, θ (·| x)
+
+Eah∼πstu, θ (·| sh)
+
+[
+
+∥Dθ,h(x, a1:h)∥22
+
+∣∣∣ x, a1:h−1
+
+] 
+
+≤
+
+H∑
+
+h=1
+
+Ea1:h−1∼πstu, θ (·| x)[1] = H.
+
+We have therefore proved the two score identities 
+
+Ea1:H ∼πstu, θ (·| x)[Sstu, θ (x, a1:H )] = 0, Ea1:H ∼πstu, θ (·| x)
+
+[
+
+∥Sstu, θ (x, a1:H )∥22
+
+]
+
+≤ H. (C.16) 44 Now, we can bound ∇θCw (θ). Fix w while differentiating with respect to θ.
+
+∇θCw (θ) = ∇θ
+
+ λm
+
+> m
+
+∑
+
+> j=1
+
+∑ 
+
+> a1:H∈A (
+
+˜xj )
+
+πstu, θ (a1:H | ˜xj ) log πstu, θ (a1:H | ˜xj )
+
+πw (a1:H | ˜xj )
+
+
+
+= λm
+
+> m
+
+∑
+
+> j=1
+
+∑ 
+
+> a1:H∈A (
+
+˜xj )
+
+∇θ
+
+πstu, θ (a1:H | ˜xj ) log πstu, θ (a1:H | ˜xj )
+
+πw (a1:H | ˜xj )
+
+.
+
+We now expand the derivative of each summand. First, by direct algebra, for any x, we have 
+
+∇θπstu, θ (a1:H | x) = ∇θ exp [log πstu, θ (a1:H | x)] = πstu, θ (a1:H | x)∇θ log πstu, θ (a1:H | x)= πstu, θ (a1:H | x)Sstu, θ (x, a1:H ).
+
+Moreover, πw does not depend on θ, and hence we have 
+
+∇θ log πstu, θ (a1:H | x)
+
+πw (a1:H | x) = ∇θ log πstu, θ (a1:H | x) − ∇ θ log πw (a1:H | x) = Sstu, θ (x, a1:H ) − 0. 
+
+Therefore, by the product rule of differentiation, we have 
+
+∇θ
+
+[
+
+πstu, θ (a1:H | x) log πstu, θ (a1:H | x)
+
+πw (a1:H | x)
+
+]
+
+= [ ∇θπstu, θ (a1:H | x)] log πstu, θ (a1:H | x)
+
+πw (a1:H | x) + πstu, θ (a1:H | x)∇θ log πstu, θ (a1:H | x)
+
+πw (a1:H | x)=πstu, θ (a1:H | x)Sstu, θ (x, a1:H ) log πstu, θ (a1:H | x)
+
+πw (a1:H | x) + πstu, θ (a1:H | x)Sstu, θ (x, a1:H ).
+
+For the second term, its sum is the score expectation already evaluated in (C.16): 
+
+∑ 
+
+> a1:H∈A (x)
+
+πstu, θ (a1:H | x)Sstu, θ (x, a1:H ) = Ea1:H ∼πstu, θ (·| x)[Sstu, θ (x, a1:H )] = 0. 
+
+The first equality is the definition of expectation and the second is the first identity in (C.16), applied to this x and θ. Substituting both product-rule terms into the definition of Cw, and then using this zero sum, we obtain 
+
+∇θCw (θ) = λm
+
+> m
+
+∑
+
+> j=1
+
+∑ 
+
+> a1:H∈A (
+
+˜xj )
+
+πstu, θ (a1:H | ˜xj )Sstu, θ (˜xj , a1:H ) × log πstu, θ (a1:H | ˜xj )
+
+πw (a1:H | ˜xj )+ λm
+
+> m
+
+∑
+
+> j=1
+
+∑ 
+
+> a1:H∈A (
+
+˜xj )
+
+πstu, θ (a1:H | ˜xj )Sstu, θ (˜xj , a1:H )
+
+︸ ︷︷ ︸
+
+> =0
+
+= λm
+
+> m
+
+∑
+
+> j=1
+
+Ea1:H ∼πstu, θ (·| ˜xj )
+
+Sstu, θ (˜xj , a1:H ) × log πstu, θ (a1:H | ˜xj )
+
+πw (a1:H | ˜xj )
+
+. (C.17) In the last line, we rewrite the finite weighted sum as an expectation. The quantity we want to control has the exact representation 45 |Cw (θ) − Cw (ϑ)| =
+
+∣∣∣∣∫ 10
+
+ddu Cw
+
+(
+
+ϑ + u(θ − ϑ))
+
+du 
+
+∣∣∣∣ =
+
+∣∣∣∣∫ 10
+
+∇θCw
+
+(
+
+ϑ + u(θ − ϑ))⊤
+
+(θ − ϑ) du 
+
+∣∣∣∣ .
+
+(C.18) These identities follow from the fundamental theorem of calculus. We bound the gradient appearing here first and then return to this expression. By the triangle inequality, the pointwise log-ratio bound in Lemma B.4, we have 
+
+∥∇ θCw (θ)∥2 = λm
+
+∥∥∥∥∥∥
+
+> m
+
+∑
+
+> j=1
+
+∑ 
+
+> a1:H∈A (
+
+˜xj )
+
+πstu, θ (a1:H | ˜xj )Sstu, θ (˜xj , a1:H ) × log πstu, θ (a1:H | ˜xj )
+
+πw (a1:H | ˜xj )
+
+∥∥∥∥∥∥2
+
+≤ λm
+
+> m
+
+∑
+
+> j=1
+
+Ea1:H ∼πstu, θ (·| ˜xj )
+
+∥Sstu, θ (˜xj , a1:H )∥2 ×
+
+∣∣∣∣∣log πstu, θ (a1:H | ˜xj )
+
+πw (a1:H | ˜xj )
+
+∣∣∣∣∣
+
+≤ 4λBH m
+
+> m
+
+∑
+
+> j=1
+
+Ea1:H ∼πstu, θ (·| ˜xj )[∥Sstu, θ (˜xj , a1:H )∥2]
+
+≤ 4λBH m
+
+> m
+
+∑
+
+> j=1
+
+(
+
+Ea1:H ∼πstu, θ (·| ˜xj )
+
+[
+
+∥Sstu, θ (˜xj , a1:H )∥22
+
+]) 1/2
+
+≤ 4λBH m
+
+> m
+
+∑
+
+> j=1
+
+√H = 4λBH 3/2.
+
+In the second inequality, we apply Lemma B.4 and in the last inequality, we apply (C.16). For u ∈ [0, 1 ], the segment between ϑ and θ remains inside the student ball because 
+
+∥ϑ + u(θ − ϑ)∥2 = ∥(1 − u)ϑ + uθ ∥2 ≤ (1 − u)∥ϑ∥2 + u∥θ∥2 ≤ (1 − u)B + uB = B.
+
+Thus, the gradient bound applies at every point of the segment in (C.18). Return to that repre-sentation and we get 
+
+|Cw (θ) − Cw (ϑ)| ≤ 
+
+∫ 10
+
+∣∣∣∣∇θCw
+
+(
+
+ϑ + u(θ − ϑ))⊤
+
+(θ − ϑ)
+
+∣∣∣∣ du 
+
+≤ ∥ θ − ϑ∥2
+
+∫ 10
+
+∥∥∥∇θCw
+
+(
+
+ϑ + u(θ − ϑ))∥ ∥∥2 du 
+
+≤ ∥ θ − ϑ∥2
+
+∫ 10
+
+4λBH 3/2 du = 4λBH 3/2∥θ − ϑ∥2.
+
+This proves (B.11). To prove (B.12), we start with the difference that must be bounded and expand 46 two costs, we have 
+
+Cw (θ) − Cv (θ) = λm
+
+> m
+
+∑
+
+> j=1
+
+∑ 
+
+> a1:H∈A (
+
+˜xj )
+
+πstu, θ (a1:H | ˜xj ) × [log πstu, θ (a1:H | ˜xj )
+
+πw (a1:H | ˜xj ) − log πstu, θ (a1:H | ˜xj )
+
+πv (a1:H | ˜xj ) ]= λm
+
+> m
+
+∑
+
+> j=1
+
+∑ 
+
+> a1:H∈A (
+
+˜xj )
+
+πstu, θ (a1:H | ˜xj ) ×
+
+[
+
+− log πw (a1:H | ˜xj ) + log πv (a1:H | ˜xj )
+
+]
+
+= λm
+
+> m
+
+∑
+
+> j=1
+
+∑ 
+
+> a1:H∈A (
+
+˜xj )
+
+πstu, θ (a1:H | ˜xj ) × [log πv (a1:H | ˜xj ) − log πw (a1:H | ˜xj )] .
+
+(C.19) Thus, it suffices to control the difference of calibration log probabilities. We derive that control from the calibration softmax itself: 
+
+log πw (a | s) = w⊤ϕ(s, a) − log 
+
+ ∑
+
+> b∈B (s)
+
+ew⊤ϕ(s,b)
+
+ ,
+
+∇w log πw (a | s) = ϕ(s, a) −
+
+∑ 
+
+> b∈B (s)
+
+ew⊤ϕ(s,b)ϕ(s, b)
+
+∑ 
+
+> c∈B (s)
+
+ew⊤ϕ(s,c) = ϕ(s, a) − ∑
+
+> b∈B (s)
+
+ew⊤ϕ(s,b)
+
+∑ 
+
+> c∈B (s)
+
+ew⊤ϕ(s,c) ϕ(s, b)=ϕ(s, a) − ∑
+
+> b∈B (s)
+
+πw (b | s)ϕ(s, b).
+
+We bound this derivative by the following: 
+
+∥∇ w log πw (a | s)∥2 =
+
+∥∥∥∥∥∥ϕ(s, a) − ∑
+
+> b∈B (s)
+
+πw (b | s)ϕ(s, b)
+
+∥∥∥∥∥∥2
+
+≤ ∥ ϕ(s, a)∥2 +
+
+∥∥∥∥∥∥∑
+
+> b∈B (s)
+
+πw (b | s)ϕ(s, b)
+
+∥∥∥∥∥∥2
+
+≤ 1 + ∑
+
+> b∈B (s)
+
+πw (b | s)∥ϕ(s, b)∥2 ≤ 1 + ∑
+
+> b∈B (s)
+
+πw (b | s) = 2. 
+
+Since W is convex, v + u(w − v) ∈ W for u ∈ [0, 1 ]. The same one-dimensional integration argument, now displayed for the token log probability, gives 
+
+log πw (a | s) − log πv (a | s) = 
+
+∫ 10
+
+ddu log πv+u(w−v)(a | s) du 
+
+=
+
+∫ 10
+
+∇w log πw (a | s)|⊤ 
+
+> w=v+u(w−v)
+
+(w − v) du .
+
+Consequently, we have 
+
+| log πw (a | s) − log πv (a | s)| ≤ 
+
+∫ 10
+
+∥∥∥ ∇w log πw (a | s)|w=v+u(w−v)
+
+∥∥∥2 ∥w − v∥2 du 
+
+≤
+
+∫ 10
+
+2∥w − v∥2 du = 2∥w − v∥2.
+
+47 Thus, we have 
+
+| log πw (a1:H | x) − log πv (a1:H | x)| =
+
+∣∣∣∣∣
+
+> H
+
+∑
+
+> h=1
+
+[
+
+log πw (ah | sh) − log πv (ah | sh)]∣∣∣∣∣
+
+≤
+
+> H
+
+∑
+
+> h=1
+
+| log πw (ah | sh) − log πv (ah | sh)|≤
+
+> H
+
+∑
+
+> h=1
+
+2∥w − v∥2 = 2H∥w − v∥2.
+
+Now, we return to the cost-difference representation (C.19). Plugging the bound derived above back, we obtain, 
+
+|Cw (θ) − Cv (θ)| ≤ λm
+
+> m
+
+∑
+
+> j=1
+
+∑ 
+
+> a1:H∈A (
+
+˜xj )
+
+πstu, θ (a1:H | ˜xj ) × | log πv (a1:H | ˜xj ) − log πw (a1:H | ˜xj )|≤ 2λH ∥w − v∥2
+
+m
+
+> m
+
+∑
+
+> j=1
+
+∑ 
+
+> a1:H∈A (
+
+˜xj )
+
+πstu, θ (a1:H | ˜xj )= 2λH ∥w − v∥2
+
+m
+
+> m
+
+∑
+
+> j=1
+
+1 = 2λH ∥w − v∥2.
+
+The right-hand side is independent of θ. Taking the supremum over θ ∈ Θ proves (B.12). 
+
+Proof of Lemma B.7. We first verify analyticity, which will also be used in the two Lojasiewicz arguments below. For each fixed legal state s and token a ∈ B (s), the softmax expressions are 
+
+πstu, θ (a | s) = eθ⊤ϕstu (s,a)
+
+∑ 
+
+> b∈B (s)
+
+eθ⊤ϕstu (s,b) ,log πstu, θ (a | s) = θ⊤ϕstu (s, a) − log 
+
+ ∑
+
+> b∈B (s)
+
+eθ⊤ϕstu (s,b)
+
+ .
+
+The exponentials of these linear functions are analytic, and their finite sum is strictly positive on Rd. Since reciprocals and logarithms are analytic on (0, ∞), both displayed expressions are analytic. For each fixed feasible answer, the chain rule for trajectory probabilities gives 
+
+πstu, θ (a1:H | x) = 
+
+> H
+
+∏
+
+> h=1
+
+πstu, θ (ah | x, a1:h−1),log πstu, θ (a1:H | x) = 
+
+> H
+
+∑
+
+> h=1
+
+log πstu, θ (ah | x, a1:h−1).
+
+Finite products and sums preserve analyticity. For any fixed positive answer laws Qj , expanding the average KL gives 
+
+1
+
+m
+
+> m
+
+∑
+
+> j=1
+
+KL (πstu, θ (· | ˜xj ) ∥ Qj ) = 1
+
+m
+
+> m
+
+∑
+
+> j=1
+
+∑ 
+
+> a1:H∈A (
+
+˜xj )
+
+πstu, θ (a1:H | ˜xj ) × [log πstu, θ (a1:H | ˜xj ) − log Qj (a1:H )] .
+
+48 Each log Qj (a1:H ) is a finite constant, and the sum has finitely many analytic summands. Thus this function is analytic. Choosing Qj = πw (· | ˜xj ) and multiplying by λ proves the assertion for Cw;choosing Qj = πstu, θ†
+
+> λ,m
+
+(· | ˜xj ) proves it for Kλ,m. In particular, F = Cw⋆λ and ∆λ,m = F − F (θ†
+
+> λ,m
+
+)
+
+are analytic. We next bound the Hessian of Cw. For this calculation, define the unscaled trajectory log ratio 
+
+ℓw (θ; x, a1:H ) := log πstu, θ (a1:H | x)
+
+πw (a1:H | x) .
+
+By Lemma B.4, |ℓw| ≤ 4BH on Θ. Recall from (C.17) that 
+
+∇θCw (θ) = λm
+
+> m
+
+∑
+
+> j=1
+
+∑ 
+
+> a1:H∈A (
+
+˜xj )
+
+πstu, θ (a1:H | ˜xj )ℓw (θ; ˜xj , a1:H )Sstu, θ (˜xj , a1:H ).
+
+We take the derivative again and use the product rule to compute the Hessian matrix 
+
+∇2
+
+> θ
+
+Cw (θ) = λm
+
+> m
+
+∑
+
+> j=1
+
+Ea1:H ∼πstu, θ (·| ˜xj )
+
+[(
+
+ℓw (θ; ˜xj , a1:H ) + 1
+
+)
+
+Sstu, θ (˜xj , a1:H )Sstu, θ (˜xj , a1:H )⊤
+
++ ℓw (θ; ˜xj , a1:H )∇θSstu, θ (˜xj , a1:H )
+
+]
+
+. (C.20) We already know from (C.16) that the expected squared score norm is at most H. To bound its derivative, we differentiate the token-score formula in the proof of Lemma B.5: 
+
+∇θSstu, θ (x, a1:H ) = −
+
+> H
+
+∑
+
+> h=1
+
+ ∑
+
+> b∈B (sh)
+
+πstu, θ (b | sh)ϕstu (sh, b)ϕstu (sh, b)⊤
+
+−
+
+ ∑
+
+> b∈B (sh)
+
+πstu, θ (b | sh)ϕstu (sh, b)
+
+ ∑
+
+> b∈B (sh)
+
+πstu, θ (b | sh)ϕstu (sh, b)
+
+ 
+
+> ⊤
+
+.
+
+This is a covariance matrix and is positive semidefinite. For any unit vector v ∈ Rd, we have 
+
+0 ≤ − v⊤∇θSstu, θ (x, a1:H )v
+
+=
+
+> H
+
+∑
+
+> h=1
+
+ ∑
+
+> b∈B (sh)
+
+πstu, θ (b | sh)(
+
+v⊤ϕstu (sh, b))2
+
+−
+
+ ∑
+
+> b∈B (sh)
+
+πstu, θ (b | sh)v⊤ϕstu (sh, b)
+
+ 
+
+> 2
+
+
+
+≤
+
+> H
+
+∑
+
+> h=1
+
+∑
+
+> b∈B (sh)
+
+πstu, θ (b | sh)∥v∥22∥ϕstu (sh, b)∥22 ≤
+
+> H
+
+∑
+
+> h=1
+
+1 = H.
+
+The first upper bound discards a nonnegative square and applies Cauchy-Schwarz; the last uses the feature norm bound and that the token probabilities sum to one. Thus ∥∇ θSstu, θ (x, a1:H )∥op ≤ H.49 Taking operator norms in (C.20) and using ∥SS ⊤∥op = ∥S∥22 now yields 
+
+∥∇ 2
+
+> θ
+
+Cw (θ)∥op ≤ λm
+
+> m
+
+∑
+
+> j=1
+
+Ea1:H ∼πstu, θ (·| ˜xj )
+
+[
+
+(4BH + 1)∥Sstu, θ (˜xj , a1:H )∥22 + 4BH 2]
+
+≤ λm
+
+> m
+
+∑
+
+> j=1
+
+[
+
+(4BH + 1)H + 4BH 2]
+
+= λH (1 + 8BH ) = Lst .
+
+This proves (B.15). Since Θ is convex, the segment joining ϑ and θ lies in Θ. The fundamental theorem of calculus then gives 
+
+∥∇ θCw (θ) − ∇ θCw (ϑ)∥2 =
+
+∥∥∥∥∫ 10
+
+∇2
+
+> θ
+
+Cw (ϑ + u(θ − ϑ))( θ − ϑ) du 
+
+∥∥∥∥2
+
+≤
+
+∫ 10
+
+Lst ∥θ − ϑ∥2 du = Lst ∥θ − ϑ∥2,
+
+which proves (B.16). Finally, subtract the two representations in (C.17). The student law and its score agree in both terms, so cancellation of their log probabilities gives 
+
+∇θCw (θ) − ∇ θCv (θ) = λm
+
+> m
+
+∑
+
+> j=1
+
+Ea1:H ∼πstu, θ (·| ˜xj )
+
+[
+
+Sstu, θ (˜xj , a1:H ) log πv (a1:H | ˜xj )
+
+πw (a1:H | ˜xj )
+
+]
+
+.
+
+The proof of (B.12) already established the pointwise bound | log (πv (a1:H | x)/πw (a1:H | x)) | ≤ 
+
+2H∥w − v∥2. Applying that bound and Cauchy-Schwarz to the score expectation, and then using (C.16), we obtain 
+
+∥∇ θCw (θ) − ∇ θCv (θ)∥2 ≤ 2λH ∥w − v∥2
+
+m
+
+> m
+
+∑
+
+> j=1
+
+Ea1:H ∼πstu, θ (·| ˜xj )[∥Sstu, θ (˜xj , a1:H )∥2]
+
+≤ 2λH ∥w − v∥2
+
+m
+
+> m
+
+∑
+
+> j=1
+
+(
+
+Ea1:H ∼πstu, θ (·| ˜xj )
+
+[
+
+∥Sstu, θ (˜xj , a1:H )∥22
+
+]) 1/2
+
+≤ 2λH 3/2∥w − v∥2.
+
+This proves (B.17). 
+
+Proof of Lemma B.6. We first compute the conditional mean of each summand, then bound the variance of their average. Conditional on Gt+1, θt and wt+1 are fixed. For every ℓ, Algorithm 1 samples jg 
+
+> t+1, ℓ
+
+uniformly and then samples an answer from the current student at that question. Thus, for a1:H ∈ A (˜xj ), we have 
+
+Pr 
+
+(
+
+jg 
+
+> t+1, ℓ
+
+= j, ag 
+
+> t+1, ℓ,1 :H
+
+= a1:H
+
+∣∣∣ Gt+1
+
+)
+
+= Pr 
+
+(
+
+jg 
+
+> t+1, ℓ
+
+= j
+
+∣∣∣ Gt+1
+
+)
+
+× Pr 
+
+(
+
+ag 
+
+> t+1, ℓ,1 :H
+
+= a1:H
+
+∣∣∣ Gt+1, jg 
+
+> t+1, ℓ
+
+= j
+
+)
+
+= 1
+
+m πstu, θt (a1:H | ˜xj ). (C.21) 50 Starting from the definition of ̂ gstu 
+
+> t+1, ℓ
+
+, we obtain 
+
+E
+
+[̂ 
+
+gstu 
+
+> t+1, ℓ
+
+∣∣∣ Gt+1
+
+]
+
+= E
+
+[
+
+Sstu, θt (˜xjg 
+
+> t+1, ℓ
+
+, ag 
+
+> t+1, ℓ,1 :H
+
+)Zt+1(θt; ˜xjg 
+
+> t+1, ℓ
+
+, ag 
+
+> t+1, ℓ,1 :H
+
+)
+
+∣∣∣ Gt+1
+
+]
+
+= 1
+
+m
+
+> m
+
+∑
+
+> j=1
+
+∑ 
+
+> a1:H∈A (
+
+˜xj )
+
+πstu, θt (a1:H | ˜xj )Sstu, θt (˜xj , a1:H )Zt+1(θt; ˜xj , a1:H )= λm
+
+> m
+
+∑
+
+> j=1
+
+∑ 
+
+> a1:H∈A (
+
+˜xj )
+
+πstu, θt (a1:H | ˜xj )Sstu, θt (˜xj , a1:H ) log πstu, θt (a1:H | ˜xj )
+
+πwt+1 (a1:H | ˜xj )= ∇θCwt+1 (θt) = ∇θCt+1(θt).
+
+The second equality uses (C.21), the third substitutes the definition of Zt+1, and the fourth applies the cost-gradient identity (C.17). By linearity of conditional expectation, we have, 
+
+E
+
+[̂ 
+
+gstu 
+
+> t+1
+
+∣∣∣ Gt+1
+
+]
+
+= 1
+
+bt+1
+
+> bt+1
+
+∑
+
+> ℓ=1
+
+E
+
+[̂ 
+
+gstu 
+
+> t+1, ℓ
+
+∣∣∣ Gt+1
+
+]
+
+= bt+1
+
+bt+1
+
+∇θCt+1(θt) = ∇θCt+1(θt).
+
+To control the variance, we first bound the second moment. Its definition and (C.21) give 
+
+E
+
+[
+
+∥̂ gstu 
+
+> t+1, ℓ
+
+∥22
+
+∣∣∣ Gt+1
+
+]
+
+= 1
+
+m
+
+> m
+
+∑
+
+> j=1
+
+∑ 
+
+> a1:H∈A (
+
+˜xj )
+
+πstu, θt (a1:H | ˜xj )∥Sstu, θt (˜xj , a1:H )∥22[Zt+1(θt; ˜xj , a1:H )] 2
+
+≤ 16 λ2B2H2
+
+m
+
+> m
+
+∑
+
+> j=1
+
+∑ 
+
+> a1:H∈A (
+
+˜xj )
+
+πstu, θt (a1:H | ˜xj )∥Sstu, θt (˜xj , a1:H )∥22
+
+= 16 λ2B2H2
+
+m
+
+> m
+
+∑
+
+> j=1
+
+Ea1:H ∼πstu, θt (·| ˜xj )
+
+[
+
+∥Sstu, θt (˜xj , a1:H )∥22
+
+]
+
+≤ 16 λ2B2H2
+
+m
+
+> m
+
+∑
+
+> j=1
+
+H = 16 λ2B2H3.
+
+The first inequality uses |Zt+1| ≤ 4λBH from Lemma B.4. The last inequality applies the score second-moment bound (C.16) at each target question. For this proof, we set et+1, ℓ :=̂ gstu  
+
+> t+1, ℓ
+
+− ∇ θCt+1(θt). The identity above yields E[et+1, ℓ | G t+1] = 0.Expanding the square yields 
+
+E[∥et+1, ℓ∥22 | G t+1] = E[∥̂gstu 
+
+> t+1, ℓ
+
+∥22 | G t+1] − 2
+
+〈
+
+E[̂ gstu  
+
+> t+1, ℓ
+
+| G t+1], ∇θCt+1(θt)〉
+
++ ∥∇ θCt+1(θt)∥22
+
+= E[∥̂gstu 
+
+> t+1, ℓ
+
+∥22 | G t+1] − ∥∇ θCt+1(θt)∥22 ≤ 16 λ2B2H3.
+
+For ℓ̸ = ℓ′, the two prompt-answer pairs are independent conditional on Gt+1, and therefore 
+
+E[⟨et+1, ℓ, et+1, ℓ′ ⟩ | G t+1] = 〈E[et+1, ℓ | G t+1], E[et+1, ℓ′ | G t+1]〉 = 0. 
+
+51 Using the definition of the averaged estimator, we conclude that 
+
+E
+
+[∥∥∥̂ gstu  
+
+> t+1
+
+− ∇ θCt+1(θt)
+
+∥∥∥22
+
+∣∣∣∣ Gt+1
+
+]
+
+= E
+
+∥∥∥∥∥∥
+
+1
+
+bt+1
+
+> bt+1
+
+∑
+
+> ℓ=1
+
+et+1, ℓ
+
+∥∥∥∥∥∥
+
+> 22
+
+∣∣∣∣∣∣∣
+
+Gt+1
+
+
+
+= 1
+
+b2
+
+> t+1
+> bt+1
+
+∑
+
+> ℓ=1
+
+E[∥et+1, ℓ∥22 | G t+1] + 2
+
+b2
+
+> t+1
+
+∑
+
+> ℓ<ℓ ′
+
+E[⟨et+1, ℓ, et+1, ℓ′ ⟩ | G t+1]
+
+≤ bt+1(16 λ2B2H3)
+
+b2
+
+> t+1
+
+= 16 λ2B2H3
+
+bt+1
+
+.
+
+This proves (B.14). Finally, θt is Ft-measurable, so σ(wt+1, θt) ⊆ G t+1. The tower property gives the remaining condi-tional identity: 
+
+E
+
+[̂ 
+
+gstu 
+
+> t+1
+
+∣∣∣ wt+1, θt
+
+]
+
+= E
+
+[
+
+E[̂ gstu  
+
+> t+1
+
+| G t+1]
+
+∣∣∣ wt+1, θt
+
+]
+
+= E[∇θCwt+1 (θt) | wt+1, θt] = ∇θCt+1(θt).
+
+The last equality holds because the displayed gradient is a function of wt+1 and θt. This completes the proof. 
+
+Proof of Lemma B.8. Conditional on Ht, the candidate policies and wt are fixed. Since we sample 
+
+jt,k,ℓ uniformly from {1, . . . , m} and then generate aval  
+
+> t,k,ℓ,1 :H
+
+from πstu, ϑt,k (· | ˜xjt,k,ℓ ), we have 
+
+E
+
+[
+
+Zt(ϑt,k; ˜xjt,k,ℓ , aval  
+
+> t,k,ℓ,1 :H
+
+) | H t
+
+]
+
+= 1
+
+m
+
+> m
+
+∑
+
+> j=1
+
+∑ 
+
+> a1:H∈A (
+
+˜xj )
+
+πstu, ϑt,k (a1:H | ˜xj )λ log πstu, ϑt,k (a1:H | ˜xj )
+
+πwt (a1:H | ˜xj ) = Ct(ϑt,k ).
+
+By Lemma B.4, the squared summand of Zt(ϑt,k; ˜xjt,k,ℓ , aval  
+
+> t,k,ℓ,1 :H
+
+), ℓ = 1, · · · , qt is at most 16 λ2B2H2.Since the samples within a batch are independent and centered after subtracting their mean, the cross terms vanish when expanding the squared sample-mean error and we have 
+
+E[( ̂ Ct,k − Ct(ϑt,k )) 2 | H t] = 1
+
+q2
+
+> tqt
+
+∑
+
+> ℓ=1
+
+Var 
+
+(
+
+Zt(ϑt,k; ˜xjt,k,ℓ , aval  
+
+> t,k,ℓ,1 :H
+
+) | H t
+
+)
+
+≤ 16 λ2B2H2
+
+qt
+
+.
+
+Then, we apply the Cauchy-Schwarz inequality and get 
+
+E[|̂Ct,k − Ct(ϑt,k )| | H t] ≤
+
+(
+
+E[( ̂ Ct,k − Ct(ϑt,k )) 2 | H t])1/2
+
+≤ 4λBH 
+
+√qt
+
+.
+
+The maximum of two nonnegative numbers is no larger than their sum. Consequently, we have 
+
+E[ξt | H t] ≤ 2
+
+> 2
+
+∑
+
+> k=1
+
+E[|̂Ct,k − Ct(ϑt,k )| | H t] ≤ 16 λBH 
+
+√qt
+
+= 16 λBH t + 1 .
+
+Choose an index k⋆t that minimizes the two true costs, only for this proof. The definition of ξt and 52 empirical minimization implies that 
+
+Ct(θt) = Ct(ϑt,̂kt ) ≤̂ Ct,̂ kt + ξt/2 ≤̂ Ct,k⋆t + ξt/2 ≤ Ct(ϑt,k⋆t ) + ξt. (C.22) The first and last inequalities bound the evaluation errors; the middle inequality is the actual two-way selection rule. This proves (B.18) and we finish the proof. 
+
+Proof of Lemma B.9. Recall that F = Cw⋆λ and ∆λ,m(θ) = F (θ) − F (θ†
+
+> λ,m
+
+). By optimality, the student Lipschitz bound in (B.11), and the diameter 2B of Θ,
+
+0 ≤ ∆λ,m(θ) ≤ 4λBH 3/2∥θ − θ†
+
+> λ,m
+
+∥2 ≤ 8λB 2H3/2 = Mopt . (C.23) We first show that the exact projected step gives a quadratic improvement when this gap is small, and then use uniform exploration for the remaining values of the gap. To apply Lemma A.2, we define the extended-real function and the normal cone 
+
+Ψ(θ) :=
+
+{F (θ), θ ∈ Θ,
+
++∞, θ /∈ Θ,
+
+NΘ(θ) := {v ∈ Rd : v⊤(ϑ − θ) ≤ 0 for every ϑ ∈ Θ}, θ ∈ Θ.
+
+For this smooth function on a closed convex set, We claim that 
+
+∂Ψ(θ) = ∇θF (θ) + NΘ(θ), θ ∈ Θ. (C.24) For θ, ϑ ∈ Θ, we first have F (ϑ) − F (θ) = ∇θF (θ)⊤(ϑ − θ) + o(∥ϑ − θ∥2).Hence, by the definition of the Fr´ echet subdifferential, we have 
+
+v ∈̂ ∂Ψ(θ) ⇐⇒ lim inf   
+
+> ϑ→θ,ϑ∈Θ
+> ϑ̸=θ
+
+F (ϑ) − F (θ) − v⊤(ϑ − θ)
+
+∥ϑ − θ∥2
+
+≥ 0 ⇐⇒ lim inf   
+
+> ϑ→θ,ϑ∈Θ
+> ϑ̸=θ
+
+(∇θF (θ) − v)⊤(ϑ − θ)
+
+∥ϑ − θ∥2
+
+≥ 0. 
+
+On one hand, by the definition of NΘ(θ), we know that 
+
+v − ∇ θF (θ) ∈ NΘ(θ) = ⇒ (∇θF (θ) − v)⊤(ϑ − θ) ≥ 0 ∀ϑ ∈ Θ =⇒ v ∈̂ ∂Ψ(θ).
+
+Conversely, let v ∈̂ ∂Ψ(θ). ∀ζ ∈ Θ \ { θ}, by the convexity of Θ, we have that 
+
+ϑu = θ + u(ζ − θ) ∈ Θ, u ∈ (0, 1 ].
+
+Therefore, 
+
+0 ≤ lim inf 
+
+> u↓0
+
+(∇θF (θ) − v)⊤(ϑu − θ)
+
+∥ϑu − θ∥2
+
+= lim inf 
+
+> u↓0
+
+u(∇θF (θ) − v)⊤(ζ − θ)
+
+u∥ζ − θ∥2
+
+= (∇θF (θ) − v)⊤(ζ − θ)
+
+∥ζ − θ∥2
+
+.
+
+Consequently, we obtain (v − ∇ θF (θ)) ⊤(ζ − θ) ≤ 0 ∀ζ ∈ Θ. Thus, 
+
+v − ∇ θF (θ) ∈ NΘ(θ).
+
+Combining both inclusions yields ̂ ∂Ψ(θ) = ∇θF (θ) + NΘ(θ). By the definition of the limiting 53 subdifferential, we know that 
+
+v ∈ ∂Ψ(θ) ⇐⇒ ∃ (θn, vn)n≥1 :
+
+
+
+θn ∈ Θ, θn → θ,
+
+Ψ(θn) → Ψ(θ), vn → v,
+
+vn ∈̂ ∂Ψ(θn).
+
+For such a sequence and every ζ ∈ Θ, we have (vn − ∇ θF (θn)) ⊤(ζ − θn) ≤ 0. Continuity of ∇θF
+
+yields that 
+
+(v − ∇ θF (θ)) ⊤(ζ − θ) = lim 
+
+> n→∞
+
+(vn − ∇ θF (θn)) ⊤(ζ − θn) ≤ 0. 
+
+Thus, we obtain 
+
+∂Ψ(θ) ⊆ ∇ θF (θ) + NΘ(θ).
+
+For the reverse inclusion, the constant sequences θn = θ and vn = v give 
+
+v ∈ ∇ θF (θ) + NΘ(θ) = ̂ ∂Ψ(θ) = ⇒ v ∈ ∂Ψ(θ).
+
+Therefore, we have proved the claim. Lemma B.7 shows that F is analytic. Consequently, the finite graph of Ψ is 
+
+{(θ, u) ∈ Rd × R : ∥θ∥22 ≤ B2, u − F (θ) = 0},
+
+which is semianalytic and hence subanalytic. Its domain is the closed ball Θ, and Ψ is continuous on this domain. Moreover, optimality of θ† 
+
+> λ,m
+
+on every segment in Θ implies that 
+
+∇θF (θ†
+
+> λ,m
+
+)⊤(ϑ − θ†
+
+> λ,m
+
+) ≥ 0, ϑ ∈ Θ.
+
+Thus −∇ θF (θ†
+
+> λ,m
+
+) ∈ NΘ(θ†
+
+> λ,m
+
+), and (C.24) gives 0 ∈ ∂Ψ(θ†
+
+> λ,m
+
+). All hypotheses of Lemma A.2 therefore hold. There are an open neighborhood U of θ†
+
+> λ,m
+
+, cloc > 0, and ρloc ∈ [0, 1 ) such that 
+
+dist (0, ∂Ψ(θ)) ≥ cloc [∆λ,m(θ)] ρloc , θ ∈ U ∩ Θ, ∆λ,m(θ) > 0. (C.25) Uniqueness of the minimizer now lets us choose 0 < δ loc ≤ min {1, Mopt } such that 
+
+{θ ∈ Θ : ∆λ,m(θ) ≤ δloc } ⊂ U .
+
+To justify this choice, if Θ \ U is nonempty, its compactness and continuity of ∆λ,m give an attained minimum there. This minimum is strictly positive because the only zero is θ† 
+
+> λ,m
+
+∈ U . Choose δloc 
+
+smaller than that minimum. If the complement is empty, any positive value satisfying the displayed upper bound suffices. For 0 < ∆λ,m(θ) ≤ δloc ≤ 1, the fact that ρloc < 1 yields 
+
+[∆λ,m(θ)] ρloc = ∆λ,m(θ)[ ∆λ,m(θ)] ρloc −1 ≥ ∆λ,m(θ).
+
+Hence (C.25) implies the weaker but sufficient linear bound 
+
+dist (0, ∂Ψ(θ)) ≥ cloc ∆λ,m(θ), 0 < ∆λ,m(θ) ≤ δloc . (C.26) We apply this bound to the exact projected step y(θ) defined in the lemma. The first-order 54 condition for Euclidean projection is 
+
+(
+
+θ − αstu ∇θF (θ) − y(θ))⊤
+
+(ϑ − y(θ)) ≤ 0 ∀ϑ ∈ Θ.
+
+Setting ϑ = θ and rearranging gives 
+
+∇θF (θ)⊤(y(θ) − θ) ≤ − ∥y(θ) − θ∥22
+
+αstu 
+
+.
+
+The gradient Lipschitz bound in (B.16), integrated along the segment from θ to y(θ), gives 
+
+F (y(θ)) − F (θ) = ∇θF (θ)⊤(y(θ) − θ) + 
+
+∫ 10
+
+[
+
+∇θF (θ + u(y(θ) − θ)) − ∇ θF (θ)]⊤
+
+(y(θ) − θ) du 
+
+≤ − ∥y(θ) − θ∥22
+
+αstu 
+
++
+
+∫ 10
+
+uL st ∥y(θ) − θ∥22 du 
+
+= −
+
+( 1
+
+αstu 
+
+− Lst 
+
+2
+
+)
+
+∥y(θ) − θ∥22 ≤ − ∥y(θ) − θ∥22
+
+2αstu 
+
+.
+
+The last inequality uses αstu = 1/(2Lst ). In particular, F (y(θ)) ≤ F (θ). The projection condition also implies 
+
+θ − y(θ)
+
+αstu 
+
+− ∇ θF (θ) ∈ NΘ(y(θ)) .
+
+Using (C.24) at y(θ), and then (B.16), we obtain 
+
+dist (0, ∂Ψ(y(θ))) ≤
+
+∥∥∥∥∇θF (y(θ)) − ∇ θF (θ) + θ − y(θ)
+
+αstu 
+
+∥∥∥∥2
+
+≤
+
+(
+
+Lst + 1
+
+αstu 
+
+)
+
+∥y(θ) − θ∥2.
+
+Suppose now that 0 < ∆λ,m(θ) ≤ δloc . If ∆λ,m(y(θ)) ≤ ∆λ,m(θ)/2, then (C.23) gives 
+
+F (θ) − F (y(θ)) = ∆λ,m(θ) − ∆λ,m(y(θ)) ≥ ∆λ,m(θ)
+
+2 ≥ [∆λ,m(θ)] 2
+
+2Mopt 
+
+.
+
+Otherwise, 0 < ∆λ,m(θ)/2 < ∆λ,m(y(θ)) ≤ δloc , so (C.26) applies at y(θ). Combining the preceding two estimates with that inequality gives 
+
+F (θ) − F (y(θ)) ≥ ∥y(θ) − θ∥22
+
+2αstu 
+
+≥ dist (0, ∂Ψ(y(θ))) 2
+
+2αstu (Lst + 1/αstu )2
+
+≥ c2loc [∆λ,m(y(θ))] 2
+
+2αstu (Lst + 1/αstu )2 ≥ c2loc 
+
+8αstu (Lst + 1/αstu )2 [∆λ,m(θ)] 2.
+
+The same quadratic lower bound, with the smaller of the two coefficients, therefore holds throughout the small sublevel set. When the gap is zero, the required bound is immediate. It remains to control ∆λ,m(θ) > δ loc . We establish the needed exploration probability for a cali-brated objective. Fix w ∈ W and 0 < u ≤ Mopt . By continuity and compactness, we can choose 
+
+ϑ⋆w ∈ argmin 
+
+> ϑ∈Θ
+
+Cw (ϑ).
+
+Set τ = u/Mopt ∈ (0, 1 ] and consider {(1 − τ )ϑ⋆w + τ ζ : ζ ∈ Θ}. By convexity, we know that this 55 set lies in Θ. Each of its points ϑ has distance at most 2Bτ from ϑ⋆w, so (B.11) gives 
+
+Cw (ϑ) − min  
+
+> ζ∈Θ
+
+Cw (ζ) ≤ (4λBH 3/2)( 2Bτ ) = Mopt τ = u.
+
+The affine map defining the set scales d-dimensional volume by τ d. Since ϑunif is uniform on Θ, we conclude that 
+
+Pr 
+
+(
+
+Cw (ϑunif ) − min  
+
+> ϑ∈Θ
+
+Cw (ϑ) ≤ u
+
+)
+
+≥
+
+( uMopt 
+
+)d
+
+, 0 < u ≤ Mopt . (C.27) Apply this bound with w = w⋆λ and u = δloc /2 to obtain 
+
+Pr 
+
+(
+
+∆λ,m(ϑunif ) ≤ δloc 
+
+2
+
+)
+
+≥
+
+( δloc 
+
+2Mopt 
+
+)d
+
+.
+
+On this event and when ∆λ,m(θ) > δ loc , we have F (θ) − F (ϑunif ) ≥ ∆λ,m(θ) − δloc /2 ≥ ∆λ,m(θ)/2.Since F (y(θ)) ≤ F (θ), the two-candidate gain is nonnegative and at least F (θ) − F (ϑunif ) for every draw. It therefore dominates the positive part below: 
+
+Eϑunif 
+
+[
+
+F (θ) − min {F (y(θ)) , F (ϑunif )}
+
+]
+
+≥ Eϑunif 
+
+[
+
+[F (θ) − F (ϑunif )] +
+
+]
+
+≥ 12
+
+( δloc 
+
+2Mopt 
+
+)d
+
+∆λ,m(θ) ≥ 12Mopt 
+
+( δloc 
+
+2Mopt 
+
+)d
+
+[∆λ,m(θ)] 2.
+
+The last inequality uses (C.23). For the small sublevel set, the minimum of the two costs is at most 
+
+F (y(θ)) , so the projected-step bounds already proved apply directly to the same left-hand side. Taking 
+
+κopt := min 
+
+
+
+14Mopt 
+
+, c2loc 
+
+8αstu (Lst + 1/αstu )2 , 12Mopt 
+
+( δloc 
+
+2Mopt 
+
+)d > 0
+
+therefore proves (B.19) for every θ ∈ Θ. All constants were chosen using the fixed objective and parameter set, and hence are independent of t.
+
+Proof of Lemma B.10. We study the fixed true cost F (θ) := Cw⋆λ (θ), so that ∆λ,m(θ) = F (θ) −
+
+F (θ†
+
+> λ,m
+
+). The algorithm evaluates Ct, whereas F is used only in this proof. Recall from (C.23) that 
+
+0 ≤ ∆λ,m(θ) ≤ Mopt . For target update t ≥ 1, let Gt := Ft−1 ∨ σ(wt). The current student θt−1 is fixed conditional on Gt. Compare the actual gradient candidate with the population candidate 
+
+ϑt,1 = Proj Θ
+
+(
+
+θt−1 − αstu ̂ gstu 
+
+> t
+
+)
+
+,
+
+y(θt−1) = Proj Θ (θt−1 − αstu ∇θF (θt−1)) .
+
+The map y is the proof-only update in Lemma B.9. We first write the one-step error comparison, before bounding its perturbation terms. Lemma B.8 and (B.12) imply, on every sample path, 
+
+F (θt) ≤ Ct(θt) + sup 
+
+> θ∈Θ
+
+|F (θ) − Ct(θ)| ≤ min  
+
+> k∈{ 1,2 }
+
+Ct(ϑt,k ) + ξt + sup 
+
+> θ∈Θ
+
+|F (θ) − Ct(θ)|≤ min  
+
+> k∈{ 1,2 }
+
+F (ϑt,k ) + ξt + 2 sup 
+
+> θ∈Θ
+
+|F (θ) − Ct(θ)| ≤ min {F (ϑt,1 ), F (ϑt,2 )} + ξt + 4λH ∥wt − w⋆λ∥2.
+
+56 Replacing one entry of a minimum changes that minimum by at most the absolute change in the entry. Since F is 4λBH 3/2-Lipschitz according to Lemma B.5, we thus have 
+
+min {F (ϑt,1 ), F (ϑt,2 )} ≤ min {F (y(θt−1)) , F (ϑt,2 )} + 4λBH 3/2∥ϑt,1 − y(θt−1)∥2.
+
+Conditional on Gt, the exploration candidate ϑt,2 is uniform on Θ. By Lemma B.9, we have 
+
+E[F (θt−1) − min {F (y(θt−1)) , F (ϑt,2 )} | G t] ≥ κopt [∆λ,m(θt−1)] 2.
+
+Since F (θt−1) is measurable with respect to Gt, rearrange and we have 
+
+E[min {F (y(θt−1)) , F (ϑt,2 )}| G t] ≤ F (θt−1) − κopt [∆λ,m(θt−1)] 2
+
+Thus, utilizing the inequalities we have proved above, we have 
+
+E[∆λ,m(θt) | G t]=E[F (θt) | G t] − F (θ†
+
+> λ,m
+
+)
+
+≤E[min {F (y(θt−1)) , F (ϑt,2 )} | G t] − F (θ†
+
+> λ,m
+
+) + 4λBH 3/2E[∥ϑt,1 − y(θt−1)∥2 | G t] + 4λH ∥wt − w⋆λ∥2 + E[ξt | G t]
+
+≤F (θt−1) − F (θ†
+
+> λ,m
+
+) − κopt [∆λ,m(θt−1)] 2 + 4λBH 3/2E[∥ϑt,1 − y(θt−1)∥2 | G t] + 4λH ∥wt − w⋆λ∥2 + E[ξt | G t].
+
+(C.28) We next bound the candidate discrepancy in this recursion. Nonexpansiveness of Euclidean pro-jection gives 
+
+∥ϑt,1 − y(θt−1)∥2 ≤ αstu ∥̂gstu  
+
+> t
+
+− ∇ θF (θt−1)∥2 ≤ αstu 
+
+[
+
+∥̂gstu  
+
+> t
+
+− ∇ θCt(θt−1)∥2 + ∥∇ θCt(θt−1) − ∇ θF (θt−1)∥2
+
+]
+
+.
+
+Conditional Cauchy-Schwarz and Lemma B.6 bound the first term by 
+
+E
+
+[
+
+∥̂gstu  
+
+> t
+
+− ∇ θCt(θt−1)∥2
+
+∣∣∣ Gt
+
+]
+
+≤
+
+(
+
+E
+
+[
+
+∥̂ gstu  
+
+> t
+
+− ∇ θCt(θt−1)∥22
+
+∣∣∣ Gt
+
+]) 1/2
+
+≤ 4λBH 3/2
+
+√bt
+
+.
+
+Lemma B.7 bounds the second term by 2λH 3/2∥wt − w⋆λ∥2. Multiplying by the cost Lipschitz constant therefore gives 
+
+4λBH 3/2E[∥ϑt,1 − y(θt−1)∥2 | G t] ≤ 16 αstu λ2B2H3
+
+√bt
+
++ 8αstu λ2BH 3∥wt − w⋆λ∥2.
+
+For validation, Gt ⊆ H t in Lemma B.8. The tower property yields 
+
+E[ξt | G t] = E[E[ξt | H t] | G t] ≤ 16 λBH t + 1 .
+
+To combine these bounds, write et := E[∆λ,m(θt)] . Taking total expectations in (C.28), using 
+
+bt = t + 1, and substituting the two perturbation bounds gives 
+
+et ≤ et−1 − κopt E
+
+[
+
+[∆λ,m(θt−1)] 2]
+
++ 16 αstu λ2B2H3
+
+√t + 1 + ( 8αstu λ2BH 3 + 4λH )E[∥wt − w⋆λ∥2] + 16 λBH t + 1 .
+
+57 Applying the calibration bound (B.7) and the Cauchy-Schwarz inequality, we have 
+
+E[∥wt − w⋆λ∥2] ≤
+
+(
+
+E[∥wt − w⋆λ∥22])1/2
+
+≤ 2
+
+γ√t + 2 ≤ 2
+
+γ√t + 1 .
+
+Also, E[[ ∆λ,m(θt−1)] 2] ≥ e2 
+
+> t−1
+
+by Jensen’s inequality, and (t + 1)−1 ≤ (t + 1)−1/2. Consequently, 
+
+et ≤ et−1 − κopt e2 
+
+> t−1
+
++ Eopt 
+
+√t + 1 , t ≥ 1. (C.29) We solve (C.29) by induction with the deterministic bound vt := Kopt (t + 1)−1/4. Initially, we have e0 ≤ Mopt ≤ Kopt = v0.Suppose et ≤ vt. If vt+1 ≥ Mopt , the bound et+1 ≤ Mopt proves the next step. Otherwise, we have 
+
+vt = vt+1
+
+( t + 2
+
+t + 1
+
+)1/4
+
+< 21/4Mopt < 2Mopt .
+
+Since κopt ≤ 1/(4Mopt ), the derivative of u − κopt u2 on [0, 2 Mopt ] is 1 − 2κopt u ≥ 0. Apply this monotonicity to the recursion at time t + 1 and we have 
+
+et+1 ≤ vt − κopt v2 
+
+> t
+
++ Eopt 
+
+√t + 2 ≤ vt − κopt K2opt − Eopt 
+
+√t + 1 .
+
+By the definition of Kopt , we have κopt K2opt − Eopt ≥ κopt K2opt  
+
+> 2
+
+≥ Kopt  
+
+> 4
+
+. The first inequality uses 
+
+K2opt ≥ 2Eopt /κopt ; the second uses Kopt ≥ 1/(2κopt ). On the other hand, integration of the derivative of u−1/4 gives 
+
+vt − vt+1 = Kopt 
+
+4
+
+∫ t+2
+
+> t+1
+
+u−5/4 du ≤ Kopt 
+
+4(t + 1)5/4 ≤ Kopt 
+
+4√t + 1 .
+
+Combining the last three displays yields et+1 ≤ vt+1. By induction, we prove the first bound in (B.20) for every T ≥ 1.Finally, we translate the true-cost bound to the calibrated optimization error. By the elementary inequality | min f − min g| ≤ sup |f − g|, applied on Θ, we have 
+
+|εT − ∆λ,m(θT )| =
+
+∣∣∣∣CT (θT ) − F (θT ) + min  
+
+> θ∈Θ
+
+F (θ) − min  
+
+> θ∈Θ
+
+CT (θ)
+
+∣∣∣∣
+
+≤ 2 sup 
+
+> θ∈Θ
+
+|CT (θ) − F (θ)| ≤ 4λH ∥wT − w⋆λ∥2. (C.30) Taking expectations and applying (B.7) proves the second bound in (B.20). We finish the proof. 
+
+Proof of Lemma B.11. We will apply the nonnegative form of Lemma A.1 with 
+
+K = Θ, f (θ) = ∆λ,m(θ), g(θ) = Kλ,m(θ).
+
+Accordingly, we verify that the two functions are nonnegative, that their graphs are subanalytic and compact, and that ∆λ,m(θ) = 0 implies Kλ,m(θ) = 0. We also establish an upper bound on 
+
+Kλ,m to use in the theorem’s exponent normalization. Their definitions are recalled in the lemma statement. 58 Nonnegativity. By the optimality of θ† 
+
+> λ,m
+
+and the nonnegativity of KL divergence, respectively, we have 
+
+∆λ,m(θ) ≥ 0, Kλ,m(θ) ≥ 0, θ ∈ Θ.
+
+Analyticity. Lemma B.7 proves analyticity for the average KL against any fixed positive answer laws. Apply that result with Qj = πw⋆λ (· | ˜xj ) and with Qj = πstu, θ†
+
+> λ,m
+
+(· | ˜xj ), respectively. Thus 
+
+Cw⋆λ and Kλ,m are analytic. Subtracting the constant Cw⋆λ (θ†
+
+> λ,m
+
+) shows that ∆λ,m is analytic. 
+
+Compact subanalytic graphs. For F ∈ { ∆λ,m, Kλ,m}, the restricted graph is 
+
+graph (F |Θ) = {(θ, u) ∈ Rd+1 : B2 − ∥ θ∥22 ≥ 0, u − F (θ) = 0}.
+
+The defining inequality is polynomial and the equality is analytic by Lemma B.7. Hence the graph is semianalytic, and therefore subanalytic. It is also compact because it is the image of the compact ball Θ under the continuous map θ 7 → (θ, F (θ)) .
+
+Zero-set inclusion. If ∆λ,m(θ) = 0, its definition gives 
+
+Cw⋆λ (θ) = Cw⋆λ (θ†
+
+> λ,m
+
+) = min  
+
+> ϑ∈Θ
+
+Cw⋆λ (ϑ).
+
+Thus θ is also a global minimizer. By Assumption 3.3, we have 
+
+πstu, θ (· | ˜xj ) = πstu, θ†
+
+> λ,m
+
+(· | ˜xj ), j = 1, . . . , m.
+
+Each KL summand defining Kλ,m(θ) is consequently the divergence of a law from itself, hence zero. We obtain the required inclusion 
+
+{θ ∈ Θ : ∆λ,m(θ) = 0} ⊆ { θ ∈ Θ : Kλ,m(θ) = 0}.
+
+A uniform bound for the KL divergence Apply the student probability envelope (C.14) from Lemma B.4 to θ and θ†
+
+> λ,m
+
+. Dividing the lower bound for the numerator by the upper bound for the denominator, and conversely, gives 
+
+e−4B ≤ πstu, θ (a | s)
+
+πstu, θ†
+
+> λ,m
+
+(a | s) ≤ e4B (a ∈ B (s)) .
+
+Taking logarithms gives an absolute token log-ratio bound of 4B. For a1:H ∈ A (˜xj ), put sj,h =(˜xj , a1:h−1). By (3.1) and the triangle inequality, we have 
+
+∣∣∣∣∣∣log πstu, θ (a1:H | ˜xj )
+
+πstu, θ†
+
+> λ,m
+
+(a1:H | ˜xj )
+
+∣∣∣∣∣∣ =
+
+∣∣∣∣∣∣
+
+> H
+
+∑
+
+> h=1
+
+log πstu, θ (ah | sj,h)
+
+πstu, θ†
+
+> λ,m
+
+(ah | sj,h)
+
+∣∣∣∣∣∣ ≤
+
+> H
+
+∑
+
+> h=1
+
+∣∣∣∣∣∣log πstu, θ (ah | sj,h)
+
+πstu, θ†
+
+> λ,m
+
+(ah | sj,h)
+
+∣∣∣∣∣∣ ≤ 4BH .
+
+Using the expectation form of KL in the definition of Kλ,m, this pointwise bound gives 
+
+0 ≤ K λ,m(θ) ≤ 1
+
+m
+
+> m
+
+∑
+
+> j=1
+
+Ea1:H ∼πstu, θ (·| ˜xj )[4BH ] = 4BH ,
+
+Via the steps above, we verify the nonnegativity, compact subanalytic graphs, and zero-set inclusion required by Lemma A.1. Moreover, the last step provides the bound Kλ,m(θ) ≤ 4BH ≤ Mλ,m with 59 Mλ,m := max {1, 4 BH }.Since the functions and their domain are fixed independently of the iteration number, applying Lemma A.1 and we get that there exist aλ,m > 0 and pλ,m ≥ 1 such that 
+
+∆λ,m(θ) ≥ aλ,m[Kλ,m(θ)] pλ,m θ ∈ Θ,
+
+We finish the proof. 
+
+# D Proofs in Section 6 
+
+Proof of Proposition 6.1. We first compute the true student objective. For either prompt in pair 
+
+(˜xi,+, ˜xi,−), we have 
+
+πstu, θ (a | ˜xi,ϵ, ∅) = exp (θi1{a = 1})
+
+eθi + 2 , a ∈ { 0, 1, null }.
+
+We define p(θi) := eθi  
+
+> eθi+2
+
+= σ(θi − log 2 ), σ(u) = ( 1 + e−u)−1. Then, the probabilities of the student policy to output 0 and null are each [1 − p(θi)] /2. Therefore, we have 
+
+12
+
+∑
+
+> ϵ∈{ +,−}
+
+Ea1:2∼πstu, θ (·| ˜xi,ϵ)[R(˜xi,ϵ, a1:2)] = 12 [πstu, θ (1 | ˜xi,+, ∅) + πstu, θ (0 | ˜xi,−, ∅)] = 12
+
+[
+
+p(θi) + 1 − p(θi)
+
+2
+
+]
+
+= 1 + p(θi)
+
+4 .
+
+Both the student and reference emit EOS with probability one at h = 2, therefore, for ϵ ∈ { +, −} ,at any ˜xi,ϵ, we can explicitly compute the KL divergence as KL (πstu ,θ (·| ˜xi,ϵ)∥πpre (·| ˜xi,ϵ)) = p(θi) log p(θi)
+
+1/3 + 2 1 − p(θi)
+
+2 log [1 − p(θi)] /21/3
+
+= p(θi) log p(θi)
+
+1/3 + [ 1 − p(θi)] log 1 − p(θi)
+
+2/3
+
+= θip(θi) − log eθi + 23 . (D.1) Recall that p′(θi) = p(θi)[ 1 − p(θi)] . Hence, for each i ∈ [d] and ϵ ∈ { +, −} , we have 
+
+∇θKL (πstu, θ (· | ˜xi,ϵ) ∥ πpre (· | ˜xi,ϵ)) = ∇θ
+
+[
+
+θip(θi) − log eθi + 23
+
+]
+
+=
+
+[
+
+p(θi) + θip′(θi) − eθi
+
+eθi + 2
+
+]
+
+ei
+
+=θip′(θi)ei.
+
+Here ei appears because the expression depends on θ only through its ith coordinate. 60 Thus, using the fact that the KL regularization terms are equal at ˜xi,+ and ˜xi,−, we obtain 
+
+Jλ,m(πstu, θ ) = 1
+
+d
+
+> d
+
+∑
+
+> i=1
+
+[ 1 + p(θi)
+
+4 − λKL (πstu, θ (· | ˜xi,+) ∥ πpre (· | ˜xi,+)) 
+
+]
+
+.
+
+Differentiating this finite sum and substituting the preceding KL-gradient identity gives 
+
+∇θJλ,m(πstu, θ ) = 1
+
+d
+
+> d
+
+∑
+
+> i=1
+
+[ p′(θi)
+
+4 ei − λ∇θKL (πstu, θ (· | ˜xi,+) ∥ πpre (· | ˜xi,+)) 
+
+]
+
+= 1
+
+d
+
+> d
+
+∑
+
+> i=1
+
+p′(θi)
+
+( 14 − λθ i
+
+)
+
+ei
+
+= 1
+
+d
+
+
+
+p1(θ1)[ 1 − p1(θ1)] ( 14 − λθ 1
+
+)
+
+...
+
+pd(θd)[ 1 − pd(θd)] ( 14 − λθ d
+
+) .
+
+Each summand strictly increases up to 1/(4λ) and strictly decreases afterward. The vector of these maximizers is feasible and interior, since √d/(4λ) < B . Then, we apply the first order optimality condition to prove that θ† 
+
+> λ,m
+
+= 14λ 1d ∈ int (Θ).We next identify the unrestricted optimal policy and verify that it belongs to the teacher policy class but not to the student policy class. Specifically, by Lemma B.1, we have that 
+
+π⋆λ(( a1, EOS ) | x) = (1/3)e1{a1=y(x)}/λ
+
+(e1/λ + 2)/3 = e1{a1=y(x)}/λ
+
+e1/λ + 2 = π(√2/λ)u1 (( a1, EOS ) | x).
+
+For w⋆λ = ( √2/λ)u1, by the feature definition in teacher class, we have 
+
+(w⋆λ)⊤ϕ(( x, ∅), a1) = 
+
+{1/λ, a1 = y(x),0, a1̸ = y(x).
+
+The resulting softmax probabilities are exactly those in the preceding expression. Since ∥w⋆λ∥2 =√2/λ < B , this proves that w⋆λ ∈ W and π⋆λ = πw⋆λ .To prove that no student represents this policy, we compare the probability of the answer (1, EOS )
+
+at the two prompts ˜xi,+ and ˜xi,−. The unrestricted optimum satisfies 
+
+π⋆λ(( 1, EOS ) | ˜xi,+) = e1/λ
+
+e1/λ + 2 > 1
+
+e1/λ + 2 = π⋆λ(( 1, EOS ) | ˜xi,−).
+
+In contrast, every student satisfies 
+
+πstu, θ (( 1, EOS ) | ˜xi,+) = p(θi) = πstu, θ (( 1, EOS ) | ˜xi,−).
+
+Thus no θ ∈ Θ can match the unrestricted optimum at both prompts. It remains to compare the teacher’s regularized return with that of every student. We first obtain a student upper bound using the oracle parameter already proved optimal. 61 Substituting (θ†
+
+> λ,m
+
+)i = 1/(4λ) into the objective and the KL expression in (D.1) gives 
+
+Jλ,m(πstu, θ ) ≤ Jλ,m(πstu, θ†
+
+> λ,m
+
+) = 1
+
+d
+
+> d
+
+∑
+
+> i=1
+
+[ 1 + p(1/(4λ)) 
+
+4 − λ
+
+( p(1/(4λ)) 
+
+4λ − log e1/(4λ) + 23
+
+)] 
+
+= 1
+
+d
+
+> d
+
+∑
+
+> i=1
+
+[ 14 + λ log e1/(4λ) + 23
+
+]
+
+= 14 + λ log e1/(4λ) + 23 .
+
+We now compute the teacher’s regularized return. Since wtea = αw ⋆λ, its answer probabilities are 
+
+πtea (( a1, EOS ) | x) = exp (α1{a1 = y(x)}/λ)
+
+eα/λ + 2 .
+
+In particular, its expected reward at every target prompt is 
+
+Ea1:2∼πtea (·| x)[R(x, a1:2)] = πtea (( y(x), EOS ) | x) = eα/λ
+
+eα/λ + 2 .
+
+Because α < 1, this correct-verdict probability is strictly smaller than that of π⋆λ. Hence the teacher differs from the unrestricted optimal policy. The reference assigns probability 1/3 to each feasible answer. Consequently, we know that 
+
+log πtea (a1:2 | x)
+
+πpre (a1:2 | x) = log 
+
+[ exp (αR (x, a1:2)/λ)
+
+eα/λ + 2 · 3
+
+]
+
+= αλ R(x, a1:2) − log eα/λ + 23 . (D.2) Substituting this identity into the regularized objective yields 
+
+Jλ,m(πtea ) = 1
+
+m
+
+> m
+
+∑
+
+> j=1
+
+Ea1:2∼πtea (·| ˜xj )
+
+[
+
+(1 − α)R(˜xj , a1:2) + λ log eα/λ + 23
+
+]
+
+= ( 1 − α) eα/λ
+
+eα/λ + 2 + λ log eα/λ + 23 .
+
+Viewing this expression as a function of α, differentiation implies that 
+
+ddα Jλ,m(πtea ) = − eα/λ
+
+eα/λ + 2 + 2(1 − α)eα/λ
+
+λ(eα/λ + 2)2 + eα/λ
+
+eα/λ + 2 = 2(1 − α)eα/λ
+
+λ(eα/λ + 2)2 > 0. 
+
+Thus, for every α ∈ [1/2, 1 ), we have that Jλ,m(πtea ) ≥ 12  
+
+> e1/(2λ)
+> e1/(2λ)+2
+
++ λ log e1/(2λ) +23 .We finally compare this teacher lower bound with the student upper bound. Since es > 1 for s > 0,we have es/(es + 2) > 1/3. Hence by direct algebra, we have 
+
+e1/(2λ)
+
+e1/(2λ) + 2 > 13 , log e1/(2λ) + 2
+
+e1/(4λ) + 2 =
+
+∫ 1/(2λ)
+
+> 1/(4λ)
+
+es
+
+es + 2 ds > 13
+
+( 12λ − 14λ
+
+)
+
+= 112 λ .
+
+Combining these two inequalities with the preceding bounds, we obtain 
+
+Jλ,m(πtea ) − Jλ,m(πstu, θ†
+
+> λ,m
+
+) ≥ 12
+
+e1/(2λ)
+
+e1/(2λ) + 2 − 14 + λ log e1/(2λ) + 2
+
+e1/(4λ) + 2 > 16 − 14 + λ 112 λ = 0. 
+
+62 Therefore, we have Jλ,m(πtea ) > J λ,m(πstu, θ†
+
+> λ,m
+
+) ≥ Jλ,m(πstu, θ ) for every θ ∈ Θ. We finish the proof. 
+
+Proof of Theorem 6.2. We first identify the minimizer of the direct-matching objective and its distance from the oracle student. Then, we bound the SGD error around this minimizer. Finally, a quadratic lower bound for the policy KL divergence converts the remaining parameter distance into the claimed separation. Recall from the proof of Proposition 6.1 that p(θi) = eθi /(eθi + 2). For a target prompt x and a feasible answer a1:2, all three policy probabilities are positive. Factoring the likelihood ratio through the reference gives 
+
+ZSM (θ; x, a1:2) = log 
+
+[ πstu, θ (a1:2 | x)
+
+πpre (a1:2 | x)
+
+πpre (a1:2 | x)
+
+πtea (a1:2 | x)
+
+]
+
++ λ log πstu, θ (a1:2 | x)
+
+πpre (a1:2 | x)= ( 1 + λ) log πstu, θ (a1:2 | x)
+
+πpre (a1:2 | x) − log πtea (a1:2 | x)
+
+πpre (a1:2 | x)= ( 1 + λ) log πstu, θ (a1:2 | x)
+
+πpre (a1:2 | x) − αλ R(x, a1:2) + log eα/λ + 23 .
+
+The second equality uses log (uv ) = log u + log v and log (1/u) = − log u; the last uses (D.2). We now derive the population cost from its definition. Using (6.11), the definition of ZSM , and its pointwise expansion above, we obtain 
+
+CSM (θ) = 1
+
+m
+
+> m
+
+∑
+
+> j=1
+
+KL (πstu, θ (· | ˜xj ) ∥ πtea (· | ˜xj )) + λKL (πstu, θ (· | ˜xj ) ∥ πpre (· | ˜xj )) 
+
+
+
+= 1
+
+m
+
+> m
+
+∑
+
+> j=1
+
+Ea1:2∼πstu, θ (·| ˜xj ) [ZSM (θ; ˜xj , a1:2)] = 1
+
+m
+
+> m
+
+∑
+
+> j=1
+
+Ea1:2∼πstu, θ (·| ˜xj )
+
+[
+
+(1 + λ) log πstu, θ (a1:2 | ˜xj )
+
+πpre (a1:2 | ˜xj ) − αλ R(˜xj , a1:2) + log eα/λ + 23
+
+]
+
+= 1
+
+m
+
+> m
+
+∑
+
+> j=1
+
+(1 + λ)KL (πstu, θ (· | ˜xj ) ∥ πpre (· | ˜xj )) − αλ Ea1:2∼πstu, θ (·| ˜xj )[R(˜xj , a1:2)] 
+
+ + log e αλ + 23 .
+
+The last equality uses linearity of expectation and the definition of KL. The final logarithm is independent of both the answer and the prompt, so averaging leaves it unchanged. Since m = 2d, we can replace the sum over j by the sum over i ∈ [d] and ϵ ∈ { +, −} . The calculations in Proposition 6.1 give 
+
+∑
+
+> ϵ∈{ +,−}
+
+KL (πstu, θ (· | ˜xi,ϵ) ∥ πpre (· | ˜xi,ϵ)) = 2KL (πstu, θ (· | ˜xi,+) ∥ πpre (· | ˜xi,+)) ,
+
+∑
+
+> ϵ∈{ +,−}
+
+Ea1:2∼πstu, θ (·| ˜xi,ϵ)[R(˜xi,ϵ, a1:2)] = 2 1 + p(θi)
+
+4 = 1 + p(θi)
+
+2 .
+
+63 Substituting these two identities into the preceding cost expression gives 
+
+CSM (θ) = 12d
+
+> d
+
+∑
+
+> i=1
+
+[
+
+2(1 + λ)KL (πstu, θ (· | ˜xi,+) ∥ πpre (· | ˜xi,+)) − αλ
+
+1 + p(θi)
+
+2
+
+]
+
++ log eα/λ + 23
+
+= 1
+
+d
+
+> d
+
+∑
+
+> i=1
+
+[
+
+(1 + λ)KL (πstu, θ (· | ˜xi,+) ∥ πpre (· | ˜xi,+)) − α
+
+4λ [1 + p(θi)] 
+
+]
+
++ log eα/λ + 23 .
+
+We next differentiate this expression with respect to the full parameter vector θ. Notice that the final logarithm is constant in θ, and ∇θp(θi) = p′(θi)ei. Using the KL-gradient identity already proved in Proposition 6.1, we obtain 
+
+∇θCSM (θ) = 1
+
+d
+
+> d
+
+∑
+
+> i=1
+
+[
+
+(1 + λ)∇θKL (πstu, θ (· | ˜xi,+) ∥ πpre (· | ˜xi,+)) − α
+
+4λ ∇θ [1 + p(θi)] 
+
+]
+
+= 1
+
+d
+
+> d
+
+∑
+
+> i=1
+
+[
+
+(1 + λ)θip′(θi)ei − α
+
+4λ p′(θi)ei
+
+]
+
+= 1
+
+d
+
+> d
+
+∑
+
+> i=1
+
+p′(θi)
+
+[
+
+(1 + λ)θi − α
+
+4λ
+
+]
+
+ei.
+
+By the first order optimality condition, the minimizer is θ⋆ 
+
+> SM
+
+:= argmin θ∈Θ CSM (θ) = α 
+
+> 4λ(1+λ)
+
+1d.It is feasible and interior because ∥θ⋆
+
+> SM
+
+∥2 < √d/(4λ) < B . Using the oracle parameter from Proposition 6.1, we obtain the fixed parameter gap 
+
+∥θ⋆ 
+
+> SM
+
+− θ†
+
+> λ,m
+
+∥2 =
+
+√d
+
+4λ
+
+(
+
+1 − α
+
+1 + λ
+
+)
+
+≥√d(1 − α)
+
+4λ . (D.3) The inequality follows from α/(1 + λ) ≤ α.We now bound the error of the SGD iterate relative to θ⋆
+
+> SM
+
+, starting from the update itself. Define 
+
+FSM  
+
+> t
+
+:= σ
+
+(
+
+jSM  
+
+> s
+
+, aSM  
+
+> s,1 :2
+
+: 0 ≤ s < t 
+
+)
+
+. The parameter θSM  
+
+> t
+
+is FSM  
+
+> t
+
+-measurable, and θ⋆ 
+
+> SM
+
+is a fixed point of the projection onto Θ. Therefore, the update and nonexpansiveness of projection yields that 
+
+∥θSM  
+
+> t+1
+
+− θ⋆
+
+> SM
+
+∥22 =
+
+∥∥∥Proj Θ(θSM  
+
+> t
+
+− ηSM 
+
+> t
+
+̂ gSM  
+
+> t
+
+) − Proj Θ(θ⋆
+
+> SM
+
+)
+
+∥∥∥22
+
+≤ ∥ θSM  
+
+> t
+
+− θ⋆ 
+
+> SM
+
+− ηSM 
+
+> t
+
+̂ gSM  
+
+> t
+
+∥22
+
+= ∥θSM  
+
+> t
+
+− θ⋆
+
+> SM
+
+∥22 − 2ηSM  
+
+> t
+
+(θSM  
+
+> t
+
+− θ⋆
+
+> SM
+
+)⊤̂ gSM  
+
+> t
+
++ ( ηSM  
+
+> t
+
+)2∥̂gSM  
+
+> t
+
+∥22.
+
+Taking conditional expectations on both sides, we have that 
+
+E
+
+[
+
+∥θSM  
+
+> t+1
+
+− θ⋆
+
+> SM
+
+∥22
+
+∣∣∣ FSM 
+
+> t
+
+]
+
+≤ ∥ θSM  
+
+> t
+
+− θ⋆
+
+> SM
+
+∥22 − 2ηSM  
+
+> t
+
+E
+
+[
+
+(θSM  
+
+> t
+
+− θ⋆
+
+> SM
+
+)⊤̂ gSM 
+
+> t
+
+∣∣∣ FSM 
+
+> t
+
+]
+
++ ( ηSM  
+
+> t
+
+)2E
+
+[
+
+∥̂ gSM  
+
+> t
+
+∥22
+
+∣∣∣ FSM 
+
+> t
+
+]
+
+.
+
+(D.4) Since ηSM  
+
+> t
+
+> 0, an upper bound for the next error requires a lower bound for the cross term and an upper bound for the gradient second moment. We establish these two bounds in turn. For the cross term, we first identify the conditional mean of ̂ gSM  
+
+> t
+
+. At x = ˜xi,ϵ, the student score is 
+
+Sstu, θ (x, a1:2) = ∇θ
+
+[
+
+θi1{a1 = 1} − log (eθi + 2)]
+
+= ei[1{a1 = 1} − p(θi)] .
+
+Thus, we obtain ∥Sstu, θ (x, a1:2)∥2 ≤ 1, Ea1:2∼πstu, θ (·| x)[Sstu, θ (x, a1:2)] = ei[p(θi) − p(θi)] = 0.64 From the definitions of the score and sampled cost, we have 
+
+∇θπstu, θ (a1:2 | x) = πstu, θ (a1:2 | x)Sstu, θ (x, a1:2),
+
+∇θZSM (θ; x, a1:2) = ( 1 + λ)Sstu, θ (x, a1:2).
+
+The product rule for the finite sum defining CSM , followed by the zero-mean score identity, gives 
+
+∇θCSM (θ) = 1
+
+m
+
+> m
+
+∑
+
+> j=1
+
+Ea1:2∼πstu, θ (·| ˜xj )
+
+[
+
+Sstu, θ (˜xj , a1:2)(
+
+ZSM (θ; ˜xj , a1:2) + 1 + λ
+
+)] 
+
+= 1
+
+m
+
+> m
+
+∑
+
+> j=1
+
+Ea1:2∼πstu, θ (·| ˜xj ) [Sstu, θ (˜xj , a1:2)ZSM (θ; ˜xj , a1:2)] .
+
+Since the algorithm samples jSM  
+
+> t
+
+uniformly and then samples the answer from the current student, 
+
+Pr 
+
+(
+
+jSM  
+
+> t
+
+= j, aSM  
+
+> t,1 :2
+
+= a1:2
+
+∣∣∣ FSM 
+
+> t
+
+)
+
+= 1
+
+m πstu, θSM  
+
+> t
+
+(a1:2 | ˜xj ), a1:2 ∈ A (˜xj ).
+
+Thus the preceding gradient identity implies 
+
+E[̂ gSM  
+
+> t
+
+| F SM  
+
+> t
+
+] = ∇θCSM (θ)|θ=θSM  
+
+> t
+
+. (D.5) We now use this unbiasedness identity to bound the cross term. For every u ∈ [−B, B], by algebra, we have 
+
+p′(u) = σ′(u − log 2 ) ≥ σ′(B + log 2 ) = κSM ,
+
+Using the population gradient already computed above, together with (1 + λ)( θ⋆
+
+> SM
+
+)i = α/(4λ), we have 
+
+E
+
+[
+
+(θSM  
+
+> t
+
+− θ⋆
+
+> SM
+
+)⊤̂ gSM 
+
+> t
+
+∣∣∣ FSM 
+
+> t
+
+]
+
+=( θSM  
+
+> t
+
+− θ⋆
+
+> SM
+
+)⊤E[̂ gSM  
+
+> t
+
+| F SM  
+
+> t
+
+]=( θSM  
+
+> t
+
+− θ⋆
+
+> SM
+
+)⊤ ∇θCSM (θ)|θ=θSM 
+
+> t
+
+= 1 + λd
+
+> d
+
+∑
+
+> i=1
+
+p′(
+
+(θSM  
+
+> t
+
+)i
+
+) [ 
+
+(θSM  
+
+> t
+
+)i − (θ⋆
+
+> SM
+
+)i
+
+]2
+
+≥ (1 + λ)κSM 
+
+d ∥θSM  
+
+> t
+
+− θ⋆
+
+> SM
+
+∥22 = μSM ∥θSM  
+
+> t
+
+− θ⋆
+
+> SM
+
+∥22.
+
+(D.6) The first equality uses the measurability of θSM  
+
+> t
+
+; the second uses (D.5). For the second moment in (D.4), the definition of the gradient estimate and the score bound already proved give 
+
+E
+
+[
+
+∥̂gSM  
+
+> t
+
+∥22
+
+∣∣∣ FSM 
+
+> t
+
+]
+
+= E
+
+[∥∥∥Sstu, θSM  
+
+> t
+
+(˜xjSM  
+
+> t
+
+, aSM 
+
+> t,1 :2
+
+)
+
+∥∥∥22
+
+∣∣∣ZSM (θSM  
+
+> t
+
+; ˜xjSM  
+
+> t
+
+, aSM 
+
+> t,1 :2
+
+)
+
+∣∣∣2 ∣∣∣∣ FSM 
+
+> t
+
+]
+
+≤ E
+
+[∣∣∣ZSM (θSM  
+
+> t
+
+; ˜xjSM  
+
+> t
+
+, aSM 
+
+> t,1 :2
+
+)
+
+∣∣∣2 ∣∣∣∣ FSM 
+
+> t
+
+]
+
+.
+
+It therefore suffices to bound the sampled cost uniformly. The explicit student/reference ratio is 
+
+log πstu, θ (a1:2 | ˜xi,ϵ)
+
+πpre (a1:2 | ˜xi,ϵ) = θi1{a1 = 1} − log eθi + 23 .
+
+65 The average (eθi + 1 + 1)/3 lies between emin {0, θi} and emax {0, θi}. Hence both terms on the right lie between min {0, θi} and max {0, θi}, and the absolute log ratio is at most |θi|. Similarly, (D.2) and 0 ≤ log [( eα/λ + 2)/3] ≤ α/λ yields 
+
+∣∣∣log πtea (a1:2|x)
+
+> πpre (a1:2|x)
+
+∣∣∣ ≤ αλ .Returning to the reference decomposition of ZSM , we obtain 
+
+|ZSM (θ; x, a1:2)| ≤ (1 + λ)
+
+∣∣∣∣∣log πstu, θ (a1:2 | x)
+
+πpre (a1:2 | x)
+
+∣∣∣∣∣ +
+
+∣∣∣∣∣log πtea (a1:2 | x)
+
+πpre (a1:2 | x)
+
+∣∣∣∣∣
+
+≤ (1 + λ)|θi| + αλ ≤ (2 + λ)B = GSM .
+
+Here x = ˜xi,ϵ and α/λ ≤ B. This uniform bound proves the required second-moment inequality: 
+
+E
+
+[
+
+∥̂ gSM  
+
+> t
+
+∥22
+
+∣∣∣ FSM 
+
+> t
+
+]
+
+≤ G2SM . (D.7) Substituting (D.6) and (D.7) into the original error recurrence (D.4), we obtain 
+
+E
+
+[
+
+∥θSM  
+
+> t+1
+
+− θ⋆
+
+> SM
+
+∥22
+
+∣∣∣ FSM 
+
+> t
+
+]
+
+≤(1 − 2μSM ηSM  
+
+> t
+
+)∥θSM  
+
+> t
+
+− θ⋆
+
+> SM
+
+∥22 + ( ηSM  
+
+> t
+
+)2G2SM 
+
+= tt + 2 ∥θSM  
+
+> t
+
+− θ⋆
+
+> SM
+
+∥22 + G2SM 
+
+μ2SM (t + 2)2 ,
+
+Taking expectations and applying the law of total expectation, we have that 
+
+E
+
+[
+
+∥θSM  
+
+> t+1
+
+− θ⋆
+
+> SM
+
+∥22
+
+]
+
+≤ tt + 2 E
+
+[
+
+∥θSM  
+
+> t
+
+− θ⋆
+
+> SM
+
+∥22
+
+]
+
++ G2SM 
+
+μ2SM (t + 2)2 . (D.8) We solve this recurrence by induction to obtain 
+
+E
+
+[
+
+∥θSM  
+
+> T
+
+− θ⋆
+
+> SM
+
+∥22
+
+]
+
+≤ G2SM 
+
+μ2SM (T + 1) . (D.9) Indeed, the initial bound follows from θSM 0 = 0, ∥θ⋆
+
+> SM
+
+∥2 ≤ B, and 
+
+GSM 
+
+μSM 
+
+= d(2 + λ)B
+
+(1 + λ)κSM 
+
+≥ 4dB ≥ B,
+
+where κSM ≤ 1/4. For the induction step, substitution of the bound at time t into the expected recurrence gives 
+
+E
+
+[
+
+∥θSM  
+
+> t+1
+
+− θ⋆
+
+> SM
+
+∥22
+
+]
+
+≤ G2SM 
+
+μ2SM 
+
+[ t
+
+(t + 2)( t + 1) + 1
+
+(t + 2)2
+
+]
+
+= G2SM 
+
+μ2SM 
+
+[ 1
+
+t + 2 − 1
+
+(t + 1)( t + 2)2
+
+]
+
+≤ G2SM 
+
+μ2SM (t + 2) .
+
+It remains to translate the fixed parameter gap and the SGD error into the policy KL in the 66 theorem. For any θ ∈ Θ, the explicit student policy πstu ,θ gives KL 
+
+(
+
+πstu, θ (· | ˜xi,ϵ)
+
+∥∥∥∥ πstu, θ†
+
+> λ,m
+
+(· | ˜xi,ϵ)
+
+)
+
+= ∑
+
+> a1∈{ 0,1, null }
+
+πstu, θ (( a1, EOS ) | ˜xi,ϵ)
+
+(
+
+θi − (θ†
+
+> λ,m
+
+)i
+
+)
+
+1{a1 = 1} + log e(θ† 
+
+> λ,m)i
+
++ 2
+
+eθi + 2
+
+
+
+=(
+
+θi − (θ†
+
+> λ,m
+
+)i
+
+)
+
+p(θi) + log e(θ† 
+
+> λ,m)i
+
++ 2
+
+eθi + 2
+
+=(
+
+(θ†
+
+> λ,m
+
+)i − θi
+
+)2 ∫ 10
+
+(1 − s) p′(
+
+θi + s[( θ†
+
+> λ,m
+
+)i − θi])
+
+ds ≥ κSM 
+
+2
+
+(
+
+θi − (θ†
+
+> λ,m
+
+)i
+
+)2
+
+.
+
+The last equality is by Taylor’s integral formula for u 7 → log (eu + 2), whose first and second derivatives are p(u) and p′(u). The segment between the two coordinates lies in [−B, B], so the already proved lower bound p′(u) ≥ κSM applies throughout the integral. Averaging over the 2d
+
+prompts gives 
+
+1
+
+m
+
+> m
+
+∑
+
+> j=1
+
+KL 
+
+(
+
+πstu, θ (· | ˜xj )
+
+∥∥∥∥ πstu, θ†
+
+> λ,m
+
+(· | ˜xj )
+
+)
+
+≥ κSM 
+
+2d ∥θ − θ†
+
+> λ,m
+
+∥22. (D.10) By the triangle inequality, Cauchy-Schwarz, and (D.9), we have 
+
+∥θ⋆ 
+
+> SM
+
+− θ†
+
+> λ,m
+
+∥2 ≤ E
+
+[
+
+∥θSM  
+
+> T
+
+− θ†
+
+> λ,m
+
+∥2
+
+]
+
++ E
+
+[
+
+∥θSM  
+
+> T
+
+− θ⋆
+
+> SM
+
+∥2
+
+]
+
+≤
+
+(
+
+E
+
+[
+
+∥θSM  
+
+> T
+
+− θ†
+
+> λ,m
+
+∥22
+
+]) 1/2
+
++ GSM 
+
+μSM 
+
+√T + 1 .
+
+Combining this with (D.3), we obtain 
+
+(
+
+E
+
+[
+
+∥θSM  
+
+> T
+
+− θ†
+
+> λ,m
+
+∥22
+
+]) 1/2
+
+≥
+
+[ √d(1−α) 
+
+> 4λ
+
+− GSM  
+
+> μSM
+> √T+1
+
+]
+
+> +
+
+.We can therefore start from the required policy error and conclude 
+
+E
+
+ 1
+
+m
+
+> m
+
+∑
+
+> j=1
+
+KL 
+
+(
+
+πstu, θSM 
+
+> T
+
+(· | ˜xj )
+
+∥∥∥∥ πstu, θ†
+
+> λ,m
+
+(· | ˜xj )
+
+) ≥ κSM 
+
+2d E
+
+[
+
+∥θSM  
+
+> T
+
+− θ†
+
+> λ,m
+
+∥22
+
+]
+
+≥ κSM 
+
+2d
+
+[ √d(1 − α)
+
+4λ − GSM 
+
+μSM 
+
+√T + 1
+
+]2
+
+> +
+
+.
+
+The first inequality is (D.10); the second is the square of the preceding bound. For the stated iteration threshold, substituting the definition of μSM gives 
+
+T + 1 ≥ 64 λ2dG 2SM 
+
+(1 + λ)2κ2SM (1 − α)2 =
+
+( 8λG SM 
+
+μSM 
+
+√d(1 − α)
+
+)2
+
+.
+
+Hence GSM /[μSM 
+
+√T + 1] ≤ √d(1 − α)/(8λ), and the KL lower bound is at least 
+
+κSM 
+
+2d
+
+[ √d(1 − α)
+
+4λ −√d(1 − α)
+
+8λ
+
+]2
+
+= κSM (1 − α)2
+
+128 λ2 > 0. 
+
+67
