@@ -1,0 +1,532 @@
+Title: Data-free On-policy Distillation
+
+URL Source: https://arxiv.org/pdf/2609.14193v2
+
+Published Time: Mon, 21 Sep 2026 00:14:06 GMT
+
+Number of Pages: 21
+
+Markdown Content:
+Work in Progress September 12, 2026 
+
+# Data-free On-policy Distillation 
+
+Gengsheng Li 1,2,3, ∗, Mao Zheng 3, ∗, Mingyang Song 3, ∗, Jie Sun 3, Zeyuan Liu 3,Ruiqi Liu 2, Qiyong Zhong 3, Haiyun Guo 1,2 , Junfeng Fang 4, Jinqiao Wang 1,2,5 1Foundation Model Research Center, Institute of Automation, Chinese Academy of Sciences 
+
+> 2
+
+School of Artificial Intelligence, University of Chinese Academy of Sciences 
+
+> 3
+
+Foundation Model Department, Tencent 
+
+> 4
+
+National University of Singapore 
+
+> 5
+
+Wuhan AI Research 
+
+> ∗
+
+Equal contribution Correspondence: ligengsheng2024@ia.ac.cn 
+
+## Abstract 
+
+On-policy distillation (OPD) has become a standard component of frontier post-training pipelines, yet how much its training data actually contributes has gone largely unexamined. On the two teacher–student pairings most common in practice, we find OPD almost indifferent to its data: eight prompts already match a 17k-problem dataset, and three independently built datasets whose difficulty and teacher–student KL differ several-fold produce nearly indistinguishable training curves. Two causes account for this. First, the unit of data in OPD is the state a prompt leads to, not the prompt itself: a single prompt keeps exposing new teacher correction as sampling continues, while the marginal value of additional prompts collapses after eight. Second, replacing mathematics with competitive programming still recovers over ninety percent of the in-domain gain, indicating that OPD transfers the teacher’s mode of reasoning rather than knowledge related to the data. We take this to its limit with Data-free On-policy Distillation (DF-OPD), in which the teacher writes its own training questions under a simple prompt—no external data, no quality filtering—leaving a system of just two policies. DF-OPD matches and even surpasses real data, and the questions it produces track the teacher’s own post-training data on three key diagnostics of training dynamics, which other real datasets do not. Applied to multi-teacher distillation, where the (prompt, domain) pairs normally have to be derived from post-training data that is often out of reach, 1k self-generated questions close 98.5% of the available headroom, even surpassing the 96.6% reached with 7k real examples. Together these results invite a reassessment of the role data plays in OPD. 
+
+## 1 Introduction 
+
+On-policy distillation (OPD) has become a standard component of the post-training pipeline of frontier foundation models (Yang et al., 2025; Xiao et al., 2026; Zeng et al., 2026; Xu et al., 2026a). Its appeal is clearest when post-training methods are compared along two axes: the states on which the student is trained, and how much signal it receives at each of them. Supervised fine-tuning (SFT) supervises every token, but only on states drawn from fixed data rather than the ones the student actually reaches at inference time, which leaves it subject to exposure bias. Reinforcement learning (RL) removes this mismatch by training on the student’s own rollouts, yet collapses all of its feedback into a single scalar reward at the end of a trajectory. OPD attains both at once (Agarwal et al., 2024; Gu et al., 2024): on-policy state visitation , since the student samples its own trajectories, and token-level dense supervision ,1arXiv:2609.14193v2 [cs.LG] 17 Sep 2026 Work in Progress September 12, 2026 0    
+
+> 20
+> 40
+> 60
+> 80
+> Averaged Accuracy (%)
+> 0
+> 20
+> 40
+> 60
+> Averaged Accuracy (%)
+> 56.41 56.61
+> 47.36 49.16
+> RL-tuned
+> Teacher
+> Larger-parameter
+> Teacher
+> Math Code IF
+
+(a)  Data-free OPD  (b)  Single-teacher OPD  (c)  Multi-teacher OPD             
+
+> Simple instruction
+> Teacher
+> Frozen
+> Real training data
+> Self-
+> generated
+> questions
+> Self-generation
+> Student
+> On-policy rollouts
+> Prompts
+> OPD
+> Token-level
+> guidance
+> No external training corpus is required:
+> only a teacher and a student are needed!
+> OPD (DAPO-Math-17k)
+> Data-free OPD (64 self-generated data)
+> MOPD (7k real post-training data)
+> Data-free MOPD (1k self-generated data)
+> Student Acc. Teacher Acc. Student Acc. Teacher Acc.
+> 64 self-generated vs 17k real data 1k self-generated vs 7k real data
+> 21.71 21.17 23.02 23.85
+> 48.80 48.91
+
+Figure 1: The Data-free OPD framework and its effectiveness. (a) A simple instruction elicits the training questions from the frozen teacher itself, with no external data involved. The self-generated questions then serve as the prompts that drive the student’s on-policy rollouts, and the same teacher supplies token-level guidance along those rollouts. The pipeline involves nothing but a teacher and a student. (b) Across the two most common single-teacher settings—a teacher obtained by RL-tuning the student, and a teacher from the same model family but with larger parameters— 64 self-generated questions match or exceed OPD trained on all 17k problems of DAPO-Math. (c) Under multi-teacher OPD, 1k self-generated questions are on par with 7k real post-training examples, ahead on mathematics and instruction following and slightly behind on code, removing the need to access each domain teacher’s real post-training data. since the teacher returns a full next-token distribution at every prefix the student visits (Lu & Thinking Machines Lab, 2025; Song & Zheng, 2026). Progress on this paradigm has been driven almost entirely by algorithmic advances (Jin et al., 2026; Yang et al., 2026a; Heo et al., 2026; Xing et al., 2026; Xie et al., 2026), while the role of the data itself remains largely uncharted (Song & Zheng, 2026): how much does the training data actually contribute to OPD? The answer determines both where practitioners should spend their budget—on collecting data or elsewhere—and whether OPD can be deployed in settings where high-quality data simply do not exist. We study this question on the two teacher–student pairings most often used in practice: an RL-tuned teacher , obtained by post-training the student itself with RL (DeepSeek-R1-Distill-Qwen-1.5B ← JustRL-DeepSeek-1.5B ; Guo et al., 2025; He et al., 2025), and a larger-parameter teacher from the same model family ( Qwen3-1.7B ←
+
+Qwen3-30B-A3B-Instruct-2507 ; Yang et al., 2025). On both pairings, OPD turns out to be insensitive to its training data along three axes. In quantity , eight prompts already match the full 17k-problem training data—56.3 versus 56.4 on the first pairing and 49.9 versus 47.4 on the second—and even a single prompt stays within 3.6 points of it. In difficulty 
+
+and information content , DAPO, DeepMath and ORZ—three independently constructed datasets with almost no overlap in problems, markedly different difficulty profiles, and initial teacher–student KL differing by a factor of three—produce training curves that are nearly indistinguishable. We trace this insensitivity to two causes. 
+
+(1) Few prompts do not mean little supervision. The unit of data in OPD is not the prompt, but the states the prompt leads the student into and the correction the teacher demands at each of them. Because sampling is on-policy, the same question lands on a different sequence of states every time it is rolled out, so repeated sampling keeps surfacing new states and new signal. We make this concrete by measuring how much of the teacher’s total correction a given batch of states already exposes. Coverage for a single question keeps rising with the sampling budget and never flattens, whereas the value of adding more questions saturates after only eight. Dense supervision on an on-policy learner turns a 2Work in Progress September 12, 2026 handful of prompts into a large amount of supervision, which is why OPD barely notices how much data it is given. 
+
+(2) OPD transfers how the teacher reasons, not what it knows. The clearest evidence is a cross-domain experiment: replacing the training data entirely with competitive-programming problems, which share no content with mathematics, still yields mathematical benchmark performance comparable to in-domain data—a result that is hard to reconcile with the view that what OPD transfers is knowledge tied to the training data. The same mechanism explains why the difficulty and information content of the data matter so little. We push this observation to its limit and propose Data-free On-Policy Distillation (DF-OPD) , an OPD recipe that requires no real external data at all (Figure 1(a)). The entire system reduces to two policies, the teacher and the student: the teacher writes the training questions itself under a simple prompt, consulting no external data, and OPD is run directly on them. DF-OPD matches and even surpasses training on real data (Figure 1(b)), and the same insensitivity to data quantity carries over intact. Turning to the training dynamics it induces, we find that self-generated questions track the teacher’s own post-training data closely on three key diagnostics of OPD training dynamics (Li et al., 2026c), while DeepMath, ORZ and DeepCoder—equally real, but never seen during the teacher’s post-training—depart from both. This suggests that the questions a teacher writes under a simple prompt already carry distillable patterns close to those of the data it was trained on, and that they keep the student inside the teacher’s trust region—two properties that let self-generated data perform on par with, or even better than, real data. This matters because, in practice, one usually inherits only the teacher’s weights, not the data that produced them (Chen et al., 2026). Multi-teacher distillation (MOPD) (Ma et al., 2026; Lian et al., 2026; Gao et al., 2026; Yang et al., 2026b) sharpens this constraint. Since MOPD routes each student trajectory to the teacher that owns its domain, it needs not merely prompts but prompts paired with domain labels. Without access to each domain teacher’s post-training data, such pairs are awkward to assemble. DF-OPD supplies these pairs directly: when each domain teacher generates its own prompts, every prompt inherits the domain of the teacher that produced it, so no question has to be taken from post-training data. We verify this under the three-domain (mathematics, code, instruction following) multi-teacher setup of Open-MOPD (Gao et al., 2026). The student is SmolLM3-3B-MixSFT , obtained from SmolLM3-3B (Bakouch et al., 2025) by mixed-domain SFT, and the three domain teachers SmolLM3-3B-RL-{Math, Code, IF} are each derived from it by single-domain RL. With 1k self-generated questions the student closes 98.5% of the teacher–student gap, even ahead of the 96.6% reached with 7k real post-training examples (Figure 1(c)). As an extension, we further ask whether the question is needed at all, running OPD on an input that states none. It works, but only sometimes—recovering 62.1% of the gap on the RL-tuned pairing against only 2.3% on the larger-parameter one. What decides this is whether the student, given an empty input, can pose a problem of its own and answer it— which is essentially an implicit form of DF-OPD. Together, these results invite a reassessment of the role data plays in OPD. And our contri-butions are as follows. • On the two most common teacher–student configurations, we show that OPD is insensitive to the quantity , difficulty and information content of its training data, and we explain this from two angles: on-policy sampling combined with dense supervision turns a few samples into a large amount of supervision signal, and what OPD transfers is the teacher’s mode of reasoning rather than the knowledge carried by the data. • Building on this, we propose DF-OPD , in which the training questions are written entirely by the teacher under a simple prompt, with no external data, so that the whole system reduces to two policies. DF-OPD performs on par with or even better than real data, and we further show that self-generated questions mirror the 3Work in Progress September 12, 2026 teacher’s post-training data on the key training dynamics, evidence that it carries comparable distillable patterns. • We apply DF-OPD to multi-teacher distillation, where it removes the need for (prompt, domain) pairs derived from post-training data that is often inaccessible. Across mathematics, code and instruction following, 1k self-generated questions close 98.5% of the teacher–student gap, ahead of the 96.6% obtained with roughly 7k real post-training examples. 
+
+## 2 Preliminaries 
+
+2.1 On-Policy Distillation 
+
+Given a frozen teacher policy πϕ and a student policy πθ to be trained, OPD aligns the student to the teacher under the student’s own state distribution : the student first samples a trajectory from its current policy, and the teacher then scores that trajectory with a token-level divergence at every state it visits. Formally, let x ∼ D be a training prompt, y =(y1, . . . , yL) ∼ πθ (· | x) the response sampled by the student, and y<t its first t − 1 tokens. The two policies share a vocabulary V and each defines a next-token distribution over it. We refer to the autoregressive context st = ( x, y<t) as a state; the OPD objective is defined over these states: 
+
+LOPD (θ) = Ex∼D , y∼πθ (·| x)
+
+" |y|
+
+# ∑
+
+> t=1
+
+KL  πθ (· | st) ∥ πϕ(· | st)#
+
+. (1) This form delivers the two properties discussed above. It is on-policy: the state distribution seen during training coincides with the one encountered at inference, so the exposure bias of SFT does not arise. And it is densely supervised: the teacher returns a complete next-token distribution at every position along the trajectory, rather than a single scalar reward at its end as in RLVR. Evaluating (1) over the full vocabulary requires transporting a vocabulary-sized distribution through the training framework at every position, which is prohibitively expensive; in practice one keeps only the few highest-probability tokens at each position (Fu et al., 2026a). We take the top-k on the student side, Vt = TopK k
+
+ πθ (· | st), and write ˜ πθ (v | st) = πθ (v |
+
+st) ∑u∈V t πθ (u | st) for the student distribution renormalized over this subset. Define the per-token teacher–student log-difference 
+
+δt(v) = log πϕ(v | st) − log πθ (v | st), v ∈ V t, (2) where δt(v) > 0 means that at state st the teacher favors token v more strongly than the student does. Applying a stop-gradient that treats ˜ πθ δt as a constant, the objective takes a policy-gradient-like form 
+
+L(θ) = −Ex, y∼πθ
+
+"
+
+1
+
+N ∑
+
+> t
+
+# ∑
+
+> v∈V t
+
+sg  ˜πθ (v | st) δt(v)  log πθ (v | st)
+
+#
+
+, (3) where N is the total number of supervised tokens. This is the objective we use throughout the paper. 
+
+2.2 Multi-teacher OPD 
+
+A recent line of technical reports adopts multi-teacher on-policy distillation (MOPD) as a way to consolidate several domain experts into a single model, mitigating the domain conflicts that tend to arise during post-training (Xiao et al., 2026; Xu et al., 2026a). The setting is as follows. The capabilities the model needs are spread across M domains, indexed by 4Work in Progress September 12, 2026 
+
+d = 1, . . . , M. Each domain has its own teacher πϕd , typically obtained by running RL on that domain alone starting from a common initial policy π0, which also serves as the initialization of the student πθ . The goal of MOPD is to merge the capabilities scattered across these teachers into that one student. MOPD normally optimizes the same objective as OPD and differs only in how the data is constructed: every training prompt must additionally carry a domain label d(x) ∈{1, . . . , M}. At each optimization step the student samples trajectories from its current policy; each trajectory is hard-routed by its d(x) to the corresponding teacher πϕd(x) , which performs a single prefill over it to produce per-token distributions, and the student is then aligned to the routed teacher under the objective of Section 2.1: 
+
+LMOPD (θ) = Ex∼D , y∼πθ (·| x)
+
+" |y|
+
+# ∑
+
+> t=1
+
+KL  πθ (· | st) ∥ πϕd(x) (· | st)#
+
+. (4) Because MOPD consolidates capabilities by distilling behavior in policy space rather than by merging models directly in parameter space, it is generally more stable and better at preserving per-domain performance (Xiao et al., 2026). 
+
+## 3 The Sensitivity of OPD to Its Training Data: Quantity, Difficulty and Information Content 
+
+How much does OPD actually depend on the data it is trained on? We answer this by varying that data along three axes: quantity , the number of prompts it contains; difficulty ,how hard those prompts are for the student; and information content , how far the student’s behavior on them is from the teacher’s. The training curves barely move along any of the three, and we trace this insensitivity to two causes. 
+
+3.1 Experimental Setup Models. We experiment with two teacher–student pairings. In the first, the student is 
+
+DeepSeek-R1-Distill-Qwen-1.5B and the teacher is JustRL-DeepSeek-1.5B (He et al., 2025), obtained from the student by GRPO post-training on DAPO-Math-17k. In the second, the student is Qwen3-1.7B and the teacher is Qwen3-30B-A3B-Instruct-2507 (Yang et al., 2025). The two correspond to the configurations most often met in OPD practice: the 
+
+RL-tuned teacher , where the teacher is the student’s own RL-post-trained self, and the 
+
+larger-parameter teacher , where teacher and student come from the same model family but the teacher has larger parameters. 
+
+Data. We use four independently constructed training datasets: DAPO-Math-17k (Yu et al., 2026), DeepMath (He et al., 2026b), ORZ (Hu et al., 2026) and DeepCoder (Luo et al., 2025). The first three are all mathematical, yet their problems barely overlap and their difficulty distributions differ; DeepCoder consists of competitive-programming problems and is the only out-of-domain one. From each of them we draw, under a common random seed, five subsets D1, D8, D64 , D256 and D1000 , the subscript giving the number of problems in that subset. Dataset sizes, cleaning and subsampling procedures, and summary statistics are reported in the appendix. 
+
+Training. All experiments build on the open-source verl framework (Sheng et al., 2025), optimizing the reverse-KL objective of Section 2.1 with k = 16. The maximum generation length during training is 7,168 tokens, we sample four responses per prompt, and the batch size is 64 prompts. For subsets smaller than one batch we repeat problems until the batch is full, so that every subset sees exactly the same number of trajectories and gradient updates per step. Since Qwen3-30B-A3B-Instruct-2507 is a non-thinking model, we follow Ex-OPD (Yang et al., 2026a) and disable thinking mode in Qwen3-1.7B, keeping teacher and student in the same mode. Remaining hyperparameters are reported in the appendix. 5Work in Progress September 12, 2026 0 60 120 180     
+
+> OPD step
+> 0.45 0.50 0.55 0.60
+> macro average
+> teacher 0.614 student init 0.471
+> 0.755 teacher 0.755
+> 060 120 180
+> OPD step
+> 0.35 0.40 0.45 0.50
+> macro average
+> student init 0.345
+
+(a) RL-tuned teacher   
+
+> DeepSeek-R1-Distill-1.5B ←JustRL-1.5B
+
+(b) Larger-parameter teacher         
+
+> Qwen3-1.7B ←Qwen3-30B-A3B-Instruct
+> |D| = 1 (2 draws) |D| = 8 |D| = 64 |D| = 256 |D| = 1 kfull 17.9k
+
+Figure 2: The gain from OPD barely changes with the amount of training data. Both pairings are trained on DAPO. (a) RL-tuned teacher pairing; (b) larger-parameter teacher pairing. The horizontal axis is the OPD step and the vertical axis the unweighted mean over the six mathematics benchmarks, validated every 15 steps. Curves run from light to dark for |D| = 1 through 1k, with dark grey for all 17k problems; the red dashed line marks the teacher and the grey dotted line the student’s starting point. The pale blue band spans two independent draws at |D| = 1 (different problems, same training seed). 
+
+Evaluation. We evaluate on six mathematics benchmarks comprising 1,590 problems in total: AIME24 (AI-MO, 2024a), AIME25 (OpenCompass, 2025), AMC23 (AI-MO, 2024b), MATH-500 (Hendrycks et al., 2021; Lightman et al., 2024), Minerva (Lewkowycz et al., 2022) and Olympiad-Bench (He et al., 2024), averaging over eight samples per problem. Unless stated otherwise, the accuracy we report is the unweighted mean over the six benchmarks. The decoding length limit is 16,384 tokens, so that truncation does not distort our estimate of a model’s true ability. Decoding hyperparameters are reported in the appendix. 
+
+3.2 OPD Is Insensitive to the Amount of Data 
+
+Here the only variable is how much data the student is trained on. For each teacher–student pairing we run OPD for 180 steps on the five subsets D1 through D1000 drawn from DAPO and on all 17k problems, evaluating every 15 steps; everything else follows Section 3.1. Subsets smaller than one batch are repeated to fill it, so all settings consume the same number of trajectories and gradient updates at any given step and the curves can be read against each other. We report the peak over the whole window, and write |D| for the number of problems in a subset. 
+
+Eight problems already match the full dataset. Figure 2 shows the curves for |D| ≥ 8lying almost on top of one another. On the RL-tuned pairing, |D| = 8/64/256/1k peak at 56.3/57.7/57.6/57.4 against 56.4 for all 17k problems; on the larger-parameter pairing, at 49.9/48.1/48.0 against 47.4. 
+
+Even a single problem recovers most of the gain. At |D| = 1 the two pairings reach 54.3 and 48.4. However, this also depends on which problem is drawn: resampling it once with a different problem and the same training seed—the pale blue band in Figure 2—gives 52.8 and 45.4, or 62% and 85%. The resulting 1.5 and 3.0 point spread within the tier already exceeds the spread across all tiers with |D| ≥ 8. By eight problems, this dependence on the particular problem has essentially vanished. 6Work in Progress September 12, 2026 DAPO DeepMath ORZ     
+
+> 0.0 0.2 0.4 0.6 0.8 pass rate at init
+> 0.461 0.620 0.689 lower = harder
+> DAPO DeepMath ORZ
+> 0.0 0.1 0.2 0.3 KL to RL-tuned teacher
+> 0.268 0.089 0.132 higher = more correction
+> 090 180
+
+OPD step    
+
+> 0.45 0.50 0.55 0.60
+> macro average
+> DeepMath teacher 0.614 student init 0.471
+> 090 180
+
+OPD step    
+
+> ORZ 0.755 teacher 0.755
+> 090 180
+
+OPD step   
+
+> 0.35 0.40 0.45 0.50
+> macro average  DeepMath
+> student init 0.345
+> 090 180
+
+OPD step 
+
+> ORZ
+
+Corpus properties RL-tuned teacher: DeepSeek-R1-Distill-1.5B ← JustRL-1.5B Larger-parameter teacher: Qwen3-1.7B ← Qwen3-30B-A3B-Instruct      
+
+> (a) Difficulty (b) Information content (c) Results on DeepMath and ORZ (d) Results on DeepMath and ORZ
+> DAPO DeepMath ORZ |D| = 1 |D| = 64 |D| = 1 k
+
+Figure 3: How the three datasets differ in difficulty and information content, and the OPD curves they produce. (a) The student’s initial pass rate on each dataset; lower means the dataset is harder for it. (b) The initial teacher–student response-level KL; higher means the dataset carries more information for the student. Both are measured on the RL-tuned pairing with the student held at its initial weights. (c) Training curves of the RL-tuned pairing on DeepMath and ORZ at |D| = 1/64/1k; (d) the same for the larger-parameter pairing. 
+
+3.3 OPD Is Insensitive to Difficulty and Information Content 
+
+Beyond sheer size, does it matter what the data is? Holding the pairings and all hyperparam-eters fixed, we swap the training data for two other independently constructed mathematical datasets, DeepMath and ORZ, drawing subsets exactly as in Section 3.1. 
+
+The three differ sharply in difficulty and information content, yet their training curves coincide. Figures 3a and 3b report two measurements, both taken at the stu-dent’s initial weights. The student’s initial pass rate on DAPO, DeepMath and ORZ is 0.461/0.620/0.689, making DAPO by far the hardest; the initial teacher–student response-level KL is 0.268/0.089/0.132, a threefold spread in how much correction the teacher has to offer per trajectory. Yet Figures 2, 3c and 3d show the three to be indistinguishable at matched |D|.
+
+3.4 Analysis 
+
+Why does scaling the training data by three orders of magnitude, or replacing it wholesale with data of very different difficulty and information content, leave the outcome essentially unchanged? We offer two explanations. 7Work in Progress September 12, 2026 20 22 24 26 28 210 212 
+
+> sampling budget (trajectories)
+> 0.1 0.2 0.3 0.4 0.5 0.6 0.7
+> signal coverage  +0.141
+> +0.039
+> +0.009
+> +0.031 |D| = 1 |D| = 8 |D| = 64 |D| = 256 |D| = 1 k
+
+Figure 4: Signal coverage reached by different amounts of training data across sampling budgets. Measured on the RL-tuned pairing with problems from DAPO and the student held at its initial weights. The horizontal axis is the sampling budget in trajectories and the vertical axis the signal coverage, the fraction of the teacher’s total correction exposed by the states those trajectories visit; curves run from light to dark for |D| = 1 through 1k, and error bars give the standard deviation over six random draws. The arrows at the right give the increment between each pair of adjacent tiers at the largest budget: the step from one problem to eight is worth +0.141, while the three steps after it—together a 125-fold increase in problems—add only +0.039, +0.009 and +0.031. 
+
+3.4.1 A Few Samples Already Produce a Large Amount of Supervision 
+
+The unit of data in OPD is the state a problem leads to, not the problem itself. Supervision is applied at every state the student’s trajectory passes through, so how much supervision a problem provides depends on how many distinct states it leads the student into and how large a correction the teacher demands at each. And because sampling is on-policy, every rollout of the same problem lands on a different sequence of states, so repeated sampling keeps producing new ones. We therefore measure how much of the teacher’s total correction a batch of states exposes, which we call signal coverage (defined in the appendix). The measurement is made on the RL-tuned pairing with problems from DAPO and the student held at its initial weights: for each tier we roll out trajectories under a given sampling budget and score them against a held-out reference set disjoint from every tier’s problems, averaging each point over six random draws. Figure 4 reports the result, and two things stand out. 
+
+A single problem supplies far more supervision than a single trajectory. Coverage at 
+
+|D| = 1 climbs from 0.114 at a budget of one to 0.507 at 4096, gaining roughly 0.04 with every doubling of the budget. 
+
+The marginal value of additional problems decays quickly. At the largest budget, going from one problem to eight adds 0.141 coverage, whereas the subsequent 125-fold increase in problems adds only 0.079; per added problem, the marginal contribution falls from 2.0 × 10 −2 to 8.0 × 10 −5, a factor of more than two hundred. Together these account for Section 3.2: few problems do not mean little supervision. Re-peated on-policy sampling drives the supervision a single problem yields far up, and beyond eight problems their number is no longer the bottleneck. 
+
+3.4.2 OPD Transfers a Mode of Reasoning, Not Knowledge 
+
+If what OPD transfers were the knowledge carried by the training data, training on data unrelated to mathematics should not improve mathematics. We therefore replace the 8Work in Progress September 12, 2026 0 90 180                 
+
+> OPD step
+> 0.45 0.50 0.55 0.60
+> macro average
+> DeepCoder
+> student init 0.471 teacher 0.614 0.755 teacher 0.755
+> 090 180
+> OPD step
+> 0.35 0.40 0.45 0.50
+> macro average  DeepCoder
+> student init 0.345
+> 0.50 0.55 0.60
+> -1.7 -1.6 -0.4
+> RL-tuned
+> 164 1k
+> |D|
+> 0.40 0.45 0.50 -4.0 -2.8 -1.1
+> larger-param.
+> (a) RL-tuned teacher (b) Larger-parameter teacher (c) Peak by domain
+> in-domain (DAPO) out-of-domain (DeepCoder) |D| = 1 |D| = 64 |D| = 1 k
+
+Figure 5: OPD curves on out-of-domain data, and their peaks against in-domain data. (a) Training curves of the RL-tuned pairing on DeepCoder at |D| = 1/64/1k; (b) the same for the larger-parameter pairing. The vertical axis is the unweighted mean over the six mathematics benchmarks—training is on competitive programming throughout, evaluation always on mathematics—validated every 15 steps; (c) One panel per pairing, comparing the peak reached in domain (DAPO, dark blue) against out of domain (DeepCoder, grey) at each tier; the gap narrows as the tier grows. training data wholesale with the competitive-programming problems of DeepCoder, leaving everything else unchanged and still evaluating on the six mathematics benchmarks. 
+
+Out-of-domain data comes close to in-domain data. Figures 2, 5a and 5b show competitive-programming problems carrying both students to roughly the level reached in domain. Figure 5c compares them tier by tier: at |D| = 1/64/1k, out-of-domain trails in-domain by 1.7/1.6/0.4 points on the RL-tuned pairing and by 4.0/2.8/1.1 points on the larger-parameter one. Crossing domains does cost something, but only 0.4 to 4.0 points, and the gap narrows as problems are added; for scale, the two teacher–student gaps are 14.4 and 41.0 points. Measured as gain over the student’s starting point, out-of-domain data recovers 96% and 92% of the in-domain gain at |D| = 1k. 
+
+What is transferred is the teacher’s way of reasoning, not knowledge contained in the data. That a dataset sharing no content whatsoever with mathematics recovers over ninety percent of the in-domain gain is hard to explain unless what the student picks up is how the teacher reasons through a problem rather than anything the data encodes. This also accounts for Section 3.3: if what is transferred is independent of the content of the data, then the difficulty and information content of that data matter correspondingly little. 
+
+## 4 Data-free On-policy Distillation 
+
+Section 3 showed OPD to be insensitive to the quantity, difficulty and information content of its training data. If so, must the training questions come from outside at all? This section takes the question to its limit: we let the teacher write its own, leaving the whole system with just two models, a teacher and a student. 
+
+4.1 Running OPD Directly on Self-generated Questions 
+
+All training questions are produced by the teacher of the pairing itself. We give the teacher a single simple instruction asking it to write a problem and provide nothing else: no seed examples and no retrieval from any external data. What comes back is neither checked for correctness nor filtered for quality. Each pairing uses its own teacher and the two pools are never shared; the prompts, the decoding procedure and the format-level filtering are given 9Work in Progress September 12, 2026 0 90 180                       
+
+> OPD step
+> 0.45 0.50 0.55 0.60
+> macro average
+> self-generated
+> student init 0.471 teacher 0.614 0.755 teacher 0.755
+> 090 180
+> OPD step
+> 0.35 0.40 0.45 0.50
+> macro average  self-generated
+> student init 0.345
+> 0.50 0.55 0.60
+> -2.6 -1.6 +0.2 -0.0
+> RL-tuned
+> 17.9k 1864 1k
+> |D|
+> 0.40 0.45 0.50 +1.2 +2.1 +1.8 +1.8
+> larger-param.
+> (a) RL-tuned teacher (b) Larger-parameter teacher (c) Peak by source
+> real (DAPO) self-generated |D| = 1 |D| = 8 |D| = 64 |D| = 1 k
+
+Figure 6: OPD trained on the teacher’s self-generated questions, and its peaks against the full real dataset. (a) Training curves of the RL-tuned pairing on self-generated questions at 
+
+|D| = 1/8/64/1k; (b) the same for the larger-parameter pairing. All questions are written by the teacher of the respective pairing under a simple prompt; (c) One panel per pairing: the dark blue bar on the left is the peak reached with the full real dataset DAPO-Math-17k, and the four grey bars on the right are the peaks reached with self-generated questions at each tier. in Appendix ?? . From the generated pool we cut |D| = 1/8/64/1k exactly as in Section 3.1, leaving everything else unchanged. 
+
+Self-generated questions match and even surpass the full real dataset. Figures 6a and 6b give the training curves at the four tiers, and Figure 6c compares their peaks against the full real dataset (DAPO-Math-17k). On the RL-tuned pairing, self-generated |D| = 64 and 1k reach 56.6 and 56.4 against 56.4 for the full real data; on the larger-parameter pairing the four tiers reach 48.6/49.5/49.2/49.1, all above the 47.4 of the full real data and by as much as 2.1 points. 
+
+The insensitivity of Section 3.2 carries over intact. On self-generated data, a single question recovers 72% and 110% of the gain the full real dataset delivers, and eight questions recover 83% and 116%; the relation between tiers is the same as on real data. Removing the dependence on external data does not change how OPD responds to the amount of it. 
+
+4.2 Self-generated Questions Induce the Training Dynamics of Post-training Data 
+
+Why do self-generated questions work? We turn to the training dynamics they induce. The analysis is confined to the RL-tuned pairing, the only one of the two for which the teacher’s real post-training data (DAPO) is available. To keep the conclusion from hinging on a handful of questions, all five datasets are taken at |D| = 1k. We track three key diagnostics of OPD training dynamics (Li et al., 2026c): student top-k KL, top-k overlap, and student overlap mass, all defined in the appendix. 
+
+The five curves split into two groups, and what separates them is where the questions come from, not what domain they are in. Figure 7 shows the similar pattern of self-generated data and DAPO: their initial student top-k KL is 0.32 and 0.26, their initial top-k
+
+overlap 0.72 and 0.72, and their student overlap mass 0.023 and 0.019. DeepMath, ORZ and DeepCoder form the other group, at 0.09–0.13, 0.82–0.84 and 0.006–0.008. These three are equally real and two of them are even in domain, yet on all three diagnostics the dynamics they induce stay far from those of the teacher’s post-training data and its self-generated questions alike. Questions a teacher writes under a simple prompt therefore appear to carry distillable patterns close to those of the teacher’s own post-training data. And because the questions 10 Work in Progress September 12, 2026 0 90 180              
+
+> OPD step
+> 0.0 0.1 0.2 0.3
+> student top-k KL  |D|= 1k
+> 090 180
+> OPD step
+> 0.7 0.8 0.9
+> top-k overlap
+> 090 180
+> OPD step
+> 0.00 0.01 0.02
+> student overlap mass
+> (a) student top-kKL (b) top-koverlap (c) student overlap mass
+> DAPO self-generated DeepMath ORZ DeepCoder
+
+Figure 7: Training dynamics induced by real post-training data and by self-generated questions. (a) student top-k KL; (b) top-k overlap; (c) student overlap mass, all three defined in the appendix. The five curves in each panel follow the same pairing (RL-tuned) training on five datasets at |D| = 1k: the two dark curves are the teacher’s own data—its real post-training data DAPO and the questions it generates itself—while the three pale curves are DeepMath, ORZ and DeepCoder. come from the teacher itself, the states they lead the student into are more likely to lie within its trust region. Together these two account for why self-generated data performs on par with, or better than, real data. 
+
+## 5 Data-free Multi-teacher On-policy Distillation 
+
+MOPD needs more than prompts: each prompt must come with the domain label that routes it. In practice the domain teachers’ post-training data is often out of reach, and these pairs then have to be pieced together from something else. DF-OPD closes exactly this gap: let each domain teacher write its own questions, and the domain label comes for free from whoever wrote them, with no question taken from post-training data. We test this in the three-domain setting—mathematics, code and instruction following—of Open-MOPD. 
+
+5.1 Experimental Setup Models. We build the multi-teacher setting from the open recipe of Open-MOPD (Gao et al., 2026). Starting from SmolLM3-3B-Base (Bakouch et al., 2025), we first run SFT on mixed-domain data to obtain πmixsft , and then run RL from πmixsft separately on mathematics, code and instruction following to obtain the three domain teachers πmath , πcode and πIF .The student in the MOPD stage is initialized from πmixsft as well, so student and teachers share a common starting point. 
+
+Data. We compare two kinds of training data. The first is real post-training data: a 7k subset drawn at random from the post-training data released with Open-MOPD (Gao et al., 2026), comprising 1,540 / 1,870 / 4,048 problems for mathematics / code / instruction following. The second is produced by the domain teachers themselves, following the procedure of Section 4.1; we again cut |D| = 8/64/256/1000, where |D| now counts problems across all three domains and is split among them in the same proportions as the real data. The generation prompt is given in the appendix. 
+
+Training and evaluation. For training we adopt the objective and the key hyperparameters of Open-MOPD (Gao et al., 2026). For evaluation we report the three domains separately: mathematics on AIME25 (OpenCompass, 2025) and AIME26 (Zhang & Math-AI Team, 2026) (avg@16), code on LiveCodeBench v5 and v6 (Jain et al., 2025) (avg@5), and instruction following on IFEval (Zhou et al., 2023b) and IFBench (Pyatkin et al., 2026). Within a domain we take the plain average of the two benchmarks, and Total is the macro average over the 11 Work in Progress September 12, 2026 Table 1: Multi-teacher distillation: real post-training data against self-generated questions. 
+
+Mathematics is scored as avg@16 over AIME25 and AIME26 (30 problems each, temperature 0.6), code as avg@5 over LiveCodeBench v5 and v6 (167 and 175 problems, temperature 1.0), and instruction following as the mean of IFEval and IFBench (541 and 300 problems). Each domain score is the unweighted mean of its two benchmarks, and Total the macro average over the three. Rec. is the recovery rate of (5), expressing the gain over πmixsft 
+
+as a fraction of RouteRL’s 7.22-point headroom. The (math/code/IF) column reports the per-domain problem counts, whose sum is the size of the training set. Every MOPD row is the checkpoint attaining the highest Total, selected on the benchmarks reported here; no held-out selection set was used.                                                                                                                                                        
+
+> Mathematics Code Instr. following Method (math/code/IF) AIME25 AIME26 avg@16 LCBv5 LCBv6 avg@5 IFEval IFB avg Total Rec.
+> Student πmixsft —16.88 14.79 15.83 15.09 16.46 15.77 68.02 14.00 41.01 24.21 —
+> Teacher πϕmath —24.79 21.25 23.02 ————————
+> Teacher πϕcode ————22.87 22.17 22.52 —————
+> Teacher πϕIF ———————74.12 23.33 48.73 ——
+> RouteRL (ceiling) —24.79 21.25 23.02 22.87 22.17 22.52 74.12 23.33 48.73 31.42 100% MOPD w/ post-training data 1,540 / 1,870 / 4,048 24.58 21.46 23.02 22.51 20.91 21.71 75.60 22.00 48.80 31.18 96.6% self-gen |D|=82 / 2 / 4 24.38 22.50 23.44 19.16 20.11 19.64 71.16 20.67 45.92 29.66 75.6% self-gen |D|=64 13 / 16 / 35 23.75 21.46 22.60 20.72 21.03 20.87 73.01 22.00 47.51 30.33 84.8% self-gen |D|=256 53 / 64 / 139 25.62 21.46 23.54 20.96 21.03 20.99 73.38 22.33 47.86 30.80 91.3% self-gen |D|=1k 206 / 251 / 543 25.83 21.88 23.85 21.32 21.03 21.17 72.83 25.00 48.91 31.31 98.5%
+
+0 50 100 
+
+MOPD step 
+
+16 18 20 22 24 
+
+> AIME25/26 avg@16  teacher student (step 0)
+
+(a) math 
+
+0 50 100 
+
+MOPD step 
+
+16 18 20 22 
+
+> LCB v5/v6 avg@5  teacher student (step 0)
+
+(b) code 
+
+0 50 100 
+
+MOPD step 
+
+40 42 44 46 48 50 
+
+> IFEval/IFBench avg@1
+> teacher student (step 0)
+
+(c) IF  
+
+> human 7,458 self-gen 1,000
+
+Figure 8: Per-domain training curves under MOPD. The dashed grey curve is trained on the 7,458 real post-training examples, the solid orange curve on 1,000 self-generated questions. (a) mathematics, as avg@16 over AIME25 and AIME26; (b) code, as avg@5 over LiveCodeBench v5 and v6; (c) instruction following, as the mean of IFEval and IFBench. In every panel the red dashed line marks that domain’s teacher and the grey dotted line the student at step 0. three domains. As a second headline number we report the recovery rate , the fraction of the available headroom the student closes relative to its own starting point: Rec. = Total − Total (πmixsft )
+
+Total (RouteRL ) − Total (πmixsft ) , (5) where RouteRL hands every test problem directly to the teacher that owns its domain and serves as the reference ceiling for MOPD in this setting. Decoding hyperparameters are given in the appendix. 
+
+5.2 Results 1k self-generated questions match and then overtake 7k real post-training examples. 
+
+Table 1 gives the full results and Figure 8 the per-domain training curves. At |D| = 1k—13% 12 Work in Progress September 12, 2026 0 50 100        
+
+> MOPD step
+> 16 18 20 22 24
+> AIME25/26 avg@16  teacher student (step 0)
+> (a) math
+> 050 100
+> MOPD step
+> 16 18 20 22
+> LCB v5/v6 avg@5  teacher student (step 0)
+> (b) code
+> 050 100
+> MOPD step
+> 40 42 44 46 48 50
+> IFEval/IFBench avg@1  teacher student (step 0)
+> (c) IF
+> |D| = 8 |D| = 64 |D| = 256 |D| = 1, 000
+
+Figure 9: Per-domain performance as the amount of self-generated data grows. Curves run from light to dark for |D| = 8, 64, 256 and 1,000, each counted across the three domains and split among them in the proportions given in Table 1. Axes and reference lines are as in Figure 8: (a) mathematics; (b) code; (c) instruction following. the size of the real data—self-generated questions reach a Total of 31.31 and recover 98.5% of the available headroom, ahead of the 31.18 (96.6%) obtained with the real post-training data. Per domain, self-generated data comes out higher on mathematics (111.6% against 100.0%) and instruction following (102.4% against 100.9%), and is behind only on code (80.0% against 88.0%). Assembling the (prompt, domain) pairs that MOPD needs therefore does not require the questions from the domain teachers’ post-training data. 
+
+Marginal returns decay more slowly under MOPD than with a single teacher. Fig-ure 9 tracks the four tiers across the three domains. |D| = 8/64/256/1000 recover 75.6%/84.8%/91.3%/98.5%, and it takes around a thousand questions to catch the 96.6% of the real data, whereas with a single teacher eight problems already matched the full dataset (Section 3.2). We see two reasons. First, |D| here is summed over three domains: |D| = 8leaves only 2/2/4 problems per domain, which is not comparable to eight problems within a single one. Second, domains in MOPD interfere with one another (Chen et al., 2026; Gao et al., 2026; Ma et al., 2026; Hou et al., 2026a), so more questions are needed to cover enough of the state space inside each domain to support stable distillation. 
+
+## 6 Can OPD Train on No Question at All? 
+
+We take the investigation one step further: can OPD train reliably on an input that states no question at all—that is, on the base template itself, as in One-shot OPD (Fu et al., 2026b)? We run this on all three settings: the RL-tuned and the larger-parameter pairing of Section 4, and the three-domain MOPD of Section 5. Figure 10 shows the base template of each. Every one is what that model’s own chat template produces from an empty user turn, and carries no question content. Under MOPD the three domains share an identical input and the domain label serves only to route a sample to its teacher; the per-domain proportions match those of the self-generated and the real data (20.6 : 25.1 : 54.3), so that the mixture ratio itself is not a confound. Table 2 summarises the results, with the training curves in Appendix ?? . On 
+
+DeepSeek-R1-Distill-Qwen-1.5B ← JustRL-DeepSeek-1.5B the base template recovers 62.1% of the student–teacher gap, indeed the same order as self-generated questions (66.4%) and real data (65.0%). On Qwen3-1.7B ← Qwen3-30B-A3B-Instruct-2507 , however, it recov-ers a mere 2.3% over 180 steps, the curve never leaving the noise around its starting point (Figure ?? b). Under MOPD it does train, but its 25.9% falls far short of both self-generated questions (98.5%) and real data (96.6%). These results suggest that the effect of the base template has to be judged case by case, and that it may not be a general recipe. 13 Work in Progress September 12, 2026 
+
+(a) RL-tuned Teacher — DeepSeek-R1-Distill-Qwen-1.5B 
+
+> <|begin_of_sentence|><|User|><|Assistant|><think> \n
+
+(b) Larger-parameter Teacher — Qwen3-1.7B 
+
+> <|im_start|>user \n <|im_end|> \n <|im_start|>assistant \n <think> \n\n </think> \n\n
+
+(c) MOPD — SmolLM3-3B-MixSFT 
+
+> <|im_start|>system \n <|im_end|> \n <|im_start|>user \n <|im_end|> \n <|im_start|>assistant \n
+
+Figure 10: The base template of each Student model. Every template is the output of that model’s own tokenizer given an empty user turn, namely: (a) the base tem-plate of DeepSeek-R1-Distill-Qwen-1.5B from the setting of RL-tuned Teacher; (b) that of Qwen3-1.7B from the setting of Larger-parameter Teacher; (c) that of SmolLM3-3B-MixSFT 
+
+from the setting of MOPD. Table 2: Base template against self-generated and real data. Score is the macro average over the six mathematics benchmarks for the two single-teacher pairings and the three-domain macro for MOPD. Recovery is measured against each setting’s own ceiling: the teacher for the single-teacher pairings, and the per-domain teacher composition (RouteRL) for MOPD. Setting Training input Score Recovery RL-tuned Teacher 
+
+R1-Distill-1.5B ← JustRL-1.5B 
+
+Base template 56.00 62.1% Self-generated ( |D|=64) 56.61 66.4% Real data (DAPO-17.9k) 56.41 65.0% Larger-parameter Teacher 
+
+Qwen3-1.7B ← Qwen3-30B-A3B 
+
+Base template 35.44 2.3% Self-generated ( |D|=64) 49.16 35.8% Real data (DAPO-17.9k) 47.36 31.4% MOPD (three teachers) 
+
+SmolLM3-3B-MixSFT 
+
+Base template 26.07 25.9% Self-generated ( |D|=1k) 31.31 98.5% Real data (7,458) 31.18 96.6% R1-Dist. 1.5B SmolLM3 MixSFT Qwen3 1.7B    
+
+> 020 40 60
+> Self-QA (%)
+> 62.0 11.8 0.1 020 40 60
+> recovery (%)
+
+Figure 11: Base-template recovery tracks self-QA rate. Bars: self-QA over 1,024 samples (left axis). Line: base-template recovery (right axis). To see what makes the base template effective in some settings but not others, we sampled each Student 1,024 times on its own base template and examined the resulting trajectories in detail. 
+
+DeepSeek-R1-Distill-Qwen-1.5B turns out to pose its own problem and then solve it at a high rate: given a prompt that states no question, it writes one itself and works it through, as in Figure 12a, where it poses an asymptote problem and carries it to y = 0. Measuring how often this happens (criteria in Appendix ?? ) gives 62.0% for DeepSeek-R1-Distill-Qwen-1.5B , but only 11.8% for SmolLM3-3B-MixSFT and 0.1% for Qwen3-1.7B ,whose dominant response (85.4%) is instead to ask for the missing question (Figure 12b). These three rates are strictly ordered with the recoveries in Table 2 (62.1%, 25.9%, 2.3%) and span three different teacher–student pairings (Figure 11), so how well the base template works is closely tied to how readily the Student poses its own problem and then solves it . Appendix ?? discusses further why these Students differ in this respect. 14 Work in Progress September 12, 2026 
+
+(a) Self-QA — DeepSeek-R1-Distill-Qwen-1.5B 
+
+> input
+> <|begin_of_sentence|><|User|><|Assistant|><think> \n rollout (1,226 tokens)
+> Find the vertical and horizontal asymptotes of f(x) = (x+6)/(xˆ2+6x+11).
+> Vertical: set xˆ2+6x+11 = 0; discriminant 36-44 = -8 < 0, so there is no real root. [. . . ] Horizontal: deg(num) 1 < deg(den) 2.
+> Answer: y = 0, no vertical asymptote.
+
+(b) Refusal — Qwen3-1.7B 
+
+> input
+> <|im_start|>user \n <|im_end|> \n <|im_start|>assistant \n <think> \n\n </think> \n\n rollout (14 tokens)
+> Sure! Please provide the question you’d like me to answer.
+
+Figure 12: Two responses to an input that states no question. Each panel gives the base template fed to the Student and the rollout it produced. (a) DeepSeek-R1-Distill-Qwen-1.5B 
+
+states an asymptote problem of its own and works it through, producing the long reasoning chain the teacher then supervises; the derivation is abridged here. (b) Qwen3-1.7B instead stops after fourteen tokens to ask for the missing question, leaving almost nothing to distil. Both rollouts are verbatim. Overall, the effect of the base template stems less from the template itself than from the tendency of some Students to pose their own problems when given an out-of-distribution, empty input. Such a pattern essentially degenerates into an implicit form of DF-OPD, except that the questions are written by the Student rather than the teacher, where neither their number nor their quality is under any control. DF-OPD, in contrast, is not restricted to particular Students: it obtains its training questions from the teacher directly, and is both more general and markedly stronger. 
+
+## 7 Related Work 
+
+On-policy distillation. OPD was established by MiniLLM (Gu et al., 2024) and GKD (Agar-wal et al., 2024): the former optimizes the teacher–student divergence on the student’s own rollouts by policy gradient under a reverse KL, the latter generalizes this to a family of divergences and to mixed on- and off-policy sampling. The combination of on-policy state visitation with token-level dense supervision has since made OPD a standard component of frontier post-training pipelines (Yang et al., 2025; Xiao et al., 2026; Zeng et al., 2026; Xu et al., 2026a), and subsequent work has been largely algorithmic (Song & Zheng, 2026). One line refines the supervision signal itself, identifying which tokens are worth learning (Xu et al., 2026b; Wang et al., 2026c) or extracting a more task-relevant signal from the teacher–student difference (Heo et al., 2026). A second adjusts the objective and training stability, reading OPD as RL under a dense KL constraint and amplifying the implicit reward so as to pass the teacher’s own ceiling (Yang et al., 2026a), or keeping the student from drifting out of the teacher’s high-confidence region (Xing et al., 2026; Xie et al., 2026). A third widens its scope, adapting OPD to multi-turn agentic settings (Wang et al., 2026a; Li et al., 2026b; Zhong et al., 2026) or to teacher–student pairs with mismatched tokenizers (Sun et al., 2026). Multi-teacher distillation (MOPD) extends the paradigm to consolidating capabilities across domains (Ma et al., 2026; Chen et al., 2026; Gao et al., 2026; Yang et al., 2026b): compared with merging experts directly in parameter space (Ilharco et al., 2022; Yadav et al., 2023), it carries out the consolidation in policy space, which is generally more stable and better at preserving per-domain ability (Ma et al., 2026). 15 Work in Progress September 12, 2026 
+
+Data in post-training. Data-centric studies so far come mainly from SFT and RLVR. One line uses influence functions or quality scores to select a more valuable subset from a given pool (Xia et al., 2024; Chen et al., 2024); another shows that very few examples suffice to elicit alignment and reasoning (Zhou et al., 2023a; Ye et al., 2025; Muennighoff et al., 2025; Li et al., 2025; Wang et al., 2026b). Their forms of supervision—a reference solution in SFT, a sparse outcome reward in RL—differ from the dense target OPD places at every visited state, which is why data in OPD warrants study of its own. A few works have approached the data side of OPD, through the mixing ratio of problems (Hou et al., 2026a) or their ordering (Zhu et al., 2026), but they share the premises of the SFT and RLVR literature above: that the composition of the data materially affects OPD, and that an external pool must exist in the first place and is therefore worth optimizing within. Following One-shot RLVR (Wang et al., 2026b), we assume neither, and ask directly how much of the difference in outcome the quantity, difficulty and information content of the data can explain (Section 3), and then whether the training questions need come from outside at all (Section 4). Two concurrent works examine the same premise: One-shot OPD (Fu et al., 2026b) explains the effectiveness of few samples through state coverage, and What Matters in OPD (Hou et al., 2026b) derives a data-selection method from instance difficulty and CoT length. We differ in not stopping at whether a state is visited, but measuring how much of the total distillation signal the visited states expose (Section 3.4.1), and in showing that what OPD transfers is the teacher’s mode of reasoning rather than the knowledge the data contains (Section 3.4.2). We then push this insensitivity to questions produced entirely by the teacher, matching or beating real data in both single- and multi-teacher distillation (Sections 4 and 5). 
+
+Synthetic data. A persistent line of work reduces the reliance of post-training on human-written data. On the input side, Self-Instruct (Wang et al., 2023) and Evol-Instruct (Xu et al., 2024) bootstrap instructions from a seed set, Magpie (Xu et al., 2025) shows that a chat-template prefix alone is enough to elicit complete instruction–response pairs from an aligned model, and self-play training (Zhao et al., 2025; Huang et al., 2026; Li et al., 2026a) has models propose their own tasks. On the label side, a body of work removes the dependence of RL on verifiable rewards, substituting the model’s own confidence or entropy (Zhao et al., 2026), majority agreement across samples (Zuo et al., 2025), or asking outright how far RLVR can go with no labels at all (He et al., 2026a). We differ from both sides: OPD in its standard form already draws no supervision from labels, and our self-generated prompts use no seed set and receive no quality filtering, the aim being to push the analysis of OPD’s sensitivity to data to its extreme. 
+
+## 8 Conclusion 
+
+We asked how much OPD owes to its training data, and the answer turns out to be: remark-ably little. Along quantity, difficulty and information content the training curves barely move, because dense supervision on an on-policy learner turns a handful of prompts into a large amount of signal, and because what crosses from teacher to student is a way of reason-ing rather than the content of the data. Taken to its limit, this removes the external dataset altogether: a teacher asked to write its own questions supplies training data that matches, and even beats, real data—both in single-teacher distillation and in the multi-teacher setting, where (prompt, domain) pairs are otherwise hardest to come by. Removing the question as well is where this stops: an input that states none trains a student only where that student happens to supply one itself. Collectively these results reframe the question about data in OPD. 
+
+## References 
+
+Rishabh Agarwal, Nino Vieillard, Yongchao Zhou, Piotr Stanczyk, Sabela Ramos Garea, Matthieu Geist, and Olivier Bachem. On-policy distillation of language models: Learning from self-generated mistakes. In The Twelfth International Conference on Learning Represen-tations , 2024. URL https://openreview.net/forum?id=3zKtaqxLhW .AI-MO. Aime 2024. https://huggingface.co/datasets/AI-MO/aimo-validation-aime ,2024a. 16 Work in Progress September 12, 2026 AI-MO. Amc 2023. https://huggingface.co/datasets/AI-MO/aimo-validation-amc ,2024b. Elie Bakouch, Loubna Ben Allal, Anton Lozhkov, Nouamane Tazi, Lewis Tunstall, Car-los Miguel Patiño, Edward Beeching, Aymeric Roucher, Aksel Joonas Reedi, Quentin Gallouédec, Kashif Rasul, Nathan Habib, Clémentine Fourrier, Hynek Kydlicek, Guil-herme Penedo, Hugo Larcher, Mathieu Morlon, Vaibhav Srivastav, Joshua Lochner, Xuan-Son Nguyen, Colin Raffel, Leandro von Werra, and Thomas Wolf. SmolLM3: smol, multilingual, long-context reasoner. https://huggingface.co/blog/smollm3 , 2025. Lichang Chen, Shiyang Li, Jun Yan, Hai Wang, Kalpa Gunaratna, Vikas Yadav, Zheng Tang, Vijay Srinivasan, Tianyi Zhou, Heng Huang, et al. Alpagasus: Training a better alpaca with fewer data. In International Conference on Learning Representations , volume 2024, pp. 34767–34797, 2024. Tianlei Chen, Jiao Ou, Ziyuan Liu, Ruiming Tang, Jian Liang, and Han Li. Counteraction-aware multi-teacher on-policy distillation for general capability recovery with domain preservation. arXiv preprint arXiv:2605.27115 , 2026. Yuqian Fu, Haohuan Huang, Kaiwen Jiang, Jiacai Liu, Zhuo Jiang, Yuanheng Zhu, and Dongbin Zhao. Revisiting on-policy distillation: Empirical failure modes and simple fixes. In Third Conference on Language Modeling , 2026a. URL https://openreview.net/forum?i d=uZbZb058bA .Zixuan Fu, Bingxiang He, Yuxin Zuo, Haohuan Huang, Jinqian Zhang, Ruhang Xiao, Cheng Qian, Qinyu Luo, Huan-ang Gao, Yudong Wang, et al. Rethinking on-policy distillation of large language models ii: One training example. arXiv preprint arXiv:2609.04172 , 2026b. Huan-ang Gao, Haohan Chi, Yong Yan, Shiyuan Feng, Hanlin Wu, Zheng Jiang, Bingxiang He, Wei-Ying Ma, Ya-Qin Zhang, and Hao Zhou. Open-mopd: Diagnosing and fixing ca-pability imbalance in multi-teacher on-policy distillation. arXiv preprint arXiv:2608.19098 ,2026. Yuxian Gu, Li Dong, Furu Wei, and Minlie Huang. MiniLLM: Knowledge distillation of large language models. In The Twelfth International Conference on Learning Representations ,2024. URL https://openreview.net/forum?id=5h0qf7IBZZ .Daya Guo, Dejian Yang, Haowei Zhang, Junxiao Song, Peiyi Wang, Qihao Zhu, Runxin Xu, Ruoyu Zhang, Shirong Ma, Xiao Bi, et al. Deepseek-r1: Incentivizing reasoning capability in llms via reinforcement learning. arXiv preprint arXiv:2501.12948 , 2025. Bingxiang He, Zekai Qu, Zeyuan Liu, Yinghao Chen, Yuxin Zuo, Cheng Qian, Kaiyan Zhang, Weize Chen, Chaojun Xiao, Ganqu Cui, et al. Justrl: Scaling a 1.5 b llm with a simple rl recipe. arXiv preprint arXiv:2512.16649 , 2025. Bingxiang He, Yuxin Zuo, Zeyuan Liu, Shangziqi Zhao, Zixuan Fu, Junlin Yang, Cheng Qian, Kaiyan Zhang, Yuchen Fan, Ganqu Cui, Xiusi Chen, Youbang Sun, Xingtai Lv, Xuekai Zhu, Li Sheng, Ran Li, Huan ang Gao, Yuchen Zhang, Lifan Yuan, Bowen Zhou, Zhiyuan Liu, and Ning Ding. How far can unsupervised RLVR scale LLM training? In The Fourteenth International Conference on Learning Representations , 2026a. URL https: //openreview.net/forum?id=VesLZukY5E .Chaoqun He, Renjie Luo, Yuzhuo Bai, Shengding Hu, Zhen Thai, Junhao Shen, Jinyi Hu, Xu Han, Yujie Huang, Yuxiang Zhang, et al. Olympiadbench: A challenging benchmark for promoting agi with olympiad-level bilingual multimodal scientific problems. In 
+
+Proceedings of the 62nd Annual Meeting of the Association for Computational Linguistics (Volume 1: Long Papers) , pp. 3828–3850, 2024. Zhiwei He, Tian Liang, Jiahao Xu, Qiuzhi Liu, Xingyu Chen, Yue Wang, Linfeng Song, Dian Yu, Zhenwen Liang, Wenxuan Wang, et al. Deepmath-103k: A large-scale, chal-lenging, decontaminated, and verifiable mathematical dataset for advancing reasoning. In International Conference on Learning Representations , volume 2026, pp. 138306–138322, 2026b. 17 Work in Progress September 12, 2026 Dan Hendrycks, Collin Burns, Saurav Kadavath, Akul Arora, Steven Basart, Eric Tang, Dawn Song, and Jacob Steinhardt. Measuring mathematical problem solving with the math dataset. arXiv preprint arXiv:2103.03874 , 2021. Byeongho Heo, Jaehui Hwang, Sangdoo Yun, and Dongyoon Han. On-policy delta distilla-tion. arXiv preprint arXiv:2607.15161 , 2026. Wenjin Hou, Shangpin Peng, Weinong Wang, Zheng Ruan, Yue Zhang, Zhenglin Zhou, Mingqi Gao, Yifei Chen, Kaiqi Wang, Hongming Yang, et al. Uni-opd: Unifying on-policy distillation with a dual-perspective recipe. arXiv preprint arXiv:2605.03677 , 2026a. Zhinan Hou, Jiaqi Zhang, Xunliang Cai, and Keyou You. What matters in on-policy distilla-tion? a perspective on data efficiency and data selection. arXiv preprint arXiv:2609.05198 ,2026b. Jingcheng Hu, Yinmin Zhang, Qi Han, Daxin Jiang, Xiangyu Zhang, and Heung-Yeung Shum. Open-reasoner-zero: An open source approach to scaling up reinforcement learn-ing on the base model. Advances in Neural Information Processing Systems , 38:162239–162262, 2026. Chengsong Huang, Wenhao Yu, Xiaoyang Wang, Hongming Zhang, Zongxia Li, Ruosen Li, Jiaxin Huang, Haitao Mi, and Dong Yu. R-zero: Self-evolving reasoning llm from zero data. In International Conference on Learning Representations , volume 2026, pp. 130770–130790, 2026. Gabriel Ilharco, Marco Tulio Ribeiro, Mitchell Wortsman, Suchin Gururangan, Ludwig Schmidt, Hannaneh Hajishirzi, and Ali Farhadi. Editing models with task arithmetic. 
+
+arXiv preprint arXiv:2212.04089 , 2022. Naman Jain, King Han, Alex Gu, Wen-Ding Li, Fanjia Yan, Tianjun Zhang, Sida Wang, Armando Solar-Lezama, Koushik Sen, and Ion Stoica. Livecodebench: Holistic and contamination free evaluation of large language models for code. In The Thirteenth International Conference on Learning Representations , 2025. URL https://openreview.net/f orum?id=chfJJYC3iL .Woogyeol Jin, Taywon Min, Yongjin Yang, Dennis Wei, Yi Zhou, Swanand Ravindra Kadhe, Nathalie Baracaldo, and Kimin Lee. Entropy-aware on-policy distillation of language models. In Forty-third International Conference on Machine Learning , 2026. URL https: //openreview.net/forum?id=J5i09faOOf .Aitor Lewkowycz, Anders Andreassen, David Dohan, Ethan Dyer, Henryk Michalewski, Vinay Ramasesh, Ambrose Slone, Cem Anil, Imanol Schlag, Theo Gutman-Solo, et al. Solving quantitative reasoning problems with language models. Advances in neural information processing systems , 35:3843–3857, 2022. Gengsheng Li, Jinghan He, Shijie Wang, Dan Zhang, Ruiqi Liu, Renrui Zhang, Zijun Yao, Junfeng Fang, Haiyun Guo, and Jinqiao Wang. R-diverse: Mitigating diversity illusion in self-play llm training. arXiv preprint arXiv:2602.13103 , 2026a. Gengsheng Li, Mao Zheng, Mingyang Song, Ruiqi Liu, Tianyu Yang, Jie Sun, Qiyong Zhong, Haiyun Guo, Junfeng Fang, Dan Zhang, et al. On-policy distillation with curriculum turn-level guidance for multi-turn agents. arXiv preprint arXiv:2606.15912 , 2026b. Xuefeng Li, Haoyang Zou, and Pengfei Liu. Limr: Less is more for rl scaling. arXiv preprint arXiv:2502.11886 , 2025. Yaxuan Li, Yuxin Zuo, Bingxiang He, Jinqian Zhang, Chaojun Xiao, Cheng Qian, Tianyu Yu, Huan-ang Gao, Wenkai Yang, Zhiyuan Liu, and Ning Ding. Rethinking on-policy distillation of large language models: Phenomenology, mechanism, and recipe. In ICML 2026 Workshop on Foundations of Deep Generative Models: Understanding Memorization, Generalization, and Reasoning , 2026c. URL https://openreview.net/forum?id=aaDDXXDG XB .18 Work in Progress September 12, 2026 Niu Lian, Alan Chen, Zhehao Yu, Chengzhen Duan, Fazhan Liu, Hui Liu, Pei Fu, Jian Luan, Yaowei Wang, Shu-Tao Xia, et al. Ui-mopd: Multi-platform on-policy distillation for continual gui agent learning. arXiv preprint arXiv:2607.04425 , 2026. Hunter Lightman, Vineet Kosaraju, Yuri Burda, Harrison Edwards, Bowen Baker, Teddy Lee, Jan Leike, John Schulman, Ilya Sutskever, and Karl Cobbe. Let’s verify step by step. In International Conference on Learning Representations , volume 2024, pp. 39578–39601, 2024. Kevin Lu and Thinking Machines Lab. On-policy distillation. Thinking Machines Lab: Connectionism , 2025. doi: 10.64434/tml.20251026. https://thinkingmachines.ai/blog/on-policy-distillation. Michael Luo, Sijun Tan, Roy Huang, Ameen Patel, Alpay Ariyak, Qingyang Wu, Xiaoxiang Shi, Rachel Xin, Colin Cai, Maurice Weber, Ce Zhang, Li Erran Li, Raluca Ada Popa, and Ion Stoica. Deepcoder: A fully open-source 14b coder at o3-mini level. https: //pretty-radio-b75.notion.site/DeepCoder-A-Fully-Open-Source-14B-Coder-at-O 3-mini-Level-1cf81902c14680b3bee5eb349a512a51 , 2025. Notion Blog. Wenhan Ma, Jianyu Wei, Liang Zhao, Hailin Zhang, Bangjun Xiao, Lei Li, Qibin Yang, Bofei Gao, Yudong Wang, Rang Li, et al. Mopd: Multi-teacher on-policy distillation for capability integration in llm post-training. arXiv preprint arXiv:2606.30406 , 2026. Niklas Muennighoff, Zitong Yang, Weijia Shi, Xiang Lisa Li, Li Fei-Fei, Hannaneh Hajishirzi, Luke Zettlemoyer, Percy Liang, Emmanuel Candès, and Tatsunori B Hashimoto. s1: Simple test-time scaling. In Proceedings of the 2025 Conference on Empirical Methods in Natural Language Processing , pp. 20286–20332, 2025. OpenCompass. Aime 2025. https://huggingface.co/datasets/opencompass/AIME2025 ,2025. Valentina Pyatkin, Saumya Malik, Victoria Graf, Hamish Ivison, Shengyi Huang, Pradeep Dasigi, Nathan Lambert, and Hanna Hajishirzi. Generalizing verifiable instruction following. Advances in Neural Information Processing Systems , 38, 2026. Guangming Sheng, Chi Zhang, Zilingfeng Ye, Xibin Wu, Wang Zhang, Ru Zhang, Yanghua Peng, Haibin Lin, and Chuan Wu. Hybridflow: A flexible and efficient rlhf framework. In 
+
+Proceedings of the Twentieth European Conference on Computer Systems , pp. 1279–1297, 2025. Mingyang Song and Mao Zheng. A survey of on-policy distillation for large language models. arXiv preprint arXiv:2604.00626 , 2026. Jie Sun, Mao Zheng, Mingyang Song, Qiyong Zhong, Yilin Cheng, Bichuan Feng, Pengfei Liu, Junfeng Fang, and Xiang Wang. Simct: Recovering lost supervision for cross-tokenizer on-policy distillation. arXiv preprint arXiv:2605.07711 , 2026. Jiaqi Wang, Wenhao Zhang, Weijie Shi, Yaliang Li, and James Cheng. Exploring temporal curriculum in on-policy distillation for multi-turn autonomous agents. In Third Conference on Language Modeling , 2026a. URL https://openreview.net/forum?id=KH9eJRz8WR .Yiping Wang, Qing Yang, Zhiyuan Zeng, Liliang Ren, Liyuan Liu, Baolin Peng, Hao Cheng, Xuehai He, Kuan Wang, Jianfeng Gao, et al. Reinforcement learning for reasoning in large language models with one training example. Advances in Neural Information Processing Systems , 38:122721–122764, 2026b. Yizhong Wang, Yeganeh Kordi, Swaroop Mishra, Alisa Liu, Noah A Smith, Daniel Khashabi, and Hannaneh Hajishirzi. Self-instruct: Aligning language models with self-generated instructions. In Proceedings of the 61st annual meeting of the association for computational linguistics (volume 1: long papers) , pp. 13484–13508, 2023. Yuanyi Wang, Su Lu, Yanggan Gu, Pengkai Wang, Yifan Yang, Zhaoyi Yan, Congkai Xie, Jianmin Wu, and Hongxia Yang. Not all disagreement is learnable: Token teachability in on-policy distillation. arXiv preprint arXiv:2605.26844 , 2026c. 19 Work in Progress September 12, 2026 Mengzhou Xia, Sadhika Malladi, Suchin Gururangan, Sanjeev Arora, and Danqi Chen. Less: Selecting influential data for targeted instruction tuning. arXiv preprint arXiv:2402.04333 ,2024. Bangjun Xiao, Bingquan Xia, Bo Yang, Bofei Gao, Bowen Shen, Chen Zhang, Chenhong He, Chiheng Lou, Fuli Luo, Gang Wang, et al. Mimo-v2-flash technical report. arXiv preprint arXiv:2601.02780 , 2026. Zhengpeng Xie, Li Lyna Zhang, Zeke Xie, and Mao Yang. Trust region policy distillation. 
+
+arXiv preprint arXiv:2607.04751 , 2026. Xingrun Xing, Haoqing Wang, Boyan Gao, Ziheng Li, and Yehui Tang. Trust region on-policy distillation. arXiv preprint arXiv:2606.01249 , 2026. Anyi Xu, Bangcai Lin, Bing Xue, Bingxuan Wang, Bingzheng Xu, Bochao Wu, Bowei Zhang, Chaofan Lin, Chen Dong, Chenchen Ling, et al. Deepseek-v4: Towards highly efficient million-token context intelligence. arXiv preprint arXiv:2606.19348 , 2026a. Can Xu, Qingfeng Sun, Kai Zheng, Xiubo Geng, Pu Zhao, Jiazhan Feng, Chongyang Tao, Qingwei Lin, and Daxin Jiang. Wizardlm: Empowering large pre-trained language models to follow complex instructions. In International Conference on Learning Representations ,volume 2024, pp. 30745–30766, 2024. Yuanda Xu, Hejian Sang, Zhengze Zhou, Ran He, Zhipeng Wang, and Alborz Geramifard. Tip: Token importance in on-policy distillation. arXiv preprint arXiv:2604.14084 , 2026b. Zhangchen Xu, Fengqing Jiang, Luyao Niu, Yuntian Deng, Radha Poovendran, Yejin Choi, and Bill Yuchen Lin. Magpie: Alignment data synthesis from scratch by prompting aligned llms with nothing. In International Conference on Learning Representations , volume 2025, pp. 76346–76382, 2025. Prateek Yadav, Derek Tam, Leshem Choshen, Colin A Raffel, and Mohit Bansal. Ties-merging: Resolving interference when merging models. Advances in neural information processing systems , 36:7093–7115, 2023. An Yang, Anfeng Li, Baosong Yang, Beichen Zhang, Binyuan Hui, Bo Zheng, Bowen Yu, Chang Gao, Chengen Huang, Chenxu Lv, et al. Qwen3 technical report. arXiv preprint arXiv:2505.09388 , 2025. Wenkai Yang, Weijie Liu, Ruobing Xie, Kai Yang, Saiyong Yang, and Yankai Lin. Learning beyond teacher: Generalized on-policy distillation with reward extrapolation. arXiv preprint arXiv:2602.12125 , 2026a. Zhuolin Yang, Zihan Liu, Yang Chen, Wenliang Dai, Boxin Wang, Sheng-Chieh Lin, Chankyu Lee, Yangyi Chen, Dongfu Jiang, Jiafan He, et al. Nemotron-cascade 2: Post-training llms with cascade rl and multi-domain on-policy distillation. arXiv preprint arXiv:2603.19220 ,2026b. Yixin Ye, Zhen Huang, Yang Xiao, Ethan Chern, Shijie Xia, and Pengfei Liu. Limo: Less is more for reasoning. arXiv preprint arXiv:2502.03387 , 2025. Qiying Yu, Zheng Zhang, Ruofei Zhu, Yufeng Yuan, Xiaochen Zuo, Yu Yue, Weinan Dai, Tiantian Fan, Gaohong Liu, Lingjun Liu, et al. Dapo: An open-source llm reinforcement learning system at scale. Advances in Neural Information Processing Systems , 38:113222– 113244, 2026. Aohan Zeng, Xin Lv, Zhenyu Hou, Zhengxiao Du, Qinkai Zheng, Bin Chen, Da Yin, Chendi Ge, Chenghua Huang, Chengxing Xie, et al. Glm-5: from vibe coding to agentic engineer-ing. arXiv preprint arXiv:2602.15763 , 2026. Yifan Zhang and Math-AI Team. American invitational mathematics examination (aime) 2026. https://huggingface.co/datasets/math-ai/aime26 , 2026. 20 Work in Progress September 12, 2026 Andrew Zhao, Yiran Wu, Yang Yue, Tong Wu, Quentin Xu, Yang Yue, Matthieu Lin, Shenzhi Wang, Qingyun Wu, Zilong Zheng, and Gao Huang. Absolute zero: Reinforced self-play reasoning with zero data. In The Thirty-ninth Annual Conference on Neural Information Processing Systems , 2025. URL https://openreview.net/forum?id=neZSGqhxDa .Xuandong Zhao, Zhewei Kang, Aosong Feng, Sergey Levine, and Dawn Song. Learning to reason without external rewards. In The Fourteenth International Conference on Learning Representations , 2026. URL https://openreview.net/forum?id=OU9nFEYR2M .Qiyong Zhong, Mao Zheng, Mingyang Song, Xin Lin, Jie Sun, Houcheng Jiang, Xiang Wang, and Junfeng Fang. Sod: Step-wise on-policy distillation for small language model agents. 
+
+arXiv preprint arXiv:2605.07725 , 2026. Chunting Zhou, Pengfei Liu, Puxin Xu, Srinivasan Iyer, Jiao Sun, Yuning Mao, Xuezhe Ma, Avia Efrat, Ping Yu, Lili Yu, et al. Lima: Less is more for alignment. Advances in Neural Information Processing Systems , 36:55006–55021, 2023a. Jeffrey Zhou, Tianjian Lu, Swaroop Mishra, Siddhartha Brahma, Sujoy Basu, Yi Luan, Denny Zhou, and Le Hou. Instruction-following evaluation for large language models. arXiv preprint arXiv:2311.07911 , 2023b. Ximo Zhu, Ruiqi Liu, Rong Wang, Ping Wu, Xiang Zheng, Wenzhuo Xu, Xubin Yao, Zhiyuan Yan, Bo Li, Jun Gao, et al. Reorder-opd: Reliability-aware prompt ordering for on-policy distillation. arXiv preprint arXiv:2608.10905 , 2026. Yuxin Zuo, Kaiyan Zhang, Li Sheng, Shang Qu, Ganqu Cui, Xuekai Zhu, Haozhan Li, Yuchen Zhang, Xinwei Long, Ermo Hua, Biqing Qi, Youbang Sun, Zhiyuan Ma, Lifan Yuan, Ning Ding, and Bowen Zhou. TTRL: Test-time reinforcement learning. In The Thirty-ninth Annual Conference on Neural Information Processing Systems , 2025. URL https: //openreview.net/forum?id=VuVhgEiu20 .21
