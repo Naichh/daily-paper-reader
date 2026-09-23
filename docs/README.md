@@ -6,44 +6,41 @@
 </div>
 
 ## 每次日报
-- 最新运行日期：2026-09-22
-- 运行时间：2026-09-22 22:14:51 UTC
+- 最新运行日期：2026-09-23
+- 运行时间：2026-09-23 22:37:43 UTC
 - 运行状态：成功
-- 本次总论文数：8
-- 精读区：6
+- 本次总论文数：6
+- 精读区：4
 - 速读区：2
 
 ### 今日简报（AI）
-今日精读6篇、速读2篇，聚焦 on-policy 蒸馏的时序信用分配与梯度估计两大难题。最值得看的是两篇满分工作：前者提出奖励兼容的时序信用分配，突破 token 局部模仿；后者证明仅1% token 就足以完成梯度估计。普通读者可先读这两篇，再顺带了解工具增强蒸馏在组学任务和多阶段后训练中的应用。
-- 详情：[/202609/22/README](/202609/22/README)
+- 今日共生成 6 篇推荐（精读 4 篇，速读 2 篇）
+- 精读：《What Should a Self-Teacher See? Privileged Context Design for On-Policy Self-Distillation》（9.0/10）, 《Train Where the Quantized Model Goes: On-Policy Distillation for Low-Bit Reasoning》（9.0/10）
+- 速读：《ReDraft, Don't Just Distill: Reference-Driven Revision for Continual VLLM Post-Training》（7.0/10）, 《Ladders of Thought: A Self-Evolving Curriculum of Progressively Simplified Reasoning Traces》（6.0/10）
+- 这些结果覆盖了当下较热的方向，建议先看精读区论文的关键问题与方法。
+- 详情：[/202609/23/README](/202609/23/README)
 
 ### 精读区论文标签
-1. [Beyond Token-Local Imitation: Reward-Compatible Temporal Credit Assignment for On-Policy Distillation](/202609/22/2609.16937v2-beyond-token-local-imitation-reward-compatible-temporal-credit-assignment-for-on-policy-distillation)  
-   标签：评分：10.0/10、query:policy-dist
-   evidence：统一时序信用视角与GammaOPD，用于大模型后训练的在线策略蒸馏
-2. [1% of Tokens Can Be Enough: On Gradient Estimation in On-Policy Distillation](/202609/22/2609.24432v1-1-of-tokens-can-be-enough-on-gradient-estimation-in-on-policy-distillation)  
-   标签：评分：10.0/10、query:policy-dist
-   evidence：稀疏同策略蒸馏中的梯度估计与token选择
-3. [ReDraft, Don't Just Distill: Reference-Driven Revision for Continual VLLM Post-Training](/202609/22/2609.16639v2-redraft-dont-just-distill-reference-driven-revision-for-continual-vllm-post-training)  
+1. [What Should a Self-Teacher See? Privileged Context Design for On-Policy Self-Distillation](/202609/23/2609.25623v1-what-should-a-self-teacher-see-privileged-context-design-for-on-policy-self-distillation)  
    标签：评分：9.0/10、query:policy-dist
-   evidence：面向持续后训练的RLVR与自蒸馏等同策略方法
-4. [Distill What You Trust: Reliability-Aware Multi-Teacher On-Policy Distillation](/202609/22/2609.23697v1-distill-what-you-trust-reliability-aware-multi-teacher-on-policy-distillation)  
+   evidence：同策略自蒸馏中的特权上下文设计
+2. [Train Where the Quantized Model Goes: On-Policy Distillation for Low-Bit Reasoning](/202609/23/2609.26708v1-train-where-the-quantized-model-goes-on-policy-distillation-for-low-bit-reasoning)  
    标签：评分：9.0/10、query:policy-dist
-   evidence：多教师同策略蒸馏，采用token级可靠性感知监督分配
-5. [CLOOPD: Closing the Learner Loop in On-Policy Distillation](/202609/22/2609.24141v1-cloopd-closing-the-learner-loop-in-on-policy-distillation)  
-   标签：评分：9.0/10、query:policy-dist
-   evidence：闭环在线策略蒸馏框架，在多次演员更新间复用已评分批次
-6. [iSDFT: Information-Proximal Self-Distillation for Continual Learning in LLMs](/202609/22/2609.24646v1-isdft-information-proximal-self-distillation-for-continual-learning-in-llms)  
-   标签：评分：9.0/10、query:policy-dist
-   evidence：面向LLM持续学习的同策略自蒸馏微调
+   evidence：面向低比特推理模型的同策略蒸馏
+3. [BAS-OPD: Budget-Aware Selective On-Policy Self-Distillation for Fine-Grained Multimodal Perception](/202609/23/2609.25891v1-bas-opd-budget-aware-selective-on-policy-self-distillation-for-fine-grained-multimodal-perception)  
+   标签：评分：8.0/10、query:policy-dist
+   evidence：面向多模态大模型后训练的预算感知选择性在线策略自蒸馏
+4. [PACT: From Credit Assignment to Critic Alignment](/202609/23/2609.26355v1-pact-from-credit-assignment-to-critic-alignment)  
+   标签：评分：8.0/10、query:policy-dist
+   evidence：将在线策略蒸馏中的理想教师视为隐式评论家，聚焦LLM后训练信用分配
 
 ### 速读区论文标签
-1. [Tool-Augmented On-Policy Distillation for LLM Domain Adaptation in Sequence-Based Omics Tasks](/202609/22/2609.23435v1-tool-augmented-on-policy-distillation-for-llm-domain-adaptation-in-sequence-based-omics-tasks)  
-   标签：评分：8.0/10、query:policy-dist
-   evidence：工具增强在策略蒸馏用于LLM领域适配
-2. [ACLArena: Agent Continue Learning in Multi-stage Post-training](/202609/22/2609.23989v1-aclarena-agent-continue-learning-in-multi-stage-post-training)  
+1. [ReDraft, Don't Just Distill: Reference-Driven Revision for Continual VLLM Post-Training](/202609/23/2609.16639v3-redraft-dont-just-distill-reference-driven-revision-for-continual-vllm-post-training)  
    标签：评分：7.0/10、query:policy-dist
-   evidence：系统比较多阶段后训练中的多教师在线策略蒸馏
+   evidence：面向持续后训练的在策略自蒸馏
+2. [Ladders of Thought: A Self-Evolving Curriculum of Progressively Simplified Reasoning Traces](/202609/23/2609.25643v1-ladders-of-thought-a-self-evolving-curriculum-of-progressively-simplified-reasoning-traces)  
+   标签：评分：6.0/10、query:policy-dist
+   evidence：用于提升推理的知识蒸馏
 
 
 <div class="dpr-home-promo-card">

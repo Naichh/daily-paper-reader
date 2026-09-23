@@ -1,0 +1,1762 @@
+Title: PACT: From Credit Assignment to Critic Alignment
+
+URL Source: https://arxiv.org/pdf/2609.26355v1
+
+Published Time: Wed, 23 Sep 2026 01:18:24 GMT
+
+Number of Pages: 28
+
+Markdown Content:
+# PACT: From Credit Assignment to Critic Alignment 
+
+AllSpark Team 
+
+“The real justification of these definitions, however, will reside in their implications.” 
+
+— Claude E. Shannon 
+
+Reinforcement learning has become a central component of large language model (LLM) post-training, yet token-level credit lacks a generally accepted mathematical definition, leaving its re-lationship to commonly used training signals unclear. We formulate three regularity conditions, namely Completeness, Prefix Consistency, and Neutrality, and prove that they uniquely determine token-level credit. This characterization provides a unified basis for explaining phenomena across existing algorithms and guides the development of an improved actor-critic training procedure. Through this lens, an ideal teacher in On-Policy Distillation (OPD) acts as an implicit critic, yield-ing an expected policy gradient proportional to that induced by token-level credit. Response-level REINFORCE Leave-One-Out (RLOO) signals match the expected policy-gradient contribution of token-level credit despite their coarser granularity. We further establish approximate credit spar-sity under bounded outcome rewards and show how intermediate critic errors in Generalized Ad-vantage Estimation (GAE) can become comparable to the underlying credit. These motivate Policy 
+
+Aligned Critic Training (PACT), which adopts an Actor-then-Critic update order to apply impor-tance sampling correction to critic training and better align the critic with the updated policy. In agentic mathematical reasoning, PACT achieves 72.87% average accuracy across four benchmarks, outperforming GRPO and PPO by 8.80 and 13.16 percentage points, respectively. On SWE-bench Verified, PACT achieves a pass rate of 67.4%, outperforming PPO, GRPO, and SAO by 2.4, 2.0, and 3.8 percentage points, respectively. 
+
+Date: September 22, 2026 
+
+Github: https://github.com/AllSpark-Research/PACT AIME 2025      
+
+> 46.67 51.25 66.04 76.50 83.12
+> AIME 2026
+> 51.25 63.33 73.96 74.78 85.21
+> BeyondAIME
+> 28.63 36.63 40.31 41.81 51.69
+> HMMT Nov. 2025
+> 37.50 53.33 58.54 63.19 71.46
+> SWE-bench Verified
+> 60.8 63.6 65.0 65.4 67.4
+> Base SAO PPO GRPO PACT(Ours)
+
+Figure 1: Performance comparison of the base models and models trained with PPO ( λ = 1), GRPO, SAO, and PACT on mathematical reasoning and coding benchmarks. Mathematical reasoning results re-port Avg@16 accuracy on AIME 2025, AIME 2026, BeyondAIME, and HMMT Nov. 2025 using Qwen3.5-4B with OpenCode. Coding results report pass@1 rates on SWE-bench Verified using Qwen3.6-35B-A3B with Codex. arXiv:2609.26355v1 [cs.LG] 22 Sep 2026 1 Introduction 
+
+Recent advances have demonstrated that reinforcement learning can substantially improve the capabilities of large language models across general tasks [11, 24, 6], general agents [45], and coding agents [7, 46]. In these settings, a language model may generate a long sequence of tokens and repeatedly interact with an external environment. However, the training signal is often a scalar outcome reward revealed only after the completion of the trajectory, while optimization updates are applied at the level of individual generated tokens. This difference in granularity gives rise to a fundamental credit assignment problem of determining how the final outcome should be attributed to the tokens in the trajectory. Furthermore, despite its central role in reinforcement learning, credit itself lacks a generally accepted mathematical characterization, and existing methods operationalize it through different algorithm-dependent quantities [31]. A common formulation models autoregressive language model reinforcement learning as a token-level Markov Decision Process, where the complete generation history is treated as the state and the next gener-ated token as the action [34]. In interactive settings, taking the complete history of the prompt, generated tokens, and environment observations as the state yields a Markov representation. However, this repre-sentation alone does not characterize how the realized outcome should be attributed across the generated tokens. In particular, it does not describe how the statistical information relevant to the final reward changes as the trajectory unfolds. Credit assignment therefore requires an additional characterization beyond the Markov formulation. In this work, we formulate three regularity conditions for credit assignment, namely Completeness, Prefix Consistency, and Neutrality, and prove that credit is uniquely determined under these conditions. The resulting representation subsumes related forms previously derived under specific objectives or algorithmic constructions [2, 19, 37]. The same uniqueness result holds for credit assignment at coarser granularities, such as the turn level, with the corresponding representation obtained by aggregating token-level credit over consecutive segments. Our contributions are twofold: • A unique representation theorem and its consequences. We establish a unique representation theorem for credit under three regularity conditions, namely Completeness, Prefix Consistency, and Neutrality. This representation provides a unified perspective on several phenomena in LLM reinforcement learning. Under an ideal teacher, the On-Policy Distillation (OPD) [23] update is equivalent in expectation, up to a scaling factor, to the policy-gradient update induced by the unique credit, with the teacher acting as an implicit critic. For REINFORCE Leave-One-Out (RLOO) [1], the response-level signal, although not itself token-level credit, induces the same expected policy-gradient contribution as the unique credit represen-tation. We further establish approximate sparsity of token-level credit under bounded outcome rewards, providing a perspective on the sensitivity of fine-grained credit estimation to critic errors and the empirical difficulty of Generalized Advantage Estimation (GAE) based Actor-Critic methods in long-horizon settings [35]. • Policy Aligned Critic Training. Motivated by these findings, we propose Policy Aligned Critic Training (PACT). PACT adopts an Actor-then-Critic update order to enable importance sampling correction in critic training, better aligning the critic with the updated policy. We also use Binary Cross Entropy (BCE) instead of Mean Squared Error (MSE) to train the critic to better approximate the true values. On four mathematical reasoning benchmarks, PACT achieves 72.87% average accuracy, outper-forming GRPO and PPO by 8.80 and 13.16 percentage points, respectively. On SWE-bench Veri-fied, PACT achieves a pass rate of 67.4%, outperforming PPO, GRPO, and SAO by 2.4, 2.0, and 3.8 percentage points, respectively. All proofs are deferred to the appendices, which also contain additional discussion and a detailed review of related work. 22 Unique Representation of Token-Level Credit 
+
+Credit assignment can be defined at different granularities. For example, one may assign rewards to com-plete responses, interaction turns, or individual tokens. In autoregressive language model reinforcement learning, however, coarser-grained credit assignments can be viewed as special cases of token-level credit by aggregating consecutive tokens into larger units. Therefore, we shall firstly focus on the finest-grained formulation and study token-level credit assignment. 
+
+2.1 Notation: Reward Information Flow 
+
+We first introduce the necessary notation to formalize the information flow of rewards during autoregres-sive generation. Our formulation covers both standard autoregressive generation and agentic interaction. Given a prompt q, a realized trajectory takes the form 
+
+Y = ( q, T1, O1, T2, O2, . . . , Tτ , Oτ ),where Ti is the i-th token generated by the policy and Oi is the observation returned by the environment after Ti. An observation may be a tool response, an environment transition, user feedback, or any other information revealed to the model. We allow Oi = ∅; consequently, ordinary autoregressive language generation is recovered as the special case in which every observation is empty. The terminal reward is defined as a measurable function of the complete trajectory, R = R(Y). In particular, R need not be assigned to any specific token or observation. Let F0 = σ(q), Fi = σ(q, T1, O1, . . . , Ti, Oi) denote the information available after the i-th token and its associated observation have been revealed. Here, σ(·) denotes the generated sigma-algebra. We define the conditional reward prediction at this point as Vi = E[R | F i].
+
+2.2 Regularity Conditions of Credit Assignment 
+
+Let Ci denote the credit assigned to the i-th generated token Ti. Although environmental observations Oi
+
+are incorporated into the information filtration and affect future token generation, credit assignment aims to attribute the final outcome only to the model’s generated tokens, rather than to environment-provided information. Here we also define the accumulated token credit up to step i as 
+
+Si =
+
+> i
+
+# ∑
+
+> j=1
+
+Cj, S0 = 0. We characterize token-level credit assignments through the following three regularity conditions. 
+
+Completeness. The assigned credits should fully explain the deviation of the final reward from its initial prediction: τ
+
+# ∑
+
+> i=1
+
+Ci = R − E[R | F 0].
+
+Prefix Consistency. Credit assigned to a generated prefix should only reflect the information contained in that prefix. In particular, once a prefix has been generated, the credit accumulated by this prefix should be fixed from the perspective of the available information. Different realizations of future tokens or observa-tions should be attributed to future decisions, rather than modifying the credit already assigned to previous tokens. Formally, for any two trajectories Y and ˜Y, if they share the same prefix information up to step i,
+
+(q, T1, O1, . . . , Ti, Oi) = ( ˜q, ˜T1, ˜O1, . . . , ˜Ti, ˜Oi),then the accumulated credits at step i should satisfy Si(Y) = Si( ˜Y).
+
+Neutrality. A token credit should neither systematically overestimate nor underestimate the contribution of the corresponding token from the perspective of the available information. The expected credit assigned to the next token should be zero: 
+
+E[Ci | F i−1] = 0. 32.3 Unique Representation Theorem 
+
+The following theorem is the central result of our characterization and provides the foundation for the subsequent analysis. It establishes that a token-level credit assignment satisfying the three regularity condi-tions introduced above exists and is unique, and that the unique assignment is given by the differences of a martingale. We further establish in Appendix C.2.3 that all three conditions are necessary for uniqueness by showing that omitting any one admits alternative credit assignments. 
+
+Theorem 1 (Unique Representation of Token-Level Credit) . Let L denote the maximum number of generated tokens in a trajectory, and let τ ≤ L be the stopping time induced by the generation process. Assume that R is integrable and Fτ -measurable. Define Vi := E[R | F i], i = 0, . . . , τ.
+
+There exists a unique integrable token-level credit assignment, up to almost-sure equality, {Ci}τ 
+
+> i=1
+
+satisfying Com-pleteness, Prefix Consistency, and Neutrality. It admits the representation Ci = Vi − Vi−1 = E[R | F i] − E[R | F i−1] a.s. , i = 1, . . . , τ.
+
+Moreover, {Ci}τ 
+
+> i=1
+
+is a martingale difference sequence with respect to {F i}τ
+
+> i=0
+
+.
+
+Corollary 1 (Aggregation of the Unique Token-Level Representation) . Consider any partition of the token sequence into consecutive segments 
+
+I1, I2, . . . , IK,
+
+where each segment Ik contains a set of consecutive token indices. Define the segment-level credit as C(k) = ∑
+
+> i∈I k
+
+Ci.
+
+The resulting segment-level credit is C(k) = ∑
+
+> i∈I k
+
+(Vi − Vi−1) = Vbk − Vak −1,
+
+where a k and b k denote the first and last token indices of segment Ik.
+
+In particular, existing coarse-grained credit assignment schemes, such as turn-level attribution, can be re-covered as special cases by aggregating the unique token-level representation over appropriate token seg-ments. 
+
+# 3 Interpreting Existing RL Algorithms through the Unique Credit Representation 
+
+In this section, we use the unique credit representation to revisit several phenomena in LLM reinforcement learning. We first examine the relationship between OPD and critics, then study credit granularity in RLOO and credit estimation in GAE. All these analyses together motivate Policy Aligned Critic Training (PACT), introduced in the next section. 
+
+3.1 The Teacher in On-Policy Distillation is an Implicit Critic 
+
+On-Policy Distillation trains on student-generated trajectories using dense token-level supervision from a teacher [23]. Prior work further showed that the OPD objective can be algebraically reformulated as dense KL-constrained RL, in which the teacher–student log-density ratio plays the role of a token-level advantage [48]. This optimization-level equivalence, however, does not by itself guarantee that the induced signal is consistent with the outcome reward R, or that it constitutes a correct token-level credit assignment. We establish this missing credit-level connection by identifying an ideal teacher under which OPD induces, up to scaling, the same policy-gradient update as the unique token-level credit in Theorem 1. Moreover, recent work suggests that effective on-policy distillation requires a teacher that improves upon the student while remaining compatible with its on-policy distribution [20]. We capture these requirements with an idealized teacher defined through KL-regularized reward improvement. 4Fix a policy π = πθ and a token position t ≤ τ. Let 
+
+pt(a) = πθ (a | F t−1)
+
+denote the current policy distribution over the vocabulary V. Define the token-action value 
+
+Qπ 
+
+> t
+
+(a) = Eπ [R|F t−1, Tt = a] .The expectation includes the subsequent environment observation and all future tokens and observations generated under π.
+
+Definition 1 (Ideal Teacher) . Let β > 0. At each prefix Ft−1, the ideal teacher distribution is defined by q⋆ 
+
+> t
+
+∈ arg max  
+
+> q∈∆(V)
+
+{Ea∼q [Qπ 
+
+> t
+
+(a)] − βDKL (q∥pt)} .
+
+We assume that R is bounded and that p t has full support over V. The distribution q ⋆ 
+
+> t
+
+is defined relative to the current policy and is held fixed during the corresponding OPD update. 
+
+For a teacher distribution qt, sampled-token OPD assigns the signal 
+
+AOPD  
+
+> t
+
+(qt) = log qt(Tt)
+
+pt(Tt) , Tt ∼ pt.Let 
+
+Zt = ∇θ log πθ (Tt | F t−1)
+
+denote the policy score. The on-policy update direction induced by AOPD  
+
+> t
+
+(qt) is 
+
+GOPD  
+
+> t
+
+(qt) := Eπ
+
+[
+
+Zt AOPD  
+
+> t
+
+(qt)
+
+∣∣∣Ft−1
+
+]
+
+= Eπ
+
+[
+
+Zt log qt(Tt)
+
+pt(Tt)
+
+∣∣∣∣Ft−1
+
+]
+
+.The following theorem identifies the OPD teacher as an implicit critic under the ideal-teacher assumption. Unlike a conventional critic represented by a value head, the OPD teacher provides credit through its KL-based objective. From this perspective, the empirical success of OPD further highlights the role of critics, even when no explicit value head is used. 
+
+Theorem 2 (Teacher Credit Equivalence) . Let q ⋆ 
+
+> t
+
+be the ideal teacher in Definition 1. Then GOPD  
+
+> t
+
+(q⋆ 
+
+> t
+
+) = 1
+
+β Eπ [ZtCπ 
+
+> t
+
+|F t−1] a.s. ,
+
+where Cπ 
+
+> t
+
+= Vπ 
+
+> t
+
+− Vπ
+
+> t−1
+
+, Vπ 
+
+> t
+
+= Eπ [R | F t]
+
+is the unique token-level credit from Theorem 1. 
+
+3.2 Group-Level Baselines as Gradient-Equivalent Credit Surrogates 
+
+The unique representation theorem shows that the unique token-level credit depends on the evolution of conditional reward predictions: Ci = Vi − Vi−1. However, recent group-based RL algorithms for language models, such as GRPO [39] and RLOO [1], construct advantages using multiple sampled responses from the same prompt. The resulting baseline is defined at the response level, since it aggregates rewards from different sampled trajectories. This response-level baseline is then broadcast to every token position within the same response during policy optimization. This introduces a granularity gap between response-level baseline estimation and token-level credit assignment. We now examine group-level baseline methods, taking RLOO as a representative example. We show that, although the RLOO baseline is constructed at the response level, the resulting token-wise policy gradient contribution coincides in expectation with that of the unique token-level credit. 
+
+Theorem 3 (Gradient Unbiasedness of the RLOO Estimator) . Conditioned on a prompt q, let G ≥ 2 trajectories be sampled independently from the current policy πθ . Let R j denote the reward of trajectory j. For trajectory i, define the leave-one-out baseline 
+
+¯R−i = 1
+
+G − 1 ∑ 
+
+> j̸=i
+
+Rj.
+
+Then its token-level policy gradient estimator is equivalent in expectation to the gradient induced by the unique token-level credit representation: 
+
+E [∇θ log πθ (Tt|F t−1)( Ri − ¯R−i)] = E [∇θ log πθ (Tt|F t−1)Ct] .5The preceding equivalence holds only in expectation and does not imply equal statistical efficiency. The conditional expectation Vt = E[R | F t] minimizes the mean squared prediction error among Ft-measurable predictors. In contrast, the response-level RLOO baseline retains randomness from finite outcomes. In long-horizon settings, these fluctuations can be substantial relative to the local credit signal. This motivates estimating credit at a finer granularity. 
+
+3.3 Approximate Credit Sparsity and Error Sensitivity of GAE 
+
+Recent empirical observations suggest that GAE with λ close to one can be beneficial in LLM reinforcement learning. DeepSeek-R1 [11] reports that PPO [36] with λ = 1 outperforms the commonly used setting 
+
+λ = 0.95. SAO [14] adopts a length-adaptive GAE coefficient that approaches one as the response length increases. To understand these observations, we first establish an approximate sparsity property of credit and then examine how critic estimation errors enter GAE. For any bounded reward, we can apply a positive affine transformation to normalize it into [0, 1 ] without changing the optimal policy. Therefore, we consider R ∈ [0, 1 ] without loss of generality. In this case, the reward variance satisfies Var (R) ≤ 14 .
+
+Theorem 4 (Approximate Credit Sparsity) . For any fixed prompt q, 
+
+E
+
+[ τ
+
+# ∑
+
+> i=1
+
+C2 
+
+> i
+
+| F 0
+
+]
+
+= Var (R | F 0) ≤ 14 .
+
+Consequently, for any ϵ > 0,
+
+E
+
+[ τ
+
+# ∑
+
+> i=1
+
+1{| Ci| > ϵ}
+
+∣∣∣∣∣F0
+
+]
+
+≤ 14ϵ2 .We now examine how this sparsity property relates to GAE in the outcome-only reward setting, where the reward is revealed only after the generation trajectory is complete. Let the critic estimate be ̂ Vi = Vi + εi,where εi denotes the value estimation error. With γ = 1 and the terminal prediction set to ̂ Vτ = R, the TD residual becomes ̂ δi =̂ Vi −̂ Vi−1 = Ci + εi − εi−1. For GAE with parameter λ, the estimated advantage is computed as ̂ Aλ 
+
+> t
+
+= ∑τ 
+
+> i=t
+
+λi−t̂ δi. Substituting the above TD decomposition gives ̂ Aλ 
+
+> t
+
+= ∑τ 
+
+> i=t
+
+λi−tCi − εt−1 +(1 − λ) ∑τ−1 
+
+> i=t
+
+λi−tεi, where the terminal value error is assumed to be zero. This decomposition separates the true credit signal from critic estimation errors. The first term corresponds to the accumulated token-level credit, while the remaining terms arise from imperfect value estimation. When λ < 1, intermediate critic errors are retained through the last term. However, Theorem 4 bounds the expected number of credit increments exceeding any fixed magnitude, independently of the maximum response length. Consequently, the critic error term can become comparable to, or even dominate, the true credit signal. In contrast, when λ = 1, the intermediate critic error term vanishes: ̂ A1 
+
+> t
+
+= ∑τ 
+
+> i=t
+
+Ci − εt−1 = R −̂ Vt−1.Therefore, λ = 1 eliminates intermediate value estimation errors, leaving only the prefix value error −εt−1.Following the analysis above, our proposed method, i.e., PACT, uses λ = 1. 
+
+# 4 Policy Aligned Critic Training 
+
+4.1 Motivation 
+
+Theorems 1 and 4 highlight the importance of accurate value estimation for fine-grained credit assignment. By Theorem 1, the unique token-level credit under policy π is 
+
+Cπ 
+
+> i
+
+= Vπ 
+
+> i
+
+− Vπ
+
+> i−1
+
+, Vπ 
+
+> i
+
+= Eπ [R | F i].Thus, recovering local credit requires not only accurate value predictions, but also values corresponding to the policy currently being optimized. Moreover, Theorem 4 shows that most local credits can be small in long-horizon generation. Consequently, even a modest value error or policy mismatch may dominate the underlying credit signal. 6Old Actor Rollout Critic Forward Actor Update Critic Update New Actor Rollout Align to Old Actor Old Actor Rollout Critic Forward Actor Update Critic Update New Actor Rollout IS Correction Align to New Actor 
+
+## PPO: Independent Updates PACT: Actor-then-Critic Figure 2: PPO and PACT training workflows. Under current RL training frameworks, PPO-style training can introduce a policy mismatch between the actor and the critic. Let πk denote the policy used to generate the trajectories Dk in iteration k. The critic values used to compute advantages on Dk are produced before the critic is updated on Dk. Hence, these values are generated by critic parameters learned from the previous trajectories Dk−1 ∼ πk−1:
+
+Dk ∼ πk,̂ Vϕk−1 ≈ Vπk−1 .Although the critic is subsequently updated on Dk, the resulting critic is not used to recompute the advan-tages for the current actor update. After the actor is updated from πk to πk+1, the critic is therefore again one policy update behind. This policy–critic lag is especially consequential when token-level credit is obtained by differencing consec-utive conditional values. It motivates training procedures that improve value estimation while explicitly synchronizing the critic with the updated policy. We shall develop such a procedure in this section. 
+
+4.2 Probabilistic Value Estimation 
+
+As discussed above and proved in Appendix C.1, any bounded reward can be normalized to [0, 1 ] without changing the optimal policy. We therefore assume R ∈ [0, 1 ], which also implies Vπ 
+
+> i
+
+= Eπ [R | F i] ∈ [0, 1 ].Instead of the conventional mean squared error, we parameterize the critic as ̂ Vϕ,i = σ(zϕ,i) and optimize the soft binary cross-entropy loss 
+
+LBCE (ϕ) = E
+
+[
+
+−R log ̂ Vϕ,i − (1 − R) log (1 −̂ Vϕ,i)
+
+]
+
+.For R ∈ [0, 1 ], BCE and MSE have the same optimal prediction: arg min  
+
+> v∈[0,1 ]
+
+E[−R log v − (1 − R) log (1 − v) | F i] = arg min  
+
+> v∈R
+
+E[( v − R)2 | F i] = Vπ 
+
+> i
+
+.At the endpoints, BCE is defined by its limits, allowing the value +∞, with 0 log 0 = 0. Thus, using BCE does not change the value being estimated. Classification-based objectives have shown favorable empiri-cal performance for value estimation in deep reinforcement learning [8]. Furthermore, a controlled critic-pretraining ablation, reported in Section 5.3, shows that the probabilistic BCE critic converges substantially faster than the conventional MSE critic. 7Table 1: Mathematical reasoning performance on Avg@16 accuracy (%).            
+
+> Method AIME 2025 AIME 2026 BeyondAIME HMMT Nov. 2025 Average Base Model 46.67 51.25 28.63 37.50 41.01 GRPO ( ϵhigh
+
+= 0.28) 76.50 74.78 41.81 63.19 64.07 PPO ( λ = 0.95) 32.33 29.38 17.86 25.67 26.31 PPO ( λ = 1.0) 66.04 73.96 40.31 58.54 59.71 SAO 51.25 63.33 36.63 53.33 51.14 PACT w/o IS 76.04 82.50 51.38 61.04 67.74      
+
+> PACT 83.12 85.21 51.69 71.46 72.87
+
+4.3 Off-Policy Critic Synchronization 
+
+As shown in Figure 2, Policy Aligned Critic Training (PACT) introduces an Actor-then-Critic dependency through importance-corrected critic targets, whereas standard PPO allows independent actor and critic updates. Within each iteration, the current critic first provides the value predictions required for actor optimization. After all actor updates have been completed, we perform one additional forward pass over the same rollout batch using the updated actor. Together with the log-probabilities recorded before the update, this produces importance ratios between the pre-update and post-update policies. We then train the critic using these ratios, so that the iteration ends with the critic better aligned to the updated actor. Let μ = πk be the policy before the actor update and π = πk+1 the updated policy. For a prefix Ft−1, define the continuation importance ratio 
+
+It =
+
+> τ
+
+# ∏
+
+> k=t
+
+π(Tk | F k−1)
+
+μ(Tk | F k−1) .Assuming unchanged environment dynamics and absolute continuity of the continuation distributions, a change of measure gives 
+
+Vπ 
+
+> t−1
+
+= Eπ [R | F t−1] = Eμ[It R | F t−1].We now regard It R as a single random variable. As established in the previous subsection, binary cross-entropy recovers the conditional mean: for any integrable random variable Y whose conditional mean lies in [0, 1 ],
+
+E[Y | F ] = arg min  
+
+> x∈[0,1 ]
+
+E [LBCE (x, Y) | F ] .Throughout this subsection, the conditional expected BCE is extended to x = 0 and x = 1 by taking one-sided limits after the conditional expectation. For a sigmoid-parameterized critic, optima at 0 and 1 are approached as the logit tends to −∞ and +∞, respectively. Applying this result with Y = It R immediately gives 
+
+Vπ 
+
+> t−1
+
+= arg min  
+
+> x∈[0,1 ]
+
+Eμ [LBCE (x, It R) | F t−1] .Therefore, trajectories sampled before the actor update can be used to train a critic for the updated actor by replacing the original reward target R with the importance-corrected target It R. Although an individual realization of It R need not lie in [0, 1 ], this does not alter the conditional minimizer above; a logit-space gradient analysis is provided in Appendix C.6. In practice, the exact continuation ratio can have high variance for long responses. We use the detached current-token importance ratio and mask out token-level critic losses whose ratios fall outside [ρmin , ρmax ]. These ratios require only one additional forward pass after actor training and no additional rollout generation, yielding a stable and inexpensive surrogate for exact policy synchronization. 
+
+# 5 Experiments 
+
+5.1 Experimental Setup 
+
+All RL training experiments use Dressage [16], an agentic RL framework built on slime [54] that integrates agent execution, trajectory collection, and policy training. 8Table 2: SWE-bench Verified pass rates (%) with Qwen3.6-35B-A3B.             
+
+> Method Base Model GRPO PPO ( λ=1.0) SAO PACT
+> Pass@1 Rate 60.8 65.4 65.0 63.6 67.4
+
+Training Details. For mathematical reasoning, we train Qwen3.5-4B [32] on a subset of DAPO-Math-17k [49] using the OpenCode [29] agentic harness, with final-answer correctness as the outcome reward. The training subset contains 3,200 problems, constructed by prioritizing problems that the initial policy fails under pass@1 evaluation and randomly sampling additional problems from the remaining pool. For agentic coding, we train Qwen3.6-35B-A3B [33] on OpenSWE [9] using a Codex [28] agent through Har-bor [12], with terminal rewards provided by the task verifier. For both tasks, each rollout round produces 512 trajectories. GRPO samples 8 trajectories for each of 64 prompts. The optimization batch size is 128, yielding four minibatches per rollout round. SAO uses DIS with importance ratio ranges of [0.7, 6.0 ] for mathematical reasoning and [0.6, 3.0 ] for coding. PACT uses the same actor-side DIS range as SAO for mathematical reasoning and PPO clipping for coding. For critic training, PACT masks out samples whose importance ratios fall outside [0, 6 ]. For both tasks, the context window is 128k tokens, and the maximum generation length per interaction turn is 64k tokens. 
+
+Evaluation. For mathematical reasoning, we evaluate on AIME 2025, AIME 2026, HMMT Nov. 2025 [4], and BeyondAIME [5], reporting Avg@16 accuracy. We compare PACT with GRPO using Clip-Higher, PPO with λ ∈ { 0.95, 1.0 }, and SAO. For agentic coding, we evaluate on SWE-bench Verified [18] and compare PACT with SAO, GRPO with Clip-Higher, and PPO with λ = 1.0. 
+
+5.2 Main Results 
+
+Tables 1 and 2 report the results on mathematical reasoning and agentic coding, respectively. On math-ematical reasoning, PACT achieves the highest accuracy on all four benchmarks, averaging 72.87% and outperforming GRPO, PPO with λ = 1.0, and SAO by 8.80, 13.16, and 21.73 percentage points, respectively. PPO with λ = 1.0 also outperforms λ = 0.95, which undergoes policy collapse during training, consistent with our analysis of intermediate critic errors in GAE. On SWE-bench Verified, PACT achieves the highest pass rate of 67.4%, outperforming GRPO, PPO with λ = 1.0, and SAO by 2.0, 2.4, and 3.8 percentage points, respectively. 
+
+5.3 Ablation Studies Critic Objective. We isolate the effect of the critic objective by fixing the rollout policy and training BCE and MSE critics from the same initialization on the same on-policy rollout data. We conduct this comparison in both settings described above: Qwen3.5-4B on mathematical reasoning and Qwen3.6-35B-A3B on agentic coding. As shown in Figure 3, across both model scales, BCE-trained critics achieve lower BCE and MSE losses and greater value separation than their MSE-trained counterparts. Here, ∆± denotes the mean predicted value on positive samples minus that on negative samples. The larger separation indicates that BCE-trained critics assign more distinct values to successful and unsuccessful trajectories. 
+
+Importance Sampling Correction. PACT w/o IS retains the Actor-then-Critic update order, BCE critic ob-jective, and actor-side optimization settings, but removes the critic-target importance sampling correction. As shown in Table 1, adding importance correction improves average accuracy from 67.74% to 72.87%, a gain of 5.13 percentage points, with improvements on all four benchmarks. It also leads to more stable training, as illustrated by the training reward curves in Appendix E.3. This comparison supports the effec-tiveness of importance sampling correction in PACT. 
+
+# 6 Conclusion 
+
+We studied credit assignment under three regularity conditions, namely Completeness, Prefix Consistency, and Neutrality, and proved that credit is uniquely determined under these conditions. The resulting rep-910 −1 
+
+> 10 0
+> 10 1
+
+MSE loss (log scale) 
+
+> 10 −1
+> 10 0
+
+BCE loss (log scale) 
+
+> 0.0 0.5
+
+Value separation Δ±       
+
+> 080 160
+> Training step
+> 10 −1
+> 10 0
+> 080 160
+> Training step
+> 10 −1
+> 10 0
+> 080 160
+> Training step
+> -0.25 0.00 0.25 0.50
+> Qwen3.5-4B Qwen3.6-35B-A3B
+> BCE objective MSE objective
+
+Figure 3: Fixed-policy critic pretraining with BCE and MSE objectives. Critics are trained from the same initialization on the same on-policy rollout data. We compare BCE loss, MSE loss, and value separation ∆±.resentation provides a unified basis for explaining phenomena across existing algorithms. Under an ideal teacher, OPD yields an expected policy gradient proportional to that induced by credit, identifying the teacher as an implicit critic. RLOO yields the same expected policy gradient contribution despite its coarser granularity. We further established approximate credit sparsity under bounded outcome rewards and ana-lyzed how intermediate critic errors affect GAE in long-horizon settings. Motivated by these findings, we proposed Policy Aligned Critic Training (PACT). Its Actor-then-Critic up-date order enables importance sampling correction in critic training to better align the critic with the up-dated policy. PACT also uses BCE instead of MSE to improve value estimation. Across four mathematical reasoning benchmarks, PACT achieves 72.87% average accuracy, outperforming GRPO and PPO by 8.80 and 13.16 percentage points, respectively. On SWE-bench Verified, PACT achieves a pass rate of 67.4%, outperforming GRPO, PPO, and SAO by 2.0, 2.4, and 3.8 percentage points, respectively. Together, these results show how a mathematical characterization of credit can explain existing algorithms and guide im-provements to actor-critic training. 
+
+# References 
+
+[1] Arash Ahmadian, Chris Cremer, Matthias Gallé, Marzieh Fadaee, Julia Kreutzer, Olivier Pietquin, Ah-met Üstün, and Sara Hooker. Back to basics: Revisiting reinforce-style optimization for learning from human feedback in llms. In Proceedings of the 62nd Annual Meeting of the Association for Computational Linguistics (Volume 1: Long Papers) , pp. 12248–12267, 2024. [2] Jose A Arjona-Medina, Michael Gillhofer, Michael Widrich, Thomas Unterthiner, Johannes Brandstet-ter, and Sepp Hochreiter. Rudder: Return decomposition for delayed rewards. Advances in Neural Information Processing Systems , 32, 2019. [3] Yuntao Bai, Andy Jones, Kamal Ndousse, Amanda Askell, Anna Chen, Nova DasSarma, Dawn Drain, Stanislav Fort, Deep Ganguli, Tom Henighan, et al. Training a helpful and harmless assistant with reinforcement learning from human feedback. arXiv preprint arXiv:2204.05862 , 2022. [4] Mislav Balunovi´ c, Jasper Dekoninck, Ivo Petrov, Nikola Jovanovi´ c, and Martin Vechev. Matharena: Evaluating llms on uncontaminated math competitions, 2026. URL https://arxiv.org/abs/2505. 23281 .10 [5] ByteDance-Seed. BeyondAIME: Advancing math reasoning evaluation beyond high school olympiads. 
+
+https://huggingface.co/datasets/ByteDance-Seed/BeyondAIME , 2025. [6] Jorge Zhoujun Cheng, Shibo Hao, Tianyang Liu, Fan Zhou, Yutao Xie, Feng Yao, Yuexin Bian, Nilabjo Dey, Yonghao Zhuang, Yuheng Zha, et al. Revisiting reinforcement learning for llm reasoning from a cross-domain perspective. Advances in Neural Information Processing Systems , 38, 2026. [7] Jeff Da, Clinton Wang, Xiang Deng, Yuntao Ma, Nikhil Barhate, and Sean Hendryx. Agent-rlvr: Training software engineering agents via guidance and environment rewards. arXiv preprint arXiv:2506.11425 , 2025. [8] Jesse Farebrother, Jordi Orbay, Quan Vuong, Adrien Ali Taïga, Yevgen Chebotar, Ted Xiao, Alex Irpan, Sergey Levine, Pablo Samuel Castro, Aleksandra Faust, et al. Stop regressing: Training value functions via classification for scalable deep rl. arXiv preprint arXiv:2403.03950 , 2024. [9] Dayuan Fu, Shenyu Wu, Yunze Wu, Zerui Peng, Yaxing Huang, Jie Sun, Ji Zeng, Mohan Jiang, Lin Zhang, Yukun Li, Jiarui Hu, Liming Liu, Jinlong Hou, and Pengfei Liu. davinci-env: Open swe envi-ronment synthesis at scale, 2026. URL https://arxiv.org/abs/2603.13023 .[10] Wei Fu, Jiaxuan Gao, Xujie Shen, Chen Zhu, Zhiyu Mei, Chuyi He, Shusheng Xu, Guo Wei, Jun Mei, Jiashu Wang, et al. Areal: A large-scale asynchronous reinforcement learning system for language reasoning. Advances in Neural Information Processing Systems , 38:36256–36282, 2026. [11] Daya Guo, Dejian Yang, Haowei Zhang, Junxiao Song, Peiyi Wang, Qihao Zhu, Runxin Xu, Ruoyu Zhang, Shirong Ma, Xiao Bi, et al. Deepseek-r1: Incentivizing reasoning capability in llms via rein-forcement learning. arXiv preprint arXiv:2501.12948 , 2025. [12] Harbor Framework Team. Harbor: A framework for evaluating and optimizing agents and models in container environments, 2026. URL https://doi.org/10.5281/zenodo.20953922 .[13] Anna Harutyunyan, Will Dabney, Thomas Mesnard, Mohammad Gheshlaghi Azar, Bilal Piot, Nicolas Heess, Hado P van Hasselt, Gregory Wayne, Satinder Singh, Doina Precup, et al. Hindsight credit assignment. Advances in neural information processing systems , 32, 2019. [14] Zhenyu Hou, Yujiang Li, Jie Tang, and Yuxiao Dong. Single-rollout asynchronous optimization for agentic reinforcement learning. arXiv preprint arXiv:2607.07508 , 2026. [15] Jian Hu, Jason Klein Liu, Haotian Xu, and Wei Shen. Reinforce++: Stabilizing critic-free policy opti-mization with global advantage normalization. arXiv preprint arXiv:2501.03262 , 2025. [16] Liangmeng Huang, Qingchuan Li, Hongwei Xue, Shilin Yan, and Dressage Contributors. Dressage: Scalable RL for any agent and any sandbox. https://github.com/Accio-Lab/Dressage , 2026. [17] Chia-Chun Hung, Timothy Lillicrap, Josh Abramson, Yan Wu, Mehdi Mirza, Federico Carnevale, Arun Ahuja, and Greg Wayne. Optimizing agent behavior over long time scales by transporting value. 
+
+Nature communications , 10(1):5223, 2019. [18] Carlos E Jimenez, John Yang, Alexander Wettig, Shunyu Yao, Kexin Pei, Ofir Press, and Karthik R Narasimhan. SWE-bench: Can language models resolve real-world github issues? In The Twelfth International Conference on Learning Representations , 2024. URL https://openreview.net/forum?id= VTF8yNQM66 .[19] Amirhossein Kazemnejad, Milad Aghajohari, Eva Portelance, Alessandro Sordoni, Siva Reddy, Aaron Courville, and Nicolas Le Roux. Vineppo: Refining credit assignment in rl training of llms. arXiv preprint arXiv:2410.01679 , 2024. [20] Yaxuan Li, Yuxin Zuo, Bingxiang He, Jinqian Zhang, Chaojun Xiao, Cheng Qian, Tianyu Yu, Huan-ang Gao, Wenkai Yang, Zhiyuan Liu, et al. Rethinking on-policy distillation of large language models: Phenomenology, mechanism, and recipe. arXiv preprint arXiv:2604.13016 , 2026. [21] Ziniu Li, Tian Xu, Yushun Zhang, Zhihang Lin, Yang Yu, Ruoyu Sun, and Zhi-Quan Luo. Remax: A simple, effective, and efficient reinforcement learning method for aligning large language models. 
+
+arXiv preprint arXiv:2310.10505 , 2023. 11 [22] Zichen Liu, Changyu Chen, Wenjun Li, Penghui Qi, Tianyu Pang, Chao Du, Wee Sun Lee, and Min Lin. Understanding r1-zero-like training: A critical perspective. arXiv preprint arXiv:2503.20783 , 2025. [23] Kevin Lu and Thinking Machines Lab. On-policy distillation. Thinking Machines Lab: Connectionism ,2025. doi: 10.64434/tml.20251026. https://thinkingmachines.ai/blog/on-policy-distillation. [24] Xueguang Ma, Qian Liu, Dongfu Jiang, Ge Zhang, Zejun Ma, and Wenhu Chen. General-reasoner: Advancing llm reasoning across all domains. Advances in Neural Information Processing Systems , 38: 56596–56618, 2026. [25] Thomas Mesnard, Théophane Weber, Fabio Viola, Shantanu Thakoor, Alaa Saade, Anna Harutyunyan, Will Dabney, Tom Stepleton, Nicolas Heess, Arthur Guez, et al. Counterfactual credit assignment in model-free reinforcement learning. arXiv preprint arXiv:2011.09464 , 2020. [26] Alexander Meulemans, Simon Schug, Seijin Kobayashi, Nathaniel Daw, and Gregory Wayne. Would i have gotten that reward? long-term credit assignment by counterfactual contribution analysis, 2023. URL https://arxiv.org/abs/2306.16803 .[27] Marvin Minsky. Steps toward artificial intelligence. Proceedings of the IRE , 49(1):8–30, 1961. [28] OpenAI. Codex CLI. https://github.com/openai/codex , 2025. GitHub repository. [29] OpenCode Contributors. OpenCode: The open source ai coding agent. https://github.com/ anomalyco/opencode , 2025. GitHub repository. [30] Long Ouyang, Jeffrey Wu, Xu Jiang, Diogo Almeida, Carroll Wainwright, Pamela Mishkin, Chong Zhang, Sandhini Agarwal, Katarina Slama, Alex Ray, et al. Training language models to follow in-structions with human feedback. Advances in neural information processing systems , 35:27730–27744, 2022. [31] Eduardo Pignatelli, Johan Ferret, Matthieu Geist, Thomas Mesnard, Hado van Hasselt, Olivier Pietquin, and Laura Toni. A survey of temporal credit assignment in deep reinforcement learning. 
+
+arXiv preprint arXiv:2312.01072 , 2023. [32] Qwen Team. Qwen3.5: Towards native multimodal agents, February 2026. URL https://qwen.ai/ blog?id=qwen3.5 .[33] Qwen Team. Qwen3.6-35B-A3B: Agentic coding power, now open to all, April 2026. URL https: //qwen.ai/blog?id=qwen3.6-35b-a3b .[34] Rajkumar Ramamurthy, Prithviraj Ammanabrolu, Kianté Brantley, Jack Hessel, Rafet Sifa, Christian Bauckhage, Hannaneh Hajishirzi, and Yejin Choi. Is reinforcement learning (not) for natural language processing: Benchmarks, baselines, and building blocks for natural language policy optimization. 
+
+arXiv preprint arXiv:2210.01241 , 2022. [35] John Schulman, Philipp Moritz, Sergey Levine, Michael Jordan, and Pieter Abbeel. High-dimensional continuous control using generalized advantage estimation. arXiv preprint arXiv:1506.02438 , 2015. [36] John Schulman, Filip Wolski, Prafulla Dhariwal, Alec Radford, and Oleg Klimov. Proximal policy optimization algorithms. arXiv preprint arXiv:1707.06347 , 2017. [37] Amrith Setlur, Chirag Nagpal, Adam Fisch, Xinyang Geng, Jacob Eisenstein, Rishabh Agarwal, Alekh Agarwal, Jonathan Berant, and Aviral Kumar. Rewarding progress: Scaling automated process veri-fiers for llm reasoning. In International Conference on Learning Representations , volume 2025, pp. 60808– 60838, 2025. [38] Claude Elwood Shannon. A mathematical theory of communication. The Bell system technical journal ,27(3):379–423, 1948. [39] Zhihong Shao, Peiyi Wang, Qihao Zhu, Runxin Xu, Junxiao Song, Xiao Bi, Haowei Zhang, Mingchuan Zhang, YK Li, Yang Wu, et al. Deepseekmath: Pushing the limits of mathematical reasoning in open language models. arXiv preprint arXiv:2402.03300 , 2024. 12 [40] Nisan Stiennon, Long Ouyang, Jeffrey Wu, Daniel Ziegler, Ryan Lowe, Chelsea Voss, Alec Radford, Dario Amodei, and Paul F Christiano. Learning to summarize with human feedback. Advances in neural information processing systems , 33:3008–3021, 2020. [41] Richard S Sutton. Learning to predict by the methods of temporal differences. Machine learning , 3(1): 9–44, 1988. [42] Richard S. Sutton and Andrew G. Barto. Reinforcement Learning: An Introduction . MIT Press, Cambridge, MA, 1998. [43] Richard S Sutton, David McAllester, Satinder Singh, and Yishay Mansour. Policy gradient methods for reinforcement learning with function approximation. Advances in neural information processing systems ,12, 1999. [44] Kimi Team, Angang Du, Bofei Gao, Bowei Xing, Changjiu Jiang, Cheng Chen, Cheng Li, Chenjun Xiao, Chenzhuang Du, Chonghua Liao, et al. Kimi k1.5: Scaling reinforcement learning with llms. 
+
+arXiv preprint arXiv:2501.12599 , 2025. [45] Zihan Wang, Kangrui Wang, Qineng Wang, Pingyue Zhang, Linjie Li, Zhengyuan Yang, Xing Jin, Ke-fan Yu, Minh Nhat Nguyen, Licheng Liu, et al. Ragen: Understanding self-evolution in llm agents via multi-turn reinforcement learning. arXiv preprint arXiv:2504.20073 , 2025. [46] Yuxiang Wei, Zhiqing Sun, Emily McMilin, Jonas Gehring, David Zhang, Gabriel Synnaeve, Daniel Fried, Lingming Zhang, and Sida Wang. Toward training superintelligent software agents through self-play swe-rl. arXiv preprint arXiv:2512.18552 , 2025. [47] Ronald J Williams. Simple statistical gradient-following algorithms for connectionist reinforcement learning. Machine learning , 8(3):229–256, 1992. [48] Wenkai Yang, Weijie Liu, Ruobing Xie, Kai Yang, Saiyong Yang, and Yankai Lin. Learning beyond teacher: Generalized on-policy distillation with reward extrapolation. arXiv preprint arXiv:2602.12125 ,2026. [49] Qiying Yu, Zheng Zhang, Ruofei Zhu, Yufeng Yuan, Xiaochen Zuo, Yu Yue, Weinan Dai, Tiantian Fan, Gaohong Liu, Lingjun Liu, et al. Dapo: An open-source llm reinforcement learning system at scale. 
+
+Advances in Neural Information Processing Systems , 38:113222–113244, 2026. [50] Yufeng Yuan, Yu Yue, Ruofei Zhu, Tiantian Fan, and Lin Yan. What’s behind ppo’s collapse in long-cot? value optimization holds the secret. arXiv preprint arXiv:2503.01491 , 2025. [51] Yu Yue, Yufeng Yuan, Qiying Yu, Xiaochen Zuo, Ruofei Zhu, Wenyuan Xu, Jiaze Chen, Chengyi Wang, TianTian Fan, Zhengyin Du, et al. Vapo: Efficient and reliable reinforcement learning for advanced reasoning tasks. arXiv preprint arXiv:2504.05118 , 2025. [52] Kaiyan Zhang, Yuxin Zuo, Bingxiang He, Youbang Sun, Runze Liu, Che Jiang, Yuchen Fan, Kai Tian, Guoli Jia, Pengfei Li, et al. A survey of reinforcement learning for large reasoning models. arXiv preprint arXiv:2509.08827 , 2025. [53] Chujie Zheng, Shixuan Liu, Mingze Li, Xiong-Hui Chen, Bowen Yu, Chang Gao, Kai Dang, Yuqiong Liu, Rui Men, An Yang, Jingren Zhou, and Junyang Lin. Group sequence policy optimization, 2025. URL https://arxiv.org/abs/2507.18071 .[54] Zilin Zhu, Chengxing Xie, Xin Lv, and slime Contributors. slime: An llm post-training framework for rl scaling. https://github.com/THUDM/slime , 2025. GitHub repository. Corresponding author: Xin Lv. 13 A Contributors 
+
+Jiayan Fu, Hang Xu *, Yong Zhang, Zhaokai Luo, Yao Hu, Dongyan Zhao B, Mu Chuan B
+
+# B Additional Related Work 
+
+B.1 Reinforcement Learning for Large Language Models 
+
+Reinforcement learning has become an important component of large language model post-training, sup-porting both preference alignment and the development of complex reasoning capabilities [30, 11]. Its early applications focused primarily on preference alignment [52]. Representative RLHF methods train scalar reward models from human preferences over model responses and use PPO to optimize language model policies [40, 30, 3]. Their PPO implementations use learned value functions to construct token-level ad-vantage estimates [40, 30]. More recently, reinforcement learning has increasingly been used to improve complex reasoning through outcome-level or verifiable rewards [39, 11, 44, 52]. To avoid the computational cost and optimization difficulty of training a critic, ReMax [21] uses the re-ward of a greedily decoded response as its baseline, whereas RLOO [1] constructs a leave-one-out baseline from the rewards of other responses sampled for the same prompt. GRPO [39] instead replaces the learned value model with group-relative advantage estimates. REINFORCE++ [15] combines critic-free optimiza-tion with global advantage normalization. Subsequent work refines different components of critic-free op-timization, including clipping, sampling, and loss aggregation in DAPO [49], normalization-bias correction in Dr. GRPO [22], and sequence-level importance weighting and clipping in GSPO [53]. Despite the prevalence of critic-free optimization, recent work has continued to develop value-based meth-ods for long and heterogeneous reasoning trajectories. VC-PPO [50] attributes observed failures of PPO in long-chain-of-thought training to value-initialization bias and the attenuation of terminal reward signals in GAE, and accordingly introduces value pretraining and decoupled GAE. VAPO [51] builds on these tech-niques and introduces length-adaptive GAE for responses of varying lengths. The high and variable cost of generating long trajectories has also motivated asynchronous training systems [10, 14]. AReaL [10] decou-ples rollout generation from policy optimization and explicitly accounts for stale training samples, whereas SAO [14] combines single-rollout asynchronous training with a learned value model and a token-level GAE estimator. In contrast to these studies of optimization algorithms and training systems, our work develops a general characterization of token-level credit in long-sequence LLM reinforcement learning and studies its implications for response-level baselines and learned critics. 
+
+B.2 Credit Assignment in Reinforcement Learning 
+
+Credit assignment concerns how earlier decisions contribute to subsequent outcomes and has been recog-nized as a fundamental difficulty in learning systems since early work on artificial intelligence [27]. Many classical reinforcement learning methods connect decisions to outcomes through sampled returns and tem-poral structure. Monte Carlo methods use sampled returns as targets for value estimation [42], whereas REINFORCE-style policy gradient methods use observed rewards or returns to construct gradient esti-mates [47]. Temporal-difference learning bootstraps from temporally successive predictions [41], while eligibility traces distribute subsequent TD errors to previously visited states and actions [42]. Actor-critic methods use learned value functions to estimate policy gradients [43]. Generalized advantage estimation combines TD residuals to control the bias-variance trade-off in advantage estimation [35]. When consequential decisions are separated from their outcomes by long temporal gaps, subsequent work has developed more targeted mechanisms. RUDDER learns return-equivalent reward redistributions through contribution analysis of return predictions [2], while Temporal Value Transport uses attentional memory retrieval to transport value estimates from later events to relevant events in the distant past [17]. Hindsight Credit Assignment assigns credit to past decisions according to the likelihood that they led to an observed outcome [13]. Counterfactual Credit Assignment constructs future-conditioned baselines to disentangle an action’s influence from external factors and subsequent actions [25], whereas COCOA es-timates an action’s contribution by asking whether a subsequent reward would still have been obtained under an alternative action [26].   
+
+> *Project Leader.
+> BCorresponding Authors. zhaody@pku.edu.cn ,muchuan1@xiaohongshu.com .
+
+14 Pignatelli et al. [31] organize these developments into several methodological families, including ap-proaches based on temporal contiguity, return decomposition, and future conditioning. Collectively, these methods address the propagation of delayed rewards, the decomposition of trajectory returns, or the esti-mation of action influence, but they do so through different target quantities and estimation procedures. In long-horizon reinforcement learning for large language models, this problem becomes especially salient, as many outcome-supervised methods use a single response-level or terminal reward to train a large number of token-level decisions. Our work studies the mathematical characterization of credit under three regular-ity conditions and uses the resulting unique representation to analyze existing algorithms and guide critic training. 
+
+# C Detailed Proofs 
+
+C.1 Reward Normalization and Variance Bound 
+
+For a bounded reward R satisfying Rmin ≤ R ≤ Rmax with Rmin < Rmax , define the normalized reward by 
+
+˜R = R − Rmin 
+
+Rmax − Rmin 
+
+.Since this is a positive affine transformation, i.e., 
+
+˜R = aR + b, a > 0, maximizing the expected reward is equivalent to maximizing the expected normalized reward. It remains to show the variance bound for R ∈ [0, 1 ]. Let 
+
+μ = E[R].Since 0 ≤ R ≤ 1, we have 
+
+R2 ≤ R.Therefore, Var (R) = E[R2] − μ2 ≤ μ − μ2 = μ(1 − μ) ≤ 14 .
+
+C.2 Unique Representation Theorem 
+
+C.2.1 Prefix Consistency Implies Adaptedness 
+
+Lemma 1. Suppose that the prompt and all environmental observations are represented as finite token sequences over a finite vocabulary. If a token-level credit assignment satisfies Prefix Consistency, then its accumulated-credit process 
+
+{Si}Li=0 is adapted to the prefix filtration {F i}Li=0; that is, S i is Fi-measurable for every i = 0, . . . , L. Proof. Let (Ω, F , P) denote the underlying probability space. We assume that all information presented to the language model, including the prompt q and each environmental observation Oj, is represented as a finite token sequence over the finite vocabulary V. Let 
+
+V ∗ =
+
+> ∞⋃
+> m=0
+
+V m
+
+denote the set of all finite token sequences. Since V is finite, V ∗ is countable. For any fixed step i, define the observed prefix 
+
+Hi = ( q, T1, O1, . . . , Ti, Oi).Then Hi takes values in the countable prefix space 
+
+Hi = V ∗ × (V × V ∗)i,which we equip with the discrete sigma-algebra 2 Hi . By construction, 
+
+Fi = σ(Hi).15 Prefix Consistency requires that, for any ω, ˜ω ∈ Ω,
+
+Hi(ω) = Hi( ˜ω) =⇒ Si(ω) = Si( ˜ω).Hence, for each h ∈ Hi(Ω), the random variable Si takes a common value on the fiber 
+
+H−1 
+
+> i
+
+({h}).Define gi : Hi → R by assigning this common value to gi(h) for h ∈ Hi(Ω), and set gi(h) = 0 for h /∈ Hi(Ω).Prefix Consistency ensures that gi is well defined. Because Hi is equipped with the discrete sigma-algebra, 
+
+gi is measurable. Moreover, by construction, 
+
+Si = gi ◦ Hi.Since Hi is Fi-measurable, it follows that Si is also Fi-measurable. As this argument applies to every i, the accumulated-credit process is adapted to the prefix filtration. 
+
+C.2.2 Proof of Unique Representation Theorem 
+
+Theorem 1 (Unique Representation of Token-Level Credit) . Let L denote the maximum number of generated tokens in a trajectory, and let τ ≤ L be the stopping time induced by the generation process. Assume that R is integrable and Fτ -measurable. Define Vi := E[R | F i], i = 0, . . . , τ.
+
+There exists a unique integrable token-level credit assignment, up to almost-sure equality, {Ci}τ 
+
+> i=1
+
+satisfying Com-pleteness, Prefix Consistency, and Neutrality. It admits the representation Ci = Vi − Vi−1 = E[R | F i] − E[R | F i−1] a.s. , i = 1, . . . , τ.
+
+Moreover, {Ci}τ 
+
+> i=1
+
+is a martingale difference sequence with respect to {F i}τ
+
+> i=0
+
+.Proof. Since τ ≤ L almost surely, we adopt the convention that Ci = 0 on {i > τ} and regard every credit sequence as being defined on the deterministic horizon {1, . . . , L}. We similarly define 
+
+Vi := E[R | F i], i = 0, . . . , L.This extension is innocuous. Indeed, since R is Fτ -measurable, we have 
+
+Vi = R on {τ ≤ i} a.s. Consequently, Vi − Vi−1 = 0 on {i > τ} almost surely. 
+
+Existence. Define 
+
+C⋆ 
+
+> i
+
+:= Vi − Vi−1, i = 1, . . . , L.We verify that this assignment satisfies the three regularity conditions. First, the sum telescopes: τ
+
+# ∑
+
+> i=1
+
+C⋆ 
+
+> i
+
+= Vτ − V0.Because R is Fτ -measurable, 
+
+Vτ = E[R | F τ ] = R a.s. Therefore, τ
+
+# ∑
+
+> i=1
+
+C⋆ 
+
+> i
+
+= R − E[R | F 0] a.s., which establishes Completeness. Next, let 
+
+S⋆ 
+
+> i
+
+:=
+
+> i
+
+# ∑
+
+> j=1
+
+C⋆ 
+
+> j
+
+= Vi − V0.16 Recall that Fi = σ(Hi) and that the prefix space Hi is countable. Hence, we may choose a version of the conditional expectation for which 
+
+Vi = vi(Hi)
+
+for some measurable function vi : Hi → R. Likewise, V0 = v0(q) for some measurable function v0. It follows that 
+
+S⋆ 
+
+> i
+
+= vi(Hi) − v0(q).Thus, if two trajectories have the same prefix up to step i, they have the same value of S⋆ 
+
+> i
+
+. This proves Prefix Consistency. Finally, the tower property of conditional expectation gives 
+
+E[C⋆ 
+
+> i
+
+| F i−1] = E[Vi − Vi−1 | F i−1]= E[E[R | F i] | F i−1] − Vi−1
+
+= E[R | F i−1] − Vi−1
+
+= 0 a.s. Therefore, C⋆ 
+
+> i
+
+also satisfies Neutrality, proving existence. 
+
+Uniqueness. Let { ˜Ci}τ 
+
+> i=1
+
+be any other credit assignment satisfying Completeness, Prefix Consistency, and Neutrality. Extend it by setting ˜Ci = 0 on {i > τ}, and define its accumulated credit process by 
+
+˜Si :=
+
+> i
+
+# ∑
+
+> j=1
+
+˜Cj, i = 0, . . . , L,with ˜S0 = 0. By Prefix Consistency, ˜Si depends only on the observed prefix Hi. Equivalently, as established in Lemma 1, 
+
+˜Si is Fi-measurable. Moreover, Neutrality yields 
+
+E[ ˜Si | F i−1] = E[ ˜Si−1 + ˜Ci | F i−1]= ˜Si−1 + E[ ˜Ci | F i−1]= ˜Si−1.Hence, { ˜Si}Li=0 is a martingale with respect to {F i}Li=0.By Completeness and the zero extension after τ, its terminal value is 
+
+˜SL = ˜Sτ = R − E[R | F 0] = R − V0 a.s. A finite-horizon martingale is determined by its terminal value. Therefore, for every i = 0, . . . , L,
+
+˜Si = E[ ˜SL | F i]= E[R − V0 | F i]= E[R | F i] − V0
+
+= Vi − V0 a.s. Taking successive differences gives 
+
+˜Ci = ˜Si − ˜Si−1 = Vi − Vi−1 = C⋆ 
+
+> i
+
+a.s. for every i ≤ τ. Thus, the credit assignment is unique up to almost-sure equality. The representation also immediately implies 
+
+E[C⋆ 
+
+> i
+
+| F i−1] = 0, so {C⋆ 
+
+> i
+
+}τ 
+
+> i=1
+
+is a martingale difference sequence with respect to {F i}τ
+
+> i=0
+
+.17 C.2.3 Necessity of the Regularity Conditions 
+
+The three regularity conditions in Theorem 1 are logically independent. The following construction shows that removing any one of them admits credit assignments that differ from the unique conditional-reward increments. 
+
+Proposition 1 (Necessity of the three regularity conditions) . None of Completeness, Prefix Consistency, and Neutrality is implied by the other two. A single bounded two-step process suffices to show that none of the three conditions is implied by the other two. Proof. Let X and Y be independent Rademacher random variables: 
+
+P(X = 1) = P(X = −1) = P(Y = 1) = P(Y = −1) = 12 .Consider a stochastic process with a deterministic two-step horizon with 
+
+τ = 2, F0 = {∅, Ω}, F1 = σ(X), F2 = σ(X, Y),and define the terminal reward by 
+
+R = 1 + X
+
+2 .Thus R ∈ { 0, 1 }, and 
+
+V0 = E[R] = 12 , V1 = E[R | F 1] = R, V2 = E[R | F 2] = R.The unique representation from Theorem 1 is therefore 
+
+C⋆ 
+
+> 1
+
+= X
+
+2 , C⋆ 
+
+> 2
+
+= 0. 
+
+Completeness Consider the assignment 
+
+C1 = 0, C2 = 0. Its accumulated credits are 
+
+S1 = 0, S2 = 0, so Prefix Consistency holds. Neutrality also holds because 
+
+E[C1 | F 0] = 0, E[C2 | F 1] = 0. However, 
+
+C1 + C2 = 0̸ = R − V0 = X
+
+2 .Thus an assignment may be prefix-consistent and neutral while explaining none of the realized reward deviation. 
+
+Prefix Consistency Consider the assignment 
+
+C1 = X
+
+2 + Y, C2 = −Y.It satisfies Completeness because 
+
+C1 + C2 = X
+
+2 = R − V0.It also satisfies Neutrality: 
+
+E[C1 | F 0] = E
+
+[ X
+
+2 + Y
+
+]
+
+= 0and, by the independence of X and Y,
+
+E[C2 | F 1] = −E[Y | X] = 0. Nevertheless, 
+
+S1 = C1 = X
+
+2 + Y
+
+is not F1-measurable. Indeed, Var (S1 | F 1) = Var (Y | X) = 1. Consequently, two trajectories with the same first-step information X but different future realizations of 
+
+Y assign different credit to the first token. The assignment therefore uses future information to revise the credit of an already generated prefix. 18 Neutrality Consider the assignment 
+
+C1 = X, C2 = − X
+
+2 .It satisfies Completeness because 
+
+C1 + C2 = X
+
+2 = R − V0.Both S1 = X and S2 = X/2 are measurable with respect to their corresponding prefix sigma-algebras. Thus, Prefix Consistency is satisfied. However, 
+
+E[C2 | F 1] = − X
+
+2̸ = 0 a.s. The second-token credit is already completely predictable before the second token is generated. Thus credit can be moved arbitrarily between token positions through predictable compensating terms while preserv-ing both prefix measurability and the terminal sum. The three constructions show that each condition excludes a distinct pathology. Completeness prevents the assignment from ignoring part or all of the realized outcome. Prefix Consistency prevents future informa-tion from modifying credit assigned to an earlier prefix. Neutrality prevents predictable zero-sum transfers of credit across token positions. Hence all three conditions are necessary for the unique representation in Theorem 1. 
+
+C.2.4 Aggregation of the Unique Token-Level Representation 
+
+Corollary 1 (Aggregation of the Unique Token-Level Representation) . Consider any partition of the token sequence into consecutive segments 
+
+I1, I2, . . . , IK,
+
+where each segment Ik contains a set of consecutive token indices. Define the segment-level credit as C(k) = ∑
+
+> i∈I k
+
+Ci.
+
+The resulting segment-level credit is C(k) = ∑
+
+> i∈I k
+
+(Vi − Vi−1) = Vbk − Vak −1,
+
+where a k and b k denote the first and last token indices of segment Ik.Proof. The result follows directly from Theorem 1 by summing the unique token-level credit increments within each segment. 
+
+C.3 Teacher Credit Equivalence Theorem Theorem 2 (Teacher Credit Equivalence) . Let q ⋆ 
+
+> t
+
+be the ideal teacher in Definition 1. Then GOPD  
+
+> t
+
+(q⋆ 
+
+> t
+
+) = 1
+
+β Eπ [ZtCπ 
+
+> t
+
+|F t−1] a.s. ,
+
+where Cπ 
+
+> t
+
+= Vπ 
+
+> t
+
+− Vπ
+
+> t−1
+
+, Vπ 
+
+> t
+
+= Eπ [R | F t]
+
+is the unique token-level credit from Theorem 1. Proof. Condition on Ft−1. The optimization problem in Definition 1 can be written as max  
+
+> q∈∆(V)
+
+{
+
+# ∑
+
+> a∈V
+
+q(a)Qπ 
+
+> t
+
+(a) − β ∑
+
+> a∈V
+
+q(a) log q(a)
+
+pt(a)
+
+}
+
+.19 Its Lagrangian is 
+
+L(q, λ) = ∑
+
+> a∈V
+
+q(a)Qπ 
+
+> t
+
+(a) − β ∑
+
+> a∈V
+
+q(a) log q(a)
+
+pt(a) + λ
+
+(
+
+# ∑
+
+> a∈V
+
+q(a) − 1
+
+)
+
+.The first-order condition for each a ∈ V is 
+
+Qπ 
+
+> t
+
+(a) − β
+
+(
+
+log q(a)
+
+pt(a) + 1
+
+)
+
++ λ = 0. Consequently, the unique optimizer is 
+
+q⋆ 
+
+> t
+
+(a) = pt(a) exp (Qπ 
+
+> t
+
+(a)/β)
+
+∑b∈V pt(b) exp (Qπ 
+
+> t
+
+(b)/β) .Define the prefix-dependent normalizing factor 
+
+Zt = ∑
+
+> b∈V
+
+pt(b) exp (Qπ 
+
+> t
+
+(b)/β) .It follows that log q⋆ 
+
+> t
+
+(a)
+
+pt(a) = 1
+
+β Qπ 
+
+> t
+
+(a) − log Zt.Substituting this identity into the OPD gradient yields 
+
+GOPD  
+
+> t
+
+(q⋆ 
+
+> t
+
+) = 1
+
+β Eπ [Zt Qπ 
+
+> t
+
+(Tt)|F t−1] − log Zt Eπ [Zt|F t−1] .The conditional score-function identity gives 
+
+Eπ [Zt|F t−1] = 0. Therefore, 
+
+GOPD  
+
+> t
+
+(q⋆ 
+
+> t
+
+) = 1
+
+β Eπ [Zt Qπ 
+
+> t
+
+(Tt)|F t−1] .It remains to relate the token-action value to the unique credit. Since 
+
+Cπ 
+
+> t
+
+= Vπ 
+
+> t
+
+− Vπ
+
+> t−1
+
+,the tower property gives 
+
+Eπ [Cπ 
+
+> t
+
+|F t−1, Tt] = Eπ [Vπ 
+
+> t
+
+|F t−1, Tt] − Vπ
+
+> t−1
+
+= Qπ 
+
+> t
+
+(Tt) − Vπ
+
+> t−1
+
+.Because Zt is measurable with respect to σ(Ft−1, Tt),
+
+Eπ [ZtCπ 
+
+> t
+
+|F t−1] = Eπ [ZtEπ [Cπ 
+
+> t
+
+|F t−1, Tt]|F t−1]= Eπ
+
+[Zt
+
+(Qπ 
+
+> t
+
+(Tt) − Vπ
+
+> t−1
+
+)∣ ∣Ft−1
+
+]
+
+= Eπ [Zt Qπ 
+
+> t
+
+(Tt)|F t−1] .The last equality again follows from the conditional score-function identity. Combining the two expressions proves 
+
+GOPD  
+
+> t
+
+(q⋆ 
+
+> t
+
+) = 1
+
+β Eπ [ZtCπ 
+
+> t
+
+|F t−1] .20 C.4 Gradient Unbiasedness of the RLOO Estimator 
+
+Throughout the proof, all expectations are conditioned on the prompt q. Following the zero-extension convention, set both Ct and Zt to zero after termination. Assume that all expectations involving policy scores below are finite. 
+
+Proof. Let 
+
+Zt = ∇θ log πθ (Tt | F t−1).By Theorem 1, the unique token-level credit satisfies Ct = Vt − Vt−1 and Ri − V0 = ∑τ 
+
+> k=1
+
+Ck. We first show that 
+
+E[Zt(Ri − Ct)] = 0. For k < t, Ck is Ft−1-measurable, and therefore 
+
+E[ZtCk] = E[CkE[Zt|F t−1]] = 0. For k > t, Zt is Fk−1-measurable, and the martingale difference property of Ck gives 
+
+E[ZtCk] = E[ZtE[Ck|F k−1]] = 0. The same argument applies to V0, since V0 is Ft−1-measurable. Hence 
+
+E[Zt(Ri − Ct)] = 0. For the RLOO baseline, ¯ R−i is computed from independent responses and is independent of the current trajectory. Thus E[Zt ¯R−i] = 0. Combining the above results gives 
+
+E[Zt(Ri − ¯R−i)] = E[ZtCt].
+
+C.5 Approximate Credit Sparsity Theorem Theorem 4 (Approximate Credit Sparsity) . For any fixed prompt q, 
+
+E
+
+[ τ
+
+# ∑
+
+> i=1
+
+C2 
+
+> i
+
+| F 0
+
+]
+
+= Var (R | F 0) ≤ 14 .
+
+Consequently, for any ϵ > 0,
+
+E
+
+[ τ
+
+# ∑
+
+> i=1
+
+1{| Ci| > ϵ}
+
+∣∣∣∣∣F0
+
+]
+
+≤ 14ϵ2 .
+
+Proof. Since τ ≤ L almost surely, extend the credit sequence to the deterministic horizon {1, . . . , L} by setting Ci = 0 on {i > τ}. By the unique representation, Ci = Vi − Vi−1, where Vi = E[R | F i]. Because 
+
+R ∈ [0, 1 ], these increments are square-integrable. For 1 ≤ i < j ≤ L, Ci is Fj−1-measurable. The tower property and the martingale difference property therefore give 
+
+E[CiCj | F 0] = E[Ci E[Cj | F j−1]∣∣F0
+
+] = 0. By Completeness and the zero extension, 
+
+> L
+
+# ∑
+
+> i=1
+
+Ci =
+
+> τ
+
+# ∑
+
+> i=1
+
+Ci = R − V0, V0 = E[R | F 0].Consequently, 
+
+E
+
+[ τ
+
+# ∑
+
+> i=1
+
+C2
+
+> i
+
+∣∣∣∣∣F0
+
+]
+
+=
+
+> L
+
+# ∑
+
+> i=1
+
+E[C2 
+
+> i
+
+| F 0]= E
+
+( L
+
+# ∑
+
+> i=1
+
+Ci
+
+)2∣∣∣∣∣∣F0
+
+
+
+= E[( R − V0)2 | F 0]= Var (R | F 0).21 Since R2 ≤ R and V0 ∈ [0, 1 ],Var (R | F 0) = E[R2 | F 0] − V20 ≤ V0(1 − V0) ≤ 14 .Finally, for any ϵ > 0, the pointwise inequality 
+
+ϵ2 τ
+
+# ∑
+
+> i=1
+
+1{| Ci| > ϵ} ≤ 
+
+> τ
+
+# ∑
+
+> i=1
+
+C2
+
+> i
+
+implies, upon taking conditional expectations, 
+
+E
+
+[ τ
+
+# ∑
+
+> i=1
+
+1{| Ci| > ϵ}
+
+∣∣∣∣∣F0
+
+]
+
+≤ Var (R | F 0)
+
+ϵ2 ≤ 14ϵ2 .
+
+C.6 Gradient of BCE with Importance-Weighted Targets 
+
+For the prefix Ft−1, let the critic prediction be ̂
+
+Vϕ,t−1 = σ(zϕ,t−1),where zϕ,t−1 is the critic logit. Let It be the exact continuation importance ratio satisfying 
+
+Eμ[It R | F t−1] = Vπ
+
+> t−1
+
+.The importance-weighted target It R is held fixed when differentiating with respect to the critic logit. Its BCE is BCE (σ(zϕ,t−1), It R) = −It R log σ(zϕ,t−1)
+
+− (1 − It R) log (1 − σ(zϕ,t−1))
+
+= log (1 + exp (zϕ,t−1)) − It Rz ϕ,t−1.Therefore, 
+
+∂∂zϕ,t−1
+
+BCE (σ(zϕ,t−1), It R) =̂ Vϕ,t−1 − It R.Taking the conditional expectation under the rollout policy gives 
+
+Eμ
+
+[
+
+∂∂zϕ,t−1
+
+BCE (σ(zϕ,t−1), It R)∣∣∣∣∣ Ft−1
+
+]
+
+=̂ Vϕ,t−1 − Eμ[It R | F t−1]=̂ Vϕ,t−1 − Vπ
+
+> t−1
+
+.For 0 < Vπ 
+
+> t−1
+
+< 1, the expected logit gradient vanishes exactly when ̂
+
+Vϕ,t−1 = Vπ
+
+> t−1
+
+.When Vπ 
+
+> t−1
+
+= 0 or 1, equality is approached as the logit tends to −∞ or +∞, respectively. In addition, 
+
+∂2
+
+∂z2
+
+> ϕ,t−1
+
+BCE (σ(zϕ,t−1), It R) =̂ Vϕ,t−1
+
+(
+
+1 −̂ Vϕ,t−1
+
+)
+
+≤ 14 .Thus, although individual importance-weighted targets may fall outside [0, 1 ], the expected logit gradient has the sign of the value prediction error, and the curvature with respect to the logit remains uniformly bounded. We further show that approaching the minimum expected BCE implies approaching the target conditional mean in mean square. Let Y be an integrable target and write 
+
+m = E[Y | F ] ∈ [0, 1 ].22 For an F -measurable prediction v ∈ (0, 1 ), define 
+
+ℓ(v) = E[BCE (v, Y) | F ] = −m log v − (1 − m) log (1 − v).All logarithms are natural, and the expectations below are assumed to exist and be finite. Differentiating gives 
+
+ℓ′(v) = v − mv(1 − v) .Since u(1 − u) ≤ 1/4, for v ≥ m,
+
+ℓ(v) − ℓ(m) =  
+
+> ∫vm
+
+u − mu(1 − u) du ≥ 4 
+
+> ∫vm
+
+(u − m) du = 2(v − m)2.Similarly, for v < m,
+
+ℓ(v) − ℓ(m) =  
+
+> ∫mv
+
+m − uu(1 − u) du ≥ 4 
+
+> ∫mv
+
+(m − u) du = 2(v − m)2.Here, 
+
+ℓ(m) = −m log m − (1 − m) log (1 − m),with 0 log 0 = 0. When m = 0 or m = 1, this expression denotes the infimum over v ∈ (0, 1 ), and the inequalities follow by taking limits. Taking expectations gives 
+
+E[( v − m)2] ≤ 12 E[ℓ(v) − ℓ(m)] . (1) Consequently, for any sequence of predictions vn,
+
+E[ℓ(vn) − ℓ(m)] −→ 0 =⇒ E[( vn − m)2] −→ 0. This applies both to the on-policy target Y = R and to the exact importance-weighted target Y = IR ,provided that Eμ[IR | F ] = Vπ .We can further relate value estimation error to credit estimation error. Fix a policy π and a trajectory distri-bution under which all the following expectations are taken. For i ∈ { t − 1, t}, suppose that 
+
+E[Yi | F i] = Vπ 
+
+> i
+
+,and let ℓi denote the corresponding conditional expected BCE. Define 
+
+εi =̂ Vϕ,i − Vπ 
+
+> i
+
+,̂ Cϕ,t =̂ Vϕ,t −̂ Vϕ,t−1.Since Cπ 
+
+> t
+
+= Vπ 
+
+> t
+
+− Vπ
+
+> t−1
+
+,̂
+
+Cϕ,t − Cπ 
+
+> t
+
+= εt − εt−1.Using (a − b)2 ≤ 2a2 + 2b2 and Equation 1, we obtain 
+
+E[( ̂ Cϕ,t − Cπ 
+
+> t
+
+)2] ≤ 2E[ε2 
+
+> t
+
+] + 2E[ε2
+
+> t−1
+
+]
+
+≤ E[ℓt(̂ Vϕ,t) − ℓt(Vπ 
+
+> t
+
+)] + E[ℓt−1(̂ Vϕ,t−1) − ℓt−1(Vπ
+
+> t−1
+
+)] .(2) Thus, if the expected BCE at both adjacent prefixes approaches its minimum, the estimated credit converges to Cπ 
+
+> t
+
+in mean square. 
+
+C.7 Current-Token Importance Weighting as a One-Step Policy-Tracking Surrogate 
+
+Exact synchronization with an updated policy requires correcting the entire continuation distribution. Such a correction involves a product of token-level importance ratios and can be unstable for long trajectories. We characterize here the current-token importance target used in our method and its relation to the exact updated-policy value. Let μ denote the rollout policy and π the policy obtained after actor optimization. For the token generated after prefix Ft−1, define 
+
+ρt = π(Tt | F t−1)
+
+μ(Tt | F t−1) .23 We assume that π(· | F t−1) is absolutely continuous with respect to μ(· | F t−1). The exact continuation importance ratio is 
+
+Wt =
+
+> τ
+
+# ∏
+
+> k=t
+
+ρk,and change of measure gives 
+
+Vπ 
+
+> t−1
+
+= Eπ [R | F t−1] = Eμ[Wt R | F t−1].Our practical critic target instead uses only the current-token ratio, 
+
+Yone  
+
+> t
+
+= ρt R, ˜Vπ,μ 
+
+> t−1
+
+= Eμ[ρt R | F t−1].
+
+Proposition 2 (One-step policy tracking) . The surrogate value ˜Vπ,μ 
+
+> t−1
+
+is exactly the value of the hybrid policy that samples T t from π and follows μ thereafter: 
+
+˜Vπ,μ 
+
+> t−1
+
+= Eπ▷t μ[R | F t−1].
+
+Moreover, suppose that R ∈ [0, 1 ], τ ≤ L, and 
+
+|ρk − 1| ≤ ε, k = t, . . . , τ.
+
+Writing δk = ρk − 1, we have Vπ 
+
+> t−1
+
+= ˜Vπ,μ 
+
+> t−1
+
++ Eμ
+
+[
+
+R
+
+> τ
+
+# ∑
+
+> k=t+1
+
+δk
+
+∣∣∣∣∣Ft−1
+
+]
+
++ Rt,
+
+where 
+
+|R t| ≤ (1 + ε)L−t+1 − 1 − (L − t + 1)ε = OL(ε2).
+
+Consequently, 
+
+˜Vπ,μ 
+
+> t−1
+
+= Vπ 
+
+> t−1
+
++ OL(ε)
+
+as ε → 0 for fixed L. Proof. Conditioning first on Tt, we obtain 
+
+Eμ[ρt R | F t−1] = ∑
+
+> a
+
+μ(a | F t−1) π(a | F t−1)
+
+μ(a | F t−1) Eμ[R | F t−1, Tt = a]= ∑
+
+> a
+
+π(a | F t−1)Eμ[R | F t−1, Tt = a].The last expression is precisely the expected reward obtained by sampling the current token from π and using μ for the remaining continuation. This proves the hybrid-policy identity. For the local expansion, observe that 
+
+Wt =
+
+> τ
+
+# ∏
+
+> k=t
+
+(1 + δk) = 1 +
+
+> τ
+
+# ∑
+
+> k=t
+
+δk + rt,where rt contains all products involving at least two distinct δk’s. Since |δk| ≤ ε and τ − t + 1 ≤ L − t + 1, 
+
+|rt| ≤ 
+
+> L−t+1
+
+# ∑
+
+> m=2
+
+(L − t + 1
+
+m
+
+)
+
+εm = ( 1 + ε)L−t+1 − 1 − (L − t + 1)ε.Multiplying by R, taking the conditional expectation, and using 0 ≤ R ≤ 1 gives 
+
+Vπ 
+
+> t−1
+
+= Eμ[Wt R | F t−1]= Eμ[( 1 + δt)R | F t−1] + Eμ
+
+[
+
+R
+
+> τ
+
+# ∑
+
+> k=t+1
+
+δk
+
+∣∣∣∣∣Ft−1
+
+]
+
++ Rt
+
+= ˜Vπ,μ 
+
+> t−1
+
++ Eμ
+
+[
+
+R
+
+> τ
+
+# ∑
+
+> k=t+1
+
+δk
+
+∣∣∣∣∣Ft−1
+
+]
+
++ Rt.The stated bounds follow immediately. 24 For comparison, the complete first-order expansion of the continuation importance target is 
+
+YFO  
+
+> t
+
+= R
+
+(
+
+1 +
+
+> τ
+
+# ∑
+
+> k=t
+
+(ρk − 1)
+
+)
+
+,which satisfies 
+
+Eμ[YFO  
+
+> t
+
+| F t−1] = Vπ 
+
+> t−1
+
++ OL(ε2).The practical target ρt R retains the current-token component of this first-order correction and omits the remaining continuation terms. It is therefore a one-step truncation of the full policy correction. This choice avoids the multiplicative continuation weight while moving the critic target toward the updated policy. 
+
+# D Policy Aligned Critic Training Procedure 
+
+Algorithm 1 summarizes PACT. Here, ActorUpdate denotes its policy optimization step. All importance ratios and critic targets are computed token-wise. Notation: actor policy πθ0 ; probabilistic critic ̂ Vϕ0 (F ) = σ(zϕ0 (F )) ; number of iterations K; actor/critic steps B; importance-ratio acceptance bounds ρmin , ρmax 
+
+Algorithm 1 Policy Aligned Critic Training 
+
+Require: πθ0 ,̂ Vϕ0 , K, B, ρmin , ρmax 
+
+for k = 0, . . . , K − 1 do 
+
+Dk, R, ℓold ← ROLLOUT (πθk )̂
+
+V ← sg (̂ Vϕk (Dk))̂ 
+
+C ← CREDIT (R,̂ V)
+
+θ ← θk
+
+for b = 1, . . . , B do 
+
+θ ← ACTOR UPDATE (θ, Dk,̂ C, ℓold )
+
+end for 
+
+θk+1 ← θ
+
+ℓnew ← LOG PROB (πθk+1 , Dk)
+
+ρ ← sg 
+
+[
+
+exp (ℓnew − ℓold )]
+
+m ← I{ρmin ≤ ρ ≤ ρmax 
+
+}
+
+Y ← ρ ⊙ R
+
+ϕ ← ϕk
+
+for b = 1, . . . , B do 
+
+LPACT (ϕ) ← ∑ m ⊙ BCE (̂ Vϕ(Dk), Y)
+
+∑ m
+
+ϕ ← ϕ − ηϕ∇ϕLPACT (ϕ)
+
+end for 
+
+ϕk+1 ← ϕ
+
+end for return πθK ,̂ VϕK
+
+# E Experimental Details 
+
+E.1 Prompt of Agentic Reasoning for Math 
+
+After constructing the training subset, we convert each selected DAPO-Math-17k example and each eval-uation example from a direct-answer problem into an agentic tool-use episode. We preserve the original problem statement and ground-truth final answer, while adding neither reference solutions nor tool-use demonstrations. The ground-truth answer is stored separately and is never included in the policy input. Specifically, we prepend an instruction that informs the model of the available Python sandbox and explic-itly encourages tool use for calculation, case enumeration, and verification. We also append a formatting 25 0 100 200 300 400 
+
+Training step   
+
+> 10 20 30 40 50
+> Mean response length (k tokens)
+> Response length Mean |Δ̂ V|
+> 510 15 20
+> Mean  |Δ̂ V| (×10 −3 )
+
+Figure 4: Dynamics of response length and mean |̂ Vt −̂ Vt−1| during PACT training. Table 3: Key training hyperparameters.     
+
+> Hyperparameter Mathematical Reasoning Coding Actor learning rate 1e
+
+− 6 1e − 6Critic learning rate 5e − 6 5e − 6PACT actor update DIS PPO clipping PACT actor DIS range [0.7, 6.0 ] N/A PACT critic IS acceptance range [0, 6 ] [0, 6 ]
+
+instruction requiring the final answer to appear in a \boxed{} expression on the last line. The resulting prompt template is:   
+
+> Solve the following math problem. You are in a sandbox with a working Python interpreter—USE it: write and run Python code to do the calculations, enumerate cases, and verify your result, instead of computing by hand.
+> original problem statement
+> Please put your final answer in \boxed{} .The last line of your response must have the form
+> Answer: \boxed{answer} .
+
+E.2 Further Empirical Evidence for Theorem 4 
+
+As shown in Figure 4, responses become progressively longer during PACT training, while the mean |̂ Vt −̂
+
+Vt−1| decreases. This trend is consistent with the intuition behind Theorem 4. 
+
+E.3 Training Dynamics 
+
+Figures 5 and 6 show the evolution of mean trajectory rewards during training on mathematical reasoning and agentic coding, respectively. 
+
+E.4 Key Training Hyperparameters 
+
+Table 3 summarizes the key training hyperparameters for mathematical reasoning and coding. PPO, GRPO, and SAO use rollout log-probabilities for actor updates, whereas PACT applies TIS with a ratio range of [0, 2 ] to account for the mismatch between training and rollout inference. PACT w/o critic IS retains all other settings of PACT, including actor-side corrections, the BCE critic objective, and the Actor-then-Critic update order. 26 0 80 160 240 320 400 
+
+Train Step   
+
+> 0.0 0.2 0.4 0.6 0.8
+> Mean trajectory reward
+> EMA α= 0.3
+
+## Qwen3.5-4B  
+
+> PACT PACT w/o IS GRPO (clip higher) PPO ( λ= 1) SAO
+
+Figure 5: Training reward on agentic mathematical reasoning with Qwen3.5-4B. Faint lines show raw mean trajectory rewards, while bold lines show exponential moving averages with α = 0.3. Each rollout round corresponds to four training steps. 
+
+# F Limitations 
+
+Our characterization of credits does not imply that all possible notions of credit must take the form derived in this work. The uniqueness result is conditional on the three proposed regularity conditions. Just as re-placing Euclid’s parallel postulate leads to different but internally consistent geometries, adopting different requirements for credit may lead to different representations. Second, the notion of credit studied here is statistical rather than causal. It is defined through conditional expectations and does not characterize the counterfactual causal effect of replacing an individual token or action. Finally, this work characterizes what token-level credit should be under the proposed conditions, but does not solve the problem of estimating it exactly in practical LLM reinforcement learning. Developing accurate and efficient estimators of token-level credit remains an important direction for future work. 27 0 40 80 120 160 200 
+
+Train Step 
+
+0.0 0.2 0.4 0.6 0.8 1.0   
+
+> Mean trajectory reward
+> EMA α= 0.3
+
+## Qwen3.6-35B-A3B     
+
+> PACT GRPO (clip higher) PPO ( λ= 1) SAO
+
+Figure 6: Training reward on agentic coding with Qwen3.6-35B-A3B. Faint lines show raw mean trajectory rewards, while bold lines show exponential moving averages with α = 0.3. 28
