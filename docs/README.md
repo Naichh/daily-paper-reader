@@ -6,41 +6,34 @@
 </div>
 
 ## 每次日报
-- 最新运行日期：2026-09-23
-- 运行时间：2026-09-23 22:37:43 UTC
+- 最新运行日期：2026-09-24
+- 运行时间：2026-09-24 22:16:14 UTC
 - 运行状态：成功
-- 本次总论文数：6
-- 精读区：4
-- 速读区：2
+- 本次总论文数：3
+- 精读区：3
+- 速读区：0
 
 ### 今日简报（AI）
-- 今日共生成 6 篇推荐（精读 4 篇，速读 2 篇）
-- 精读：《What Should a Self-Teacher See? Privileged Context Design for On-Policy Self-Distillation》（9.0/10）, 《Train Where the Quantized Model Goes: On-Policy Distillation for Low-Bit Reasoning》（9.0/10）
-- 速读：《ReDraft, Don't Just Distill: Reference-Driven Revision for Continual VLLM Post-Training》（7.0/10）, 《Ladders of Thought: A Self-Evolving Curriculum of Progressively Simplified Reasoning Traces》（6.0/10）
-- 这些结果覆盖了当下较热的方向，建议先看精读区论文的关键问题与方法。
-- 详情：[/202609/23/README](/202609/23/README)
+今天 3 篇全部精读，两篇高分论文都指向同一关键词：在策略蒸馏（On-Policy Distillation）。
+
+最值得看的方向：一是把策略蒸馏前置为 RL 的"起跑线"来提升强化学习效果（10.0/10），二是用反事实约束条件化的在策略蒸馏解决多约束指令跟随（9.0/10）。
+
+普通读者可先从满分那篇入手，理解蒸馏如何为 RL 打底，再看它如何迁移到多约束场景。
+- 详情：[/202609/24/README](/202609/24/README)
 
 ### 精读区论文标签
-1. [What Should a Self-Teacher See? Privileged Context Design for On-Policy Self-Distillation](/202609/23/2609.25623v1-what-should-a-self-teacher-see-privileged-context-design-for-on-policy-self-distillation)  
+1. [RL Starts before RL: On Policy Distillation for Better Reinforcement Learning](/202609/24/2609.28145v1-rl-starts-before-rl-on-policy-distillation-for-better-reinforcement-learning)  
+   标签：评分：10.0/10、query:policy-dist
+   evidence：把在策略蒸馏作为RL准备阶段以提升最终性能
+2. [Counterfactual Constraint-Conditioned On-Policy Distillation for Multi-Constraint Instruction Following](/202609/24/2609.27421v1-counterfactual-constraint-conditioned-on-policy-distillation-for-multi-constraint-instruction-following)  
    标签：评分：9.0/10、query:policy-dist
-   evidence：同策略自蒸馏中的特权上下文设计
-2. [Train Where the Quantized Model Goes: On-Policy Distillation for Low-Bit Reasoning](/202609/23/2609.26708v1-train-where-the-quantized-model-goes-on-policy-distillation-for-low-bit-reasoning)  
+   evidence：面向多约束指令遵循的在策略蒸馏
+3. [When and Where to Trust the Teacher: Unifying On-Policy Distillation and GRPO through Entropy-Calibrated Credit Assignment](/202609/24/2609.28385v1-when-and-where-to-trust-the-teacher-unifying-on-policy-distillation-and-grpo-through-entropy-calibrated-credit-assignment)  
    标签：评分：9.0/10、query:policy-dist
-   evidence：面向低比特推理模型的同策略蒸馏
-3. [BAS-OPD: Budget-Aware Selective On-Policy Self-Distillation for Fine-Grained Multimodal Perception](/202609/23/2609.25891v1-bas-opd-budget-aware-selective-on-policy-self-distillation-for-fine-grained-multimodal-perception)  
-   标签：评分：8.0/10、query:policy-dist
-   evidence：面向多模态大模型后训练的预算感知选择性在线策略自蒸馏
-4. [PACT: From Credit Assignment to Critic Alignment](/202609/23/2609.26355v1-pact-from-credit-assignment-to-critic-alignment)  
-   标签：评分：8.0/10、query:policy-dist
-   evidence：将在线策略蒸馏中的理想教师视为隐式评论家，聚焦LLM后训练信用分配
+   evidence：统一在策略蒸馏与GRPO的大模型后训练
 
 ### 速读区论文标签
-1. [ReDraft, Don't Just Distill: Reference-Driven Revision for Continual VLLM Post-Training](/202609/23/2609.16639v3-redraft-dont-just-distill-reference-driven-revision-for-continual-vllm-post-training)  
-   标签：评分：7.0/10、query:policy-dist
-   evidence：面向持续后训练的在策略自蒸馏
-2. [Ladders of Thought: A Self-Evolving Curriculum of Progressively Simplified Reasoning Traces](/202609/23/2609.25643v1-ladders-of-thought-a-self-evolving-curriculum-of-progressively-simplified-reasoning-traces)  
-   标签：评分：6.0/10、query:policy-dist
-   evidence：用于提升推理的知识蒸馏
+- 本次无速读推荐。
 
 
 <div class="dpr-home-promo-card">
