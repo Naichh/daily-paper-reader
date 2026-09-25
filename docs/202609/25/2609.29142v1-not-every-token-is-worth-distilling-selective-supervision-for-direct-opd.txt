@@ -1,0 +1,646 @@
+Title: Not Every Token Is Worth Distilling: Selective Supervision for Direct-OPD
+
+URL Source: https://arxiv.org/pdf/2609.29142v1
+
+Published Time: Fri, 25 Sep 2026 00:41:22 GMT
+
+Number of Pages: 19
+
+Markdown Content:
+Not Every Token Is Worth Distilling: Selective Supervision for Direct-OPD 
+
+# NOT EVERY TOKEN IS WORTH DISTILLING :SELECTIVE SUPERVISION FOR DIRECT -OPD 
+
+Yibo Zhao ∗
+
+, Zixuan Yang ∗
+
+, Yunshi Lan, Xiang Li †
+
+School of Data Science and Engineering East China Normal University 
+
+Hugging Face Github 
+
+ABSTRACT 
+
+Direct On-Policy Distillation (Direct-OPD) transfers reinforcement-learning-induced policy improvements from a small model to a larger student by using the token-level log-ratio between post-RL and pre-RL checkpoints as dense su-pervision on the student’s own rollouts. This transfer rewards the policy shift at every state, yet the log-ratio measures only relative change: it can stay fixed even as the probability mass that both checkpoints assign to the student’s candidate tokens vanishes. Through an exact construction, we show that the Direct-OPD re-ward and its update can remain unchanged while the Jensen–Shannon divergence (JSD) and both KL directions between the checkpoints vanish with this mass, and we note that a small JSD bounds how much the teacher’s behavior changed. Mo-tivated by this analysis, we propose Selective Supervision for Direct-OPD (S 2D-OPD), which ranks student-sampled states by their teacher–reference JSD and masks Direct-OPD supervision at low-divergence states, retaining only the top 10% of states per response. Across two teacher pairs and four student models ranging from 1.7B to 8B parameters, S 2D-OPD improves held-out accuracy over dense Direct-OPD on AIME and HMMT benchmarks in seven of eight settings and matches it in the eighth, without extra forward passes. Our code is available at https://anonymous.4open.science/r/S2D-OPD-8868 .
+
+“No Free Lunch for Supervised Machine Learning.” — David H. Wolpert 
+
+1 INTRODUCTION 
+
+Guided by scaling laws (Kaplan et al., 2020; Hoffmann et al., 2022; Pearce & Song, 2024), recent large language models have continued to scale up pre-training (DeepSeek-AI et al., 2026; Team et al., 2026; GLM-5-Team et al., 2026), which broadens their knowledge and latent capabilities. Post-training, most prominently reinforcement learning (RL) (Yue et al., 2025; Shao et al., 2024; Zhao et al., 2025), is then needed to elicit and refine these capabilities. As model size grows, RL demands more rollout generation, training compute, memory, and infrastructure (Wu et al., 2025), and stable optimization remains difficult to achieve (Wang et al., 2026a). Consequently, the models with the greatest post-training potential are also the most expensive to improve through RL. One line of work makes large-scale RL more stable through improved training algorithms (Yu et al., 2025; Zheng et al., 2025; MiniMax et al., 2025; Ma et al., 2025; Hou et al., 2026) and more ef-ficient through training and inference systems (Sheng et al., 2025; Fu et al., 2025; Kwon et al., 2023; Narayanan et al., 2021; Zhu et al., 2025). These advances make RL on large models more practical, but its cost still grows with model size. Another line of work uses on-policy distillation (OPD) (Agarwal et al., 2024; Gu et al., 2024; Lu & Lab, 2025), in which a stronger teacher provides token-level supervision on states sampled by the student. OPD transfers capabilities efficiently to a smaller student (Li et al., 2026b; Fu et al., 2026c), but it relies on a teacher stronger than the student, which is unavailable when the target is already the strongest model. Together, these approaches leave a challenge open: how to improve a large model without paying the cost of RL at its scale. 
+
+> ∗
+
+Equal contribution. The first two authors may list their names in either order on their CVs. 
+
+> †
+
+Corresponding author: xiangli@dase.ecnu.edu.cn .
+
+1arXiv:2609.29142v1 [cs.LG] 24 Sep 2026 Not Every Token Is Worth Distilling: Selective Supervision for Direct-OPD Direct-OPD (Feng et al., 2026) and Proxy-OPD (Fu et al., 2026a) recently proposed a weak-to-strong route around this challenge: running RL on a small model and transferring the result to a larger one. Both methods extract the RL-induced policy shift as the token-level log-ratio between the post-RL teacher and its pre-RL reference, and use it as an OPD reward on states sampled by the larger student. This turns outcome-level rewards into dense token-level supervision for the large model, without running RL at its scale or requiring a teacher stronger than the student. However, this apparent free lunch leaves unexamined whether every token-level reward reflects a meaningful change in the teacher’s behavior . Because the log-ratio reward measures only relative change, it can stay fixed even as the probability mass that both checkpoints assign to the student’s top candidates vanishes. Direct-OPD can therefore reward a state where both checkpoints barely support these candidates as strongly as one where RL clearly changed the teacher’s behavior. This raises the question that motivates this work: is every state’s policy shift worth distilling for free? 
+
+We make this probability-mass mismatch exact in Sec. 4.1: as the mass that both checkpoints as-sign to the student’s top candidates vanishes, the Direct-OPD reward and gradient can stay fixed, whereas the Jensen–Shannon divergence (JSD) and both directions of KL divergence between the checkpoints vanish with it. Because JSD accounts for the probability mass that the log-ratio ignores, we propose Selective Supervision for Direct-OPD (S 2D-OPD), which ranks student-sampled states by teacher–reference JSD and masks Direct-OPD supervision at low-divergence states. Empirically, the answer to our question is no: retaining only the top 10% of states per response, S 2D-OPD improves held-out accuracy over dense Direct-OPD in seven of eight teacher–student settings and matches it in the eighth (mean gain 0.95 points; 95% CI 0.40–1.54), without extra forward passes. In summary, our contributions are threefold: • A Probability-Mass Mismatch in Direct-OPD. Through an exact construction, we show that the log-ratio reward and its local gradient on the student can remain fixed while the probability mass behind the policy shift vanishes, and with it the teacher–reference JSD and both KL directions. We further show that JSD bounds how much the teacher’s behavior can change at every state, which motivates selecting states by divergence rather than by the reward itself. • Stable and Effective Selective Transfer. We propose S 2D-OPD, which masks Direct-OPD su-pervision at low-divergence states during policy transfer. Across four student scales and two teacher pairs, it improves held-out accuracy over Direct-OPD in seven of eight settings and yields smoother late-stage validation curves under the JustRL teacher pair. • Understanding the Gains from Selective Transfer. Within a fixed teacher–student setting, per-formance broadly rises with JSD percentile: the top bin outperforms a uniformly sampled 10% subset, whereas the lowest bin degrades the student below its initialization and eventually col-lapses. Across teacher pairs, the pair with lower overall JSD benefits more from masking, consis-tent with low-divergence filtering being a source of the improvement over dense Direct-OPD. 
+
+2 RELATED WORK 
+
+On-Policy Distillation. OPD trains a student on prefixes sampled from its own policy, using the teacher’s next-token distributions as dense supervision at every position (Agarwal et al., 2024; Gu et al., 2024; Lu & Lab, 2025). Subsequent work refines it through alternative objectives (Jin et al., 2026; Jia et al., 2026), stabilization strategies (Li et al., 2026b; Fu et al., 2026b), and privileged-context self-distillation (Zhao et al., 2026; Pan et al., 2026). Despite their differences, these methods primarily learn from the teacher’s policy itself, limiting transfer to improvements already present in the teacher; recent work therefore targets the teacher’s policy shift instead. ExOPD (Yang et al., 2026) extrapolates the teacher’s improvement over its reference model to construct a target beyond the teacher. Direct-OPD (Feng et al., 2026) and Proxy-OPD (Fu et al., 2026a) instead transfer the log-ratio between a reward-optimized checkpoint and its pre-RL reference, analogous to the logit shifts induced by fine-tuning studied in CMC (Wu et al., 2024). This targets the RL-induced policy shift and can provide useful supervision even for students already stronger than the post-RL teacher. However, token-level log-ratios capture relative changes but are insensitive to the absolute probability mass supporting these changes. We examine this probability-mass mismatch in Direct-OPD and use teacher–reference divergence to select supervision positions. 2Not Every Token Is Worth Distilling: Selective Supervision for Direct-OPD 
+
+Token Selection in Policy Distillation. Selective distillation asks which positions are worth training on, and existing criteria differ mainly in which distributions they read. Some read the student alone, prioritizing positions where it is uncertain (Tavor et al., 2026; Ko et al., 2026); others the teacher alone, weighting by its confidence or local margin (Jin et al., 2026; Zhou et al., 2026); a third group compares the two, emphasizing teacher–student disagreement, which TIP (Xu et al., 2026) organizes through an entropy–divergence taxonomy and TA-OPD (Wang et al., 2026b) restricts to the student’s predictive support. We consider the policy change from a pre-RL reference to a post-RL teacher at student-visited prefixes. A related approach, OPD 2 (Heo et al., 2026), gates sampled-token delta updates by sign agreement between the centered teacher–base and teacher–student log-ratios. Our selection criterion instead ranks positions by teacher–reference JSD, accounting for the probability mass underlying the policy shift while retaining the Direct-OPD update at selected positions. 
+
+3 PRELIMINARIES 
+
+Setting. We consider three policies: a pre-RL reference πref , a post-RL teacher πT obtained from 
+
+πref by outcome-based RL such as GRPO (Shao et al., 2024), and a larger student πθ initialized at πstu . In our experiments, both teacher-side checkpoints are publicly released (Sec. 5.1), so we run no RL ourselves. Given a prompt x ∼ D and a response y = ( y1, . . . , y |y|) sampled from the student, position t has state st = ( x, y<t ).
+
+Direct-OPD treats the teacher’s RL-induced policy shift as a dense reward for the student. For any token v, the reward at state st is the teacher–reference log-ratio 
+
+∆t(v | st) = log πT(v | st)
+
+πref (v | st) , (1) which is positive where RL increased the probability of v and negative where it decreased it. Direct-OPD maximizes this reward on states visited by the student, with KL regularization: 
+
+JDirect-OPD (θ) = Ex∼D , (st,y t)∼πθ [∆ t(yt | st) − αD KL [πθ (· | st)∥πstu (· | st)]] . (2) Here, α > 0 controls KL regularization, and the expectation covers all valid response positions. 
+
+Top-K implementation. In practice, Direct-OPD evaluates the reward on the student’s top-K can-didates at each state rather than only on the sampled token: 
+
+VK (st) = TopK( πθ (· | st), K ), ¯pt(v) = πθ (v | st)
+
+P  
+
+> u∈V K(st)
+
+πθ (u | st) , (3) where TopK( ·, K ) returns the set of K tokens with the largest probabilities. Each candidate receives the teacher–reference reward ∆t(v | st), weighted by its renormalized student probability ¯pt(v).With the state and candidate set held fixed, the implemented local reward-gradient contribution is: 
+
+gRt = X 
+
+> v∈V K(st)
+
+sg 
+
+
+
+¯pt(v) log πT(v | st)
+
+πref (v | st)
+
+
+
+∇θ log πθ (v | st), (4) where sg denotes stop-gradient. The student-anchor KL term supplies a separate regularization gradient. Appendix A describes its implementation and adaptive coefficient. 
+
+4 METHOD 
+
+Direct-OPD applies its log-ratio reward at every valid position of a student response. Sec. 4.1 shows that this reward can ignore the probability mass behind the teacher’s policy shift, and Sec. 4.2 intro-duces S 2D-OPD, which selects states by teacher–reference divergence. 4.1 THEORETICAL MOTIVATION : P ROBABILITY -M ASS MISMATCH 
+
+At each state, Direct-OPD weights the teacher–reference rewards ∆t(v | st) by the student’s renor-malized probabilities ¯pt(v) over its top-K candidates in Eq. 4. These weights reflect the student’s preferences, whereas the rewards encode relative changes in the teacher’s policy. Neither depends on how much probability mass the teacher and reference place on these candidates: rescaling both by a common factor leaves every log-ratio unchanged. The following exact construction makes this precise: the teacher–reference divergence can vanish while the Direct-OPD update stays fixed. 3Not Every Token Is Worth Distilling: Selective Supervision for Direct-OPD 
+
+An exact construction. Fix a state s and a student checkpoint θ0 with top-K candidate set 
+
+VK = VK (s). Let t̸ = q be strictly positive probability vectors on VK , let b be a strictly posi-tive probability vector on its complement, and for 0 < ϵ < 1 define the teacher and reference: 
+
+Pϵ(v) = 
+
+ϵt v , v ∈ V K ,
+
+(1 − ϵ)bv , v / ∈ V K , Qϵ(v) = 
+
+ϵq v , v ∈ V K ,
+
+(1 − ϵ)bv , v / ∈ V K . (5) Here, ϵ is the probability mass that each checkpoint assigns to the student’s candidates, while the student, candidate set, and conditional distributions stay fixed. Then, for every candidate v ∈ V K ,
+
+∆ϵ(v | s) = log tv
+
+qv
+
+, DJS (Pϵ, Q ϵ) = ϵ D JS (t, q), (6) and both directions of KL scale with ϵ in the same way. As ϵ → 0, all three divergences vanish, whereas every candidate reward, and hence the Direct-OPD update of Eq. 4, stays fixed and nonzero. The construction thus isolates a single degree of freedom, the probability mass behind the policy shift, to which the Direct-OPD update is insensitive but the divergences are not. We state this result formally in Prop. 1 and prove it in App. B, including why the update is nonzero. 
+
+Divergence bounds the behavioral change. The construction shows that the Direct-OPD reward can ignore divergence; conversely, divergence bounds how much the teacher’s behavior can change. For any two distributions P and Q on a finite set and any event A,
+
+|P (A) − Q(A)| ≤ DTV (P, Q ) ≤ p2 DJS (P, Q ), (7) where DTV (P, Q ) = max A |P (A) − Q(A)| is the total variation distance and DJS is mea-sured in nats. The second inequality follows from Pinsker’s inequality applied to each term of 
+
+DJS (P, Q ) = 12 DKL (P ∥M ) + 12 DKL (Q∥M ) with M = (P + Q)/2, since DTV (P, M ) =
+
+DTV (Q, M ) = 12 DTV (P, Q ). Unlike the construction, this bound holds at every state: wherever the teacher–reference JSD is small, the teacher assigns nearly the same probability as the reference to every token and every set of tokens. Together, the two results characterize what low-divergence masking removes: states at which the teacher’s behavior provably changed little, yet at which the Direct-OPD update can be as large as anywhere else. They do not show that removing these states improves transfer, which Sec. 5.3 tests by training on JSD percentile bins. 4.2 DIVERGENCE -G UIDED STATE SELECTION 
+
+Sec. 4.1 shows that the Direct-OPD reward is insensitive to the probability mass behind a policy shift, whereas the teacher–reference JSD bounds how much the teacher’s behavior changed at a state. S 2D-OPD therefore scores each student-sampled state by this divergence and retains Direct-OPD supervision only at the highest-scoring states within each response (Fig. 1). We use JSD as the default score because, unlike KL, it is symmetric, bounded by log 2 , and finite when either checkpoint assigns a token zero probability; the procedure applies unchanged to other divergences. 
+
+Scoring on the student’s candidates. Rather than the full vocabulary, we evaluate the divergence on the top-K candidate set VK (st), where Direct-OPD already evaluates both checkpoints, and add a residual token vo that collects all remaining probability mass. For M ∈ { T, ref }, define 
+
+eπM (v | st) = 
+
+
+
+πM (v | st), v ∈ V K (st),
+
+1 − X 
+
+> u∈V K(st)
+
+πM (u | st), v = vo. (8) This keeps each candidate’s probability and the total residual mass without renormalization. By the data-processing inequality, the coarsening cannot increase JSD: 
+
+˜dt ≜ DJS (eπT(· | st) ∥ eπref (· | st)) ≤ DJS (πT(· | st) ∥ πref (· | st)) . (9) Fig. 1 illustrates two ways in which the score can be small. Either both checkpoints place little mass on the student’s candidates, so that both compressed distributions concentrate on vo, which is the regime of the construction in Sec. 4.1; or both place substantial mass on the candidates and agree on how it is distributed. The score treats these cases alike, and it need not separate them: because Eq. 7 4Not Every Token Is Worth Distilling: Selective Supervision for Direct-OPD 𝐀 o𝐀 1                 
+
+> Student
+> Teacher
+> Teacher Reference Prompt Student Rollout
+> 𝐀 1𝐀 2𝐀 3𝐀 𝐀 𝐀 𝐀−2 𝐀 𝐀−1 𝐀 𝐀
+> Student Top-K+1 𝐀 2𝐀 3𝐀 4𝐀 5𝐀 6𝐀 𝐀
+> P
+> 𝐀 1𝐀 2𝐀 3𝐀 𝐀 𝐀 o
+
+·· 𝐀 4    
+
+> P
+> 𝐀 1𝐀 2𝐀 3𝐀 𝐀 𝐀 o
+
+·· 𝐀 4    
+
+> Uninformative Low JSD
+> P
+> 𝐀 1𝐀 2𝐀 3𝐀 𝐀 𝐀 o
+
+·· 𝐀 4    
+
+> P
+> 𝐀 1𝐀 2𝐀 3𝐀 𝐀 𝐀 o
+
+·· 𝐀 4    
+
+> Low JSD
+> P
+> 𝐀 1𝐀 2𝐀 3𝐀 𝐀 𝐀 o
+
+·· 𝐀 4    
+
+> P
+> 𝐀 1𝐀 2𝐀 3𝐀 𝐀 𝐀 o
+
+·· 𝐀 4          
+
+> High JSD
+> 𝐀 1𝐀 2𝐀 𝐀 𝐀 3𝐀 4𝐀 5𝐀 6𝐀 7
+> States Selection
+> Training
+> 𝐀 2𝐀 3𝐀 7𝐀 𝐀 Selected States
+> RL-induced Policy Shift
+
+Figure 1: Overview of S 2D-OPD. At each student-sampled state, teacher–reference JSD is computed over the student’s top-K candidates, with the remaining probability mass grouped into a residual token vo. The highest-JSD states within each response are retained for the Direct-OPD objective. holds for any pair of distributions, including the compressed ones, a small score implies in either case that the teacher barely changed its behavior on the student’s candidates. Conversely, the score is large only when the checkpoints disagree on the individual candidate probabilities or on the total mass assigned to the candidate set. The score thus measures behavioral change at the resolution of the student’s candidates: differences among tail tokens outside the candidate set do not affect it. 
+
+Per-response selection. We select states within each response, so that rollouts with different over-all divergence levels all contribute supervision. For valid response positions T and a common reten-tion ratio ρ ∈ (0 , 1] , we retain the k states with the largest scores: 
+
+k = max {1, ⌈ρ|T |⌉} , I = TopK t∈T ( ˜dt, k ), (10) where retaining at least one state ensures that every rollout is represented in the objective. Selecting within each response also makes each mask independent of the rest of the batch. 
+
+Masked objective. We apply the mask mt = 1{t ∈ I} to both terms of the Direct-OPD objective: 
+
+JS2D-OPD (θ) = Ex∼D , (st,y t)∼πθ [∆ t(yt | st) − αD KL [πθ (· | st)∥πstu (· | st)] | mt = 1] . (11) In practice, we hold the selection fixed during optimization and average over all retained states in the batch, which gives the update 
+
+gS2D-OPD = 1
+
+|I B|
+
+X
+
+> t∈I B
+
+h
+
+gRt − α ∇θ DKL [πθ (· | st)∥πstu (· | st)] 
+
+i
+
+, (12) where IB collects the retained states of all responses in the batch and gRt is the reward gradient of Eq. 4. Masked states thus receive neither the reward nor the student anchor, and ρ = 1 recovers Direct-OPD. The adaptive KL coefficient is still computed from all valid positions; App. A gives the remaining optimization details. Because the score reuses the teacher and reference probabilities that Direct-OPD already computes, S 2D-OPD requires no extra forward passes. 
+
+5 EXPERIMENTS 
+
+Sec. 4.1 shows which states low-divergence masking removes, but not whether removing them im-proves transfer. We test this through three research questions (further analyses in App. C, D, E): 
+
+RQ1: Does masking low-JSD states improve transfer? (Sec. 5.2) 
+
+RQ2: How does JSD relate to supervision utility and selective masking gains? (Sec. 5.3) 
+
+RQ3: Are the gains robust across divergence measures and selection schemes? (Sec. 5.4) 5Not Every Token Is Worth Distilling: Selective Supervision for Direct-OPD Table 1: Main results (Avg@32) across four student models and two teacher–reference pairs, com-paring dense Direct-OPD with S 2D-OPD using top-10% JSD selection. Checkpoints are selected on AIME24/25 and evaluated on held-out AIME26 and HMMT (Nov. 2025 and Feb. 2026). Test Avg. 
+
+is the average accuracy over 93 held-out problems; parentheses denote gains over the initial student.                                                                                                                                                           
+
+> R1-Distill-1.5B →JustRL-1.5B Nemotron-1.5B →QuestA-1.5B Checkpoint Selection Held-out Evaluation Checkpoint Selection Held-out Evaluation Student / Method AIME24 AIME25 AIME26 HMMT Test Avg. AIME24 AIME25 AIME26 HMMT Test Avg. Qwen3-1.7B 49.3 36.7 37.7 28.2 31.3 49.3 36.7 37.7 28.2 31.3 + Direct-OPD 59.7 42.9 45.4 32.0 36.4 (+5.1) 58.6 43.4 46.8 31.6 36.5 (+5.2)
+> + S 2D-OPD 61.4 44.5 47.4 32.9 37.6 (+6.3) 59.5 43.8 48.1 33.3 38.1 (+6.8)
+> Qwen3-4B 73.2 65.2 64.8 45.9 52.0 73.2 65.2 64.8 45.9 52.0 + Direct-OPD 78.1 70.3 66.8 47.1 53.5 (+1.5) 77.6 70.4 70.4 47.1 54.6 (+2.6)
+> + S 2D-OPD 77.0 70.9 68.7 46.5 53.7 (+1.7) 78.0 68.3 70.7 49.3 56.2 (+4.2)
+> Qwen3-8B 77.3 66.0 67.5 49.7 55.4 77.3 66.0 67.5 49.7 55.4 + Direct-OPD 77.5 72.2 69.8 50.2 56.5 (+1.1) 75.9 71.7 69.7 48.6 55.4 (+0.0)
+> + S 2D-OPD 78.0 73.4 70.7 50.0 56.7 (+1.3) 78.1 71.7 70.9 50.6 57.1 (+1.7)
+> R1-Distill-7B 56.7 40.5 48.2 29.5 35.6 56.7 40.5 48.2 29.5 35.6 + Direct-OPD 63.6 45.7 56.8 32.8 40.5 (+4.9) 60.7 42.3 49.5 31.9 37.6 (+2.0)
+> + S 2D-OPD 64.6 47.1 55.0 33.6 40.5 (+4.9) 60.6 42.3 52.4 32.0 38.6 (+3.0)
+
+5.1 EXPERIMENTAL SETUP 
+
+We evaluate S 2D-OPD with two teacher pairs, R1-Distill-1.5B → JustRL-1.5B (He et al., 2025a) and Nemotron-1.5B → QuestA-1.5B (Li et al., 2026a), and transfer each policy shift to four students: Qwen3-1.7B, Qwen3-4B, Qwen3-8B 1, and R1-Distill-7B 2. All students are trained on Skywork-OR1-RL-Data (He et al., 2025b). Following the observation of Meng et al. (2026) that RL-induced policy shifts are sparse, with large divergence concentrated in a small fraction of tokens, we retain the top 10% of states per response ( ρ = 0 .1) by default. We select checkpoints on AIME 2024 and AIME 2025 and evaluate the selected checkpoint on three held-out benchmarks: AIME 2026, HMMT November 2025, and HMMT February 2026. All three postdate the release of every student model and are therefore absent from its training data, including undisclosed post-training data. We report Avg@32 on all benchmarks, define validation accuracy as the mean over AIME 2024 and AIME 2025, and give further training hyperparameter details in App. F. 5.2 MASKING LOW -D IVERGENCE STATES IMPROVES TRANSFER 
+
+Retaining 10% of states improves held-out transfer. Tab. 1 compares S 2D-OPD with dense Direct-OPD across four students and two teacher pairs. Retaining 10% of states achieves com-parable validation accuracy and improves the held-out Test Avg. in seven of eight settings, with a tie in the eighth. We assess statistical significance over 93 held-out problems, first averaging each prob-lem’s 32 responses and then averaging its paired differences across the eight settings. Using a paired problem bootstrap and an exact one-sided sign-flip test, we find that S 2D-OPD improves mean held-out accuracy from 46.36% to 47.31%, a gain of 0.95 points (95% CI: 0.40–1.54; p = 6 .4 × 10 −4). 
+
+Selective supervision preserves early learning while improving late-stage stability. Fig. 2 shows the validation trajectories under the JustRL teacher pair. Despite masking low-divergence states, S2D-OPD keeps pace with dense Direct-OPD during early training, matching or exceeding its accu-racy over the first 60 steps for all four students. Discarding 90% of states thus does not slow early learning, suggesting that the supervision driving early improvement is concentrated in the retained high-divergence subset. Later in training, S 2D-OPD maintains higher accuracy for all four students and is more stable on Qwen3-4B and Qwen3-8B, where dense Direct-OPD repeatedly falls back from its peaks and, on Qwen3-4B, even drops below the initial student by step 300. These results answer RQ1: masking low-JSD states improves held-out transfer without slowing early learning. 
+
+> 1
+
+https://huggingface.co/Qwen/Qwen3-{1.7,4,8 }B
+
+> 2
+
+https://huggingface.co/deepseek-ai/DeepSeek-R1-Distill-Qwen-7B 
+
+6Not Every Token Is Worth Distilling: Selective Supervision for Direct-OPD 0.49 0.52 0.55 0.58 0.61                   
+
+> AIME 2024 Accuracy (avg@32)
+> Base 0.493 JustRL 0.512
+> 0100 200 300 0.36 0.39 0.42 0.45
+> AIME 2025 Accuracy (avg@32)
+> Base 0.367 JustRL 0.375
+> 0.70 0.72 0.74 0.76 0.78
+> Base 0.732
+> 0.512 JustRL 0.512
+> 0.60 0.63 0.66 0.69 0.72
+> Base 0.652
+> 0100 200 300 0.375 JustRL 0.375
+> 0.74 0.76 0.78 0.80
+> Base 0.773
+> 0.512 JustRL 0.512
+> 0.65 0.68 0.71 0.74
+> Base 0.660
+> 0100 200 300 0.375 JustRL 0.375
+> 0.56 0.58 0.60 0.62 0.64 0.66
+> Base 0.567
+> 0.512 JustRL 0.512
+> 0.40 0.42 0.44 0.46 0.48
+> Base 0.405
+> 0100 200 300 0.375 JustRL 0.375
+
+Training step Qwen3-1.7B Qwen3-4B Qwen3-8B R1-Distill-7B 
+
+S2D-OPD Direct-OPD 
+
+Figure 2: Validation accuracy (Avg@32) under the JustRL teacher pair across four students. Dashed lines mark the initial student; dotted lines mark the JustRL-1.5B teacher. 0 60 120 180 240 300 
+
+> Training step
+> 0.40 0.42 0.44 0.46 0.48 0.50 0.52
+> Mean AIME accuracy (AIME24/25, avg@32)
+> 10–20 20–30 30–40 40–50 50–60 60–70 70–80 80–90 Random 10
+> 90–100
+> Base model (0.430)
+> 0–10 → 0 (collapsed)
+> 280: 0.325
+> 90–100
+> 80–90 70–80 Random 10 60–70 40–50 50–60 30–40 20–30 10–20 0–10
+> 90–100
+> Random 10 60–70 70–80 50–60 80–90 40–50 20–30 30–40 0–10 10–20
+> 90–100
+> 70–80 80–90 60–70 Random 10 50–60 40–50 30–40 10–20 20–30
+> 90–100
+> 80–90 70–80 Random 10 40–50 50–60 60–70 30–40 20–30 10–20
+
+(a) Performance across JSD percentile bins. 10 −3 10 −2 10 −1    
+
+> Mean training JSD
+> 0246810
+> Performance gain
+> n = 11 r = 0.99 ρ = 0.97
+> R2= 0.97
+
+(b) Mean JSD tracks transfer gains. 
+
+Figure 3: Which states are retained, not how many, determines transfer (Qwen3-1.7B, JustRL teacher pair). (a) Validation accuracy when training on each JSD percentile bin or on a random 10% of states. (b) Gain in peak validation accuracy over the initial student versus the mean training JSD of the retained states; the line is a log-linear fit. 5.3 LOW -D IVERGENCE SUPERVISION IS REDUNDANT AND HARMFUL 
+
+Sec. 4.1 shows that low-JSD states are those at which the teacher’s behavior changed little, yet the Direct-OPD update there can be as large as anywhere else. To test what such supervision contributes, we fix the JustRL teacher pair, the Qwen3-1.7B student, the training data, and the hyperparameters, and vary only which states enter the Direct-OPD objective. Within each response, we rank states by JSD, split them into ten equal-sized percentile bins (0–10, . . . , 90–100), and train a separate student on each bin. As a control, we train on a uniformly sampled 10% of states, whose update is an unbiased estimate of the dense Direct-OPD update (Fig. 3a). 
+
+Dense supervision is largely redundant. The random 10% control reaches a peak validation accu-racy of 51.2, on par with dense Direct-OPD (51.3; Tab. 1). Discarding 90% of states at random thus loses little, supporting the view of Fu et al. (2026c) that OPD is “data-overfed but algorithm-starved.” 
+
+Which states are retained determines transfer. At the same 10% budget, performance rises broadly with JSD percentile, and the top bin reaches 52.9, above both the random control and dense Direct-OPD. The effect is graded: across all eleven subsets, the gain in peak validation accuracy over the initial student is approximately linear in the logarithm of the subset’s mean training JSD (R2 = 0 .97 ; Fig. 3b). The random control lies on the same line, so within this setting the mean divergence of the retained states predicts transfer whether they are selected by rank or at random. 7Not Every Token Is Worth Distilling: Selective Supervision for Direct-OPD 0.0 0.1 0.2 0.3          
+
+> Qwen3-1.7B Qwen3-4B
+> 0100 200 300 0.0 0.1 0.2 0.3
+> Qwen3-8B
+> 0100 200 300
+> R1-Distill-7B
+> Mean JSD Training step
+> JustRL QuestA All positions Selected 10%
+
+(a) All-position and selected-position JSD. Qwen3 1.7B Qwen3 4B Qwen3 8B R1-Distill 7B 0.0 0.5 1.0 1.5 2.0 Test Avg. gain over Direct-OPD (pp) +1.2 +0.2 +0.2 0.0 +1.6 +1.6 +1.7 +1.0   
+
+> JustRL QuestA
+
+(b) Held-out gains over Direct-OPD. 
+
+Figure 4: Teacher-pair comparison with top-10% retention across four students. (a) Mean teacher– reference JSD over all valid response states (solid) and retained states (dashed) during S 2D-OPD training. (b) Held-out Test Avg. gains of S 2D-OPD over dense Direct-OPD under each teacher pair, in percentage points. 0 ln 2         
+
+> 517space rest −0.8 0+0.8 7153rest −0.8 0+0.8
+> …
+
+7×5 = 35 ≡ 11 mod 12, and 7×1 = 7 mod 12. If the product of 7ᵃ × 11ᵇ mod 12 is 11, then 11 × 5ᵈ mod 12. 11×5=55≡7, and 11×1=11. Therefore, overall, the total product mod 12 is: - If (a even, b even) and d odd: 5 - If (a even, b even) and d even: 1 - If (a odd, b even) and d odd: 11 × 5 = 11×5=55≡7 mod 12? Wait: …   
+
+> JSD Δp = p(Teacher-RL) − p(Teacher-base)
+> filtered
+> JSD 0.0436 log-ratio(5) = -8.625
+> retained
+> JSD 0.2622 log-ratio(7) = +0.956
+> … a even, b even, d odd: 5 … … 11 × 5 = 55 ≡ 7 (mod 12) …
+
+Figure 5: JSD and token log-ratio rank states differently. The state with the largest sampled-token log-ratio in the response is masked, while a larger redistribution of probability mass is retained. 
+
+Low-divergence supervision is harmful, not merely weak. Trained in isolation, the three lowest bins end below the initial student, and the two lowest collapse. This matches the regime identified in Sec. 4.1, where the Direct-OPD update persists although the teacher barely changed. Top-K overlap suggests a mechanism (App. C): the top bin moves the student toward the teacher while preserv-ing its overlap with the reference, whereas lower bins move it away from the reference without a commensurate gain in teacher alignment. 
+
+Divergence and reward magnitude rank states differently. Fig. 5 shows a state from an initial Qwen3-1.7B rollout under the JustRL pair. RL lowers the probability of the sampled token 5 from 0.12 to 2 × 10 −5, giving this state the largest Direct-OPD reward magnitude among the response’s 8,192 states, although the teacher’s distribution moves by only 0.12 in total variation. Its JSD (0.044) falls below the retention cutoff (0.067), so S 2D-OPD masks it while retaining a state with a smaller log-ratio but a larger redistribution of mass (JSD 0.262). 
+
+Masking helps more under the lower-divergence teacher pair. Mean JSD is higher for JustRL than for QuestA over both all states and the retained top 10% (Fig. 4a), yet the held-out gains of masking over dense Direct-OPD are larger under QuestA: 1.0–1.7 points versus 0.0–1.2 for Jus-tRL across the four students (Fig. 4b). If the benefit came from concentrating supervision on high absolute divergence, this ordering would be reversed; together with the harm of low-JSD bins, it sug-gests that masking helps mainly by removing supervision that undermines learning. These results answer RQ2: JSD ranks supervision utility within a teacher–student setting, and masking pays off by filtering low-divergence supervision rather than by maximizing the divergence of what remains. 8Not Every Token Is Worth Distilling: Selective Supervision for Direct-OPD 0.49 0.52 0.55 0.58 0.61             
+
+> AIME 2024 Accuracy (avg@32)
+> Qwen3-1.7B
+> Base 0.493 0.73 0.74 0.75 0.76 0.77 0.78
+> Qwen3-4B
+> Base 0.732
+> 0.74 0.76 0.78 0.80
+> Qwen3-8B
+> Base 0.773
+> 0100 200 300 0.36 0.38 0.40 0.42 0.44 0.46
+> AIME 2025 Accuracy (avg@32)
+> Base 0.367
+> 0100 200 300 0.65 0.67 0.69 0.71
+> Base 0.652
+> 0100 200 300 0.65 0.67 0.69 0.71 0.73
+> Base 0.660
+> Training step
+> JS Reverse KL Forward KL
+
+(a) Divergence measure. 0.49 0.52 0.55 0.58 0.61         
+
+> AIME 2024 Accuracy (avg@32)
+> R1-Distill-1.5B → JustRL-1.5B
+> Base 0.493
+> Nemotron-1.5B → QuestA-1.5B
+> Base 0.493
+> 0100 200 300 0.36 0.38 0.40 0.42 0.44 0.46
+> AIME 2025 Accuracy (avg@32)
+> Base 0.367
+> 0100 200 300
+> Base 0.367
+> Training step
+> Response-level selection Batch-level selection
+
+(b) Selection scope. 
+
+Figure 6: Robustness of selective masking across design choices. (a) Top-10% selection by JSD, re-verse KL, and forward KL on Qwen3-1.7B, 4B, and 8B under the JustRL teacher pair. (b) Response-level versus batch-level selection on Qwen3-1.7B under both teacher pairs. 5.4 SELECTIVE MASKING IS ROBUST ACROSS DESIGN CHOICES 
+
+We vary three design choices while keeping the rest of S 2D-OPD fixed: the divergence used for scoring, the scope over which states are ranked, and the retention rate (Fig. 6). 
+
+Divergence measure. The construction in Sec. 4.1 shows that both KL directions vanish with the candidate mass just as JSD does, so either should flag the same low-mass states. Under the JustRL pair, selection by forward KL, DKL (πT∥πref ), or reverse KL, DKL (πref ∥πT), attains higher mean validation accuracy than dense Direct-OPD from step 160 onward on all three Qwen3 students, and avoids the late decline of dense Direct-OPD on Qwen3-4B (final accuracy 71.6–74.1 versus 67.2). Forward KL closely tracks JSD at all three scales, whereas reverse KL is weaker on Qwen3-4B. 
+
+Selection scope. Ranking states across the whole batch, so that a response may retain none, matches response-level selection on Qwen3-1.7B under both teacher pairs (peak validation accuracy 52.3 versus 52.9 under JustRL and 51.7 versus 51.7 under QuestA). The per-response rule of Sec. 4.2 is thus not needed for accuracy; we keep it so that each mask is independent of other responses. 
+
+Retention rate. Varying ρ from 5% to 20% on Qwen3-1.7B changes peak validation accuracy by less than one point (52.2–53.0), and every rate stays above dense Direct-OPD (51.3) and the random 10% control (51.2; App. D). These results answer RQ3: within the tested range, the gains do not hinge on the divergence measure, selection scope, or retention rate. 
+
+6 CONCLUSION 
+
+Direct-OPD transfers the policy shift that RL induces in a small teacher to a larger student by re-warding every student-sampled state with the teacher–reference log-ratio. We showed that this re-ward ignores the probability mass behind the shift: it can stay fixed while the mass on the student’s candidates, and with it the teacher–reference divergence, vanishes. Building on this observation, we introduced S 2D-OPD, which retained Direct-OPD supervision only at the highest-JSD states of each response and required no extra forward passes. Retaining 10% of states improved held-out accuracy over dense Direct-OPD in seven of eight teacher–student settings and tied in the eighth. Controlled analyses further showed that dense supervision was largely redundant, that transfer depended on which states were retained rather than how many, and that low-divergence supervision could harm the student when trained on alone; the gains persisted across divergence measures, selection scopes, and retention rates. These findings suggest that weak-to-strong policy transfer depends not only on what is transferred but also on where it is applied. Extending state selection to adaptive retention rates and to domains beyond mathematical reasoning is a natural next step. 9Not Every Token Is Worth Distilling: Selective Supervision for Direct-OPD AI U SE STATEMENT 
+
+We used generative AI tools solely to improve the readability and clarity of the manuscript, including language editing and suggestions on presentation. All AI-assisted revisions were reviewed by the authors, who take full responsibility for the final content of this work. REPRODUCIBILITY STATEMENT 
+
+To facilitate reproducibility, we describe the selective supervision procedure in Section 4 and re-port the teacher–reference pairs, datasets, training configurations, and evaluation protocols in Sec-tion 5.1 and Appendix F. We provide our code at https://anonymous.4open.science/ r/S2D-OPD-8868 .
+
+REFERENCES 
+
+Rishabh Agarwal, Nino Vieillard, Yongchao Zhou, Piotr Stanczyk, Sabela Ramos Garea, Matthieu Geist, and Olivier Bachem. On-policy distillation of language models: Learning from self-generated mistakes. In The Twelfth International Conference on Learning Representations , 2024. URL https://openreview.net/forum?id=3zKtaqxLhW .DeepSeek-AI, Anyi Xu, Bangcai Lin, Bing Xue, Bingxuan Wang, Bingzheng Xu, Bochao Wu, Bowei Zhang, Chaofan Lin, Chen Dong, Chenchen Ling, Chengda Lu, Chenggang Zhao, Chengqi Deng, Chengyu Hou, Chenhao Xu, et al. Deepseek-v4: Towards highly efficient million-token context intelligence, 2026. URL https://arxiv.org/abs/2606.19348 .Shiyuan Feng, Huan ang Gao, Haohan Chi, Hanlin Wu, Zhilong Zhang, Zheng Jiang, Bingxiang He, Wei-Ying Ma, Ya-Qin Zhang, and Hao Zhou. Weak-to-strong generalization via direct on-policy distillation, 2026. URL https://arxiv.org/abs/2607.05394 .Daocheng Fu, Rong Wu, Yu Yang, Jianbiao Mei, Licheng Wen, Pinlong Cai, Xuemeng Yang, Yong Liu, Botian Shi, and Yu Qiao. Proxy opd: On-policy distillation with transferable relative proxy update, 2026a. URL https://arxiv.org/abs/2607.11505 .Wei Fu, Jiaxuan Gao, Xujie Shen, Chen Zhu, Zhiyu Mei, Chuyi He, Shusheng Xu, Guo Wei, Jun Mei, WANG JIASHU, Tongkai Yang, Binhang Yuan, and Yi Wu. AREAL: A large-scale asynchronous reinforcement learning system for language reasoning. In The Thirty-ninth Annual Conference on Neural Information Processing Systems , 2025. URL https://openreview. net/forum?id=X9diEuva9R .Yuqian Fu, Haohuan Huang, Kaiwen Jiang, Jiacai Liu, Zhuo Jiang, Yuanheng Zhu, and Dongbin Zhao. Revisiting on-policy distillation: Empirical failure modes and simple fixes, 2026b. URL 
+
+https://arxiv.org/abs/2603.25562 .Zixuan Fu, Bingxiang He, Yuxin Zuo, Haohuan Huang, Jinqian Zhang, Ruhang Xiao, Cheng Qian, Qinyu Luo, Huan ang Gao, Yudong Wang, Zhiyuan Liu, Ning Ding, and Chaojun Xiao. Re-thinking on-policy distillation of large language models ii: One training example, 2026c. URL 
+
+https://arxiv.org/abs/2609.04172 .GLM-5-Team, Aohan Zeng, Xin Lv, Zhenyu Hou, Zhengxiao Du, Qinkai Zheng, Bin Chen, Da Yin, Chendi Ge, Chenghua Huang, Chengxing Xie, Chenzheng Zhu, Congfeng Yin, Cunxiang Wang, Gengzheng Pan, Hao Zeng, et al. Glm-5: from vibe coding to agentic engineering, 2026. URL 
+
+https://arxiv.org/abs/2602.15763 .Yuxian Gu, Li Dong, Furu Wei, and Minlie Huang. MiniLLM: Knowledge distillation of large language models. In The Twelfth International Conference on Learning Representations , 2024. URL https://openreview.net/forum?id=5h0qf7IBZZ .Bingxiang He, Zekai Qu, Zeyuan Liu, Yinghao Chen, Yuxin Zuo, Cheng Qian, Kaiyan Zhang, Weize Chen, Chaojun Xiao, Ganqu Cui, Ning Ding, and Zhiyuan Liu. Justrl: Scaling a 1.5b llm with a simple rl recipe, 2025a. URL https://arxiv.org/abs/2512.16649 .10 Not Every Token Is Worth Distilling: Selective Supervision for Direct-OPD Jujie He, Jiacai Liu, Chris Yuhao Liu, Rui Yan, Chaojie Wang, Peng Cheng, Xiaoyu Zhang, Fuxiang Zhang, Jiacheng Xu, Wei Shen, Siyuan Li, Liang Zeng, Tianwen Wei, Cheng Cheng, Bo An, Yang Liu, and Yahui Zhou. Skywork open reasoner 1 technical report, 2025b. URL https: //arxiv.org/abs/2505.22312 .Byeongho Heo, Jaehui Hwang, Sangdoo Yun, and Dongyoon Han. On-policy delta distillation, 2026. URL https://arxiv.org/abs/2607.15161 .Jordan Hoffmann, Sebastian Borgeaud, Arthur Mensch, Elena Buchatskaya, Trevor Cai, Eliza Rutherford, Diego de Las Casas, Lisa Anne Hendricks, Johannes Welbl, Aidan Clark, Tom Hen-nigan, Eric Noland, Katie Millican, George van den Driessche, Bogdan Damoc, et al. Training compute-optimal large language models. In Proceedings of the 36th International Conference on Neural Information Processing Systems , NIPS ’22, Red Hook, NY, USA, 2022. Curran Associates Inc. ISBN 9781713871088. Zhenyu Hou, Yujiang Li, Jie Tang, and Yuxiao Dong. Single-rollout asynchronous optimization for agentic reinforcement learning, 2026. URL https://arxiv.org/abs/2607.07508 .Nan Jia, Haojin Yang, Xing Ma, Jiesong Lian, Shuailiang Zhang, Weipeng Zhang, Ke Zeng, Xun-liang Cai, and Zequn Sun. Asymmetric on-policy distillation: Bridging exploitation and imitation at the token level, 2026. URL https://arxiv.org/abs/2605.06387 .Woogyeol Jin, Taywon Min, Yongjin Yang, Dennis Wei, Yi Zhou, Swanand Ravindra Kadhe, Nathalie Baracaldo, and Kimin Lee. Entropy-aware on-policy distillation of language mod-els. In Forty-third International Conference on Machine Learning , 2026. URL https: //openreview.net/forum?id=J5i09faOOf .Jared Kaplan, Sam McCandlish, Tom Henighan, Tom B. Brown, Benjamin Chess, Rewon Child, Scott Gray, Alec Radford, Jeffrey Wu, and Dario Amodei. Scaling laws for neural language models, 2020. URL https://arxiv.org/abs/2001.08361 .Jongwoo Ko, Sara Abdali, Young Jin Kim, Tianyi Chen, and Pashmina Cameron. Scaling reasoning efficiently via relaxed on-policy distillation, 2026. URL https://arxiv.org/abs/2603. 11137 .Woosuk Kwon, Zhuohan Li, Siyuan Zhuang, Ying Sheng, Lianmin Zheng, Cody Hao Yu, Joseph Gonzalez, Hao Zhang, and Ion Stoica. Efficient memory management for large language model serving with pagedattention. In Proceedings of the 29th Symposium on Operating Sys-tems Principles , SOSP ’23, pp. 611–626, New York, NY, USA, 2023. Association for Com-puting Machinery. ISBN 9798400702297. doi: 10.1145/3600006.3613165. URL https: //doi.org/10.1145/3600006.3613165 .Jiazheng Li, Hongzhou Lin, Hong Lu, Kaiyue Wen, Zaiwen Yang, Jiaxuan Gao, Yi Wu, and Jingzhao Zhang. Questa: Expanding reasoning capacity in LLMs via question augmenta-tion. In The Fourteenth International Conference on Learning Representations , 2026a. URL 
+
+https://openreview.net/forum?id=3MifB0f7qR .Yaxuan Li, Yuxin Zuo, Bingxiang He, Jinqian Zhang, Chaojun Xiao, Cheng Qian, Tianyu Yu, Huan ang Gao, Wenkai Yang, Zhiyuan Liu, and Ning Ding. Rethinking on-policy distillation of large language models: Phenomenology, mechanism, and recipe, 2026b. URL https://arxiv. org/abs/2604.13016 .Kevin Lu and Thinking Machines Lab. On-policy distillation. Thinking Machines Lab: Connection-ism , 2025. doi: 10.64434/tml.20251026. https://thinkingmachines.ai/blog/on-policy-distillation. Wenhan Ma, Hailin Zhang, Liang Zhao, Yifan Song, Yudong Wang, Zhifang Sui, and Fuli Luo. Stabilizing moe reinforcement learning by aligning training and inference routers, 2025. URL 
+
+https://arxiv.org/abs/2510.11370 .Haoming Meng, Kexin Huang, Shaohang Wei, Chiyu Ma, Shuo Yang, Xue Wang, Guoyin Wang, Bolin Ding, and Jingren Zhou. Sparse but critical: A token-level analysis of distributional shifts in RLVR fine-tuning of LLMs. In The Fourteenth International Conference on Learning Repre-sentations , 2026. URL https://openreview.net/forum?id=8vWIXno8LW .11 Not Every Token Is Worth Distilling: Selective Supervision for Direct-OPD MiniMax, Aili Chen, Aonian Li, Bangwei Gong, Binyang Jiang, Bo Fei, Bo Yang, Boji Shan, Changqing Yu, Chao Wang, Cheng Zhu, Chengjun Xiao, Chengyu Du, Chi Zhang, Chu Qiao, Chunhao Zhang, et al. Minimax-m1: Scaling test-time compute efficiently with lightning atten-tion, 2025. URL https://arxiv.org/abs/2506.13585 .Deepak Narayanan, Mohammad Shoeybi, Jared Casper, Patrick LeGresley, Mostofa Patwary, Vi-jay Korthikanti, Dmitri Vainbrand, Prethvi Kashinkunti, Julie Bernauer, Bryan Catanzaro, Amar Phanishayee, and Matei Zaharia. Efficient large-scale language model training on gpu clus-ters using megatron-lm. In Proceedings of the International Conference for High Performance Computing, Networking, Storage and Analysis , SC ’21, New York, NY, USA, 2021. Associa-tion for Computing Machinery. ISBN 9781450384421. doi: 10.1145/3458817.3476209. URL 
+
+https://doi.org/10.1145/3458817.3476209 .Leyi Pan, Shuchang Tao, Yunpeng Zhai, Lingzhe Zhang, Zhaoyang Liu, Bolin Ding, Aiwei Liu, and Lijie Wen. Rlcsd: Reinforcement learning with contrastive on-policy self-distillation, 2026. URL 
+
+https://arxiv.org/abs/2606.11709 .Tim Pearce and Jinyeop Song. Reconciling kaplan and chinchilla scaling laws. Transactions on Machine Learning Research , 2024. ISSN 2835-8856. URL https://openreview.net/ forum?id=NLoaLyuUUF . Reproducibility Certification. Zhihong Shao, Peiyi Wang, Qihao Zhu, Runxin Xu, Junxiao Song, Xiao Bi, Haowei Zhang, Mingchuan Zhang, Y. K. Li, Y. Wu, and Daya Guo. Deepseekmath: Pushing the limits of mathe-matical reasoning in open language models, 2024. URL https://arxiv.org/abs/2402. 03300 .Guangming Sheng, Chi Zhang, Zilingfeng Ye, Xibin Wu, Wang Zhang, Ru Zhang, Yanghua Peng, Haibin Lin, and Chuan Wu. Hybridflow: A flexible and efficient rlhf framework. In Proceedings of the Twentieth European Conference on Computer Systems , EuroSys ’25, pp. 1279–1297, New York, NY, USA, 2025. Association for Computing Machinery. ISBN 9798400711961. doi: 10. 1145/3689031.3696075. URL https://doi.org/10.1145/3689031.3696075 .Almog Tavor, Itay Ebenspanger, Neil Cnaan, and Mor Geva. Rethinking selective knowledge distil-lation, 2026. URL https://arxiv.org/abs/2602.01395 .Kimi Team, Tongtong Bai, Yifan Bai, Yiping Bao, S. H. Cai, Yuan Cao, Y. Charles, H. S. Che, Cheng Chen, Guanduo Chen, Huarong Chen, Jia Chen, Jiahao Chen, Jianlong Chen, Jun Chen, Kefan Chen, et al. Kimi k2.5: Visual agentic intelligence, 2026. URL https://arxiv.org/ abs/2602.02276 .Xiaoxuan Wang, Han Zhang, Haixin Wang, Yidan Shi, Ruoyan Li, Kaiqiao Han, Chenyi Tong, Haoran Deng, Alexander K Taylor, Renliang Sun, Yanqiao Zhu, Jason Cong, Yizhou Sun, and Wei Wang. ARLArena: A unified framework for stable agentic reinforcement learning. In Forty-third International Conference on Machine Learning , 2026a. URL https://openreview. net/forum?id=90kxFi9VGP .Yuanyi Wang, Su Lu, Yanggan Gu, Pengkai Wang, Yifan Yang, Zhaoyi Yan, Congkai Xie, Jian-min Wu, and Hongxia Yang. Not all disagreement is learnable: Token teachability in on-policy distillation, 2026b. URL https://arxiv.org/abs/2605.26844 .Bo Wu, Sid Wang, Yunhao Tang, Jia Ding, Eryk Helenowski, Liang Tan, Tengyu Xu, Tushar Gowda, Zhengxing Chen, Chen Zhu, Xiaocheng Tang, Yundi Qian, Beibei Zhu, and Rui Hou. Llamarl: A distributed asynchronous reinforcement learning framework for efficient large-scale llm training, 2025. URL https://arxiv.org/abs/2505.24034 .Jiayi Wu, Hao Sun, Hengyi Cai, Lixin Su, Shuaiqiang Wang, Dawei Yin, Xiang Li, and Ming Gao. Cross-model control: Improving multiple large language models in one-time training. In 
+
+The Thirty-eighth Annual Conference on Neural Information Processing Systems , 2024. URL 
+
+https://openreview.net/forum?id=YPqHSTSoFs .Yuanda Xu, Hejian Sang, Zhengze Zhou, Ran He, Zhipeng Wang, and Alborz Geramifard. Tip: Token importance in on-policy distillation, 2026. URL https://arxiv.org/abs/2604. 14084 .12 Not Every Token Is Worth Distilling: Selective Supervision for Direct-OPD Wenkai Yang, Weijie Liu, Ruobing Xie, Kai Yang, Saiyong Yang, and Yankai Lin. Learning beyond teacher: Generalized on-policy distillation with reward extrapolation, 2026. URL https:// arxiv.org/abs/2602.12125 .Qiying Yu, Zheng Zhang, Ruofei Zhu, Yufeng Yuan, Xiaochen Zuo, Yu Yue, Weinan Dai, Tiantian Fan, Gaohong Liu, Lingjun Liu, Xin Liu, Haibin Lin, Zhiqi Lin, Bole Ma, Guangming Sheng, Yuxuan Tong, et al. Dapo: An open-source llm reinforcement learning system at scale, 2025. URL https://arxiv.org/abs/2503.14476 .Yang Yue, Zhiqi Chen, Rui Lu, Andrew Zhao, Zhaokai Wang, Yang Yue, Shiji Song, and Gao Huang. Does reinforcement learning really incentivize reasoning capacity in LLMs beyond the base model? In The Thirty-ninth Annual Conference on Neural Information Processing Systems ,2025. URL https://openreview.net/forum?id=4OsgYD7em5 .Rosie Zhao, Alexandru Meterez, Sham M. Kakade, Cengiz Pehlevan, Samy Jelassi, and Eran Malach. Echo chamber: RL post-training amplifies behaviors learned in pretraining. In Sec-ond Conference on Language Modeling , 2025. URL https://openreview.net/forum? id=dp4KWuSDzj .Siyan Zhao, Zhihui Xie, Mengchen Liu, Jing Huang, Guan Pang, Feiyu Chen, and Aditya Grover. Self-distilled reasoner: On-policy self-distillation for large language models, 2026. URL https: //arxiv.org/abs/2601.18734 .Chujie Zheng, Shixuan Liu, Mingze Li, Xiong-Hui Chen, Bowen Yu, Chang Gao, Kai Dang, Yuqiong Liu, Rui Men, An Yang, Jingren Zhou, and Junyang Lin. Group sequence policy op-timization, 2025. URL https://arxiv.org/abs/2507.18071 .Yuhang Zhou, Lizhu Zhang, Yifan Wu, Mingyi Wang, Bo Peng, Jiayi Liu, Xiangjun Fan, and Zhuokai Zhao. Sage-opd: Selective agent-guided intervention for multi-turn on-policy distil-lation, 2026. URL https://arxiv.org/abs/2606.19659 .Zilin Zhu, Chengxing Xie, Xin Lv, and slime Contributors. slime: An llm post-training framework for rl scaling. https://github.com/THUDM/slime , 2025. GitHub repository. Corre-sponding author: Xin Lv. 
+
+A OPTIMIZATION DETAILS 
+
+This section details the adaptive KL control inherited from Direct-OPD and the selective position-wise aggregation used in S 2D-OPD. A.1 ADAPTIVE KL C ONTROL 
+
+The KL coefficient controls the strength of the student anchor relative to the policy-shift reward. We update this coefficient using Direct-OPD’s sign-based controller: 
+
+αm+1 = clip( αm [1 + ϵ sgn(¯ rm)] , α min , α max ) , (13) where ¯rm denotes the mean student-weighted policy shift ¯pt(v)∆ t(v | st) over valid response positions and their top-K candidates at iteration m. The controller increases α when the mean weighted policy shift is positive and decreases it when negative, subject to the bounds. We use 
+
+α0 = 2 .5, ϵ = 0 .01 , and [αmin , α max ] = [0 .5, 2.5] . The updated coefficient αm+1 is used in the subsequent actor update. A.2 DETAILED LOSS AGGREGATION 
+
+Direct-OPD averages the local update over all valid response positions. S 2D-OPD keeps the local update unchanged but restricts this average to selected positions. Let I collect the positions selected independently within each response by Eq. 10 across the batch. Giving each retained position equal weight yields the local ascent direction 
+
+gS2D-OPD  
+
+> θ
+
+= 1
+
+|I| 
+
+X
+
+> t∈I
+
+" X 
+
+> v∈V K(st)
+
+sg[¯ pt(v)∆ t(v | st)] ∇θ log πθ (v | st) − αm+1 ∇θ bdt(θ)
+
+#
+
+. (14) 13 Not Every Token Is Worth Distilling: Selective Supervision for Direct-OPD Here, sg denotes stop-gradient, and bdt(θ) is the per-position KL penalty estimator toward the initial student πstu , computed using verl ’s low var kl implementation. Both terms are applied to the same selected response positions. The sampled prefixes, candidate sets, selection mask, and KL coefficient are held fixed during differentiation. 
+
+B PROOF OF THE MASS -I NVARIANCE CONSTRUCTION 
+
+Proposition 1 (Mass invariance of the Direct-OPD update) . Fix a state s and a student checkpoint 
+
+θ0, and write p(v) = πθ0 (v | s) > 0 for all v ∈ V . Let VK (s) ⊊ V be the top-K candidate set, with K ≥ 2, and define ¯p(v) = p(v)/ P  
+
+> u∈V K(s)
+
+p(u) for v ∈ V K (s). Let t = ( tv )v∈V K (s)
+
+and q = ( qv )v∈V K (s) be distinct, strictly positive probability vectors on the candidate set, and let b = ( bv )v∈V\V K (s) be a common strictly positive probability vector on its complement. For 
+
+0 < ϵ < 1, define the teacher and reference distributions: 
+
+Pϵ(v) = 
+
+ϵt v , v ∈ V K (s),
+
+(1 − ϵ)bv , v / ∈ V K (s), Qϵ(v) = 
+
+ϵq v , v ∈ V K (s),
+
+(1 − ϵ)bv , v / ∈ V K (s). (15) 
+
+Here, ϵ is the total probability mass that each checkpoint assigns to the student’s candidates. Both checkpoints vary with ϵ, while the student, candidate set, and conditional distributions remain fixed. Then, for every ϵ ∈ (0 , 1) :(i) Reward invariance. For every candidate v ∈ V K (s), the Direct-OPD reward (Eq. 1) with 
+
+πT = Pϵ and πref = Qϵ satisfies 
+
+∆ϵ(v | s) = log Pϵ(v)
+
+Qϵ(v) = log tv
+
+qv
+
+. (16) 
+
+(ii) Fixed, nonzero update. The local reward gradient of Direct-OPD (Eq. 4) at θ0,
+
+gϵ = X 
+
+> v∈V K(s)
+
+¯p(v) log tv
+
+qv
+
+∇θ log πθ (v | s) θ=θ0
+
+= g, (17) 
+
+is independent of ϵ and nonzero with respect to the student’s logits. (iii) Divergences scale with the mass. The teacher–reference divergences satisfy 
+
+DJS (Pϵ, Q ϵ) = ϵD JS (t, q), D KL (Pϵ∥Qϵ) = ϵD KL (t∥q), D KL (Qϵ∥Pϵ) = ϵD KL (q∥t).
+
+(18) 
+
+Consequently, as ϵ → 0, all three divergences vanish, whereas the reward and its gradient remain fixed and nonzero. Proof. (i) The common factor ϵ cancels in the ratio. (ii) By (i), each term of gϵ is independent of 
+
+ϵ, since VK (s) and ¯p depend only on θ0. For softmax logits z, ∇z log π(v | s) = ev − π(· | s),so g = w − (P 
+
+> u
+
+wu) p, where wv = ¯ p(v) log( tv /q v ) on VK (s) and wv = 0 elsewhere. Since 
+
+VK (s) ⊊ V and p > 0, g = 0 would require w = 0, i.e., t = q. (iii) Off the candidate set, Pϵ, Qϵ,and their mixture coincide, so the shared tail contributes zero to each divergence; on the candidate set, the factor ϵ cancels inside each logarithm and factors out of the sum. 
+
+C TOKEN OVERLAP ACROSS DIVERGENCE RANKS 
+
+Prior work associates successful OPD with increasing overlap between the student’s and teacher’s high-probability token sets (Li et al., 2026b). Direct-OPD instead transfers a teacher–reference log-ratio, motivating us to examine overlap with both checkpoints. We track how these overlaps evolve when supervision is restricted to different teacher–reference JSD deciles. For a student policy πS and a comparison policy πC at state st, let 
+
+VSk (st) = TopK  πS (· | st), k , (19) 
+
+VCk (st) = TopK  πC (· | st), k , (20) 14 Not Every Token Is Worth Distilling: Selective Supervision for Direct-OPD 0 50 100 150 200 250 300        
+
+> Training step
+> 0.58 0.60 0.62 0.64 0.66 0.68
+> Top-16 token overlap
+> 10–20 20–30 30–40 40–50 50–60 60–70 70–80 80–90 Random 10
+> 90–100
+> Teacher-RL
+> 0–10 → 0.011 (collapsed)
+> 050 100 150 200 250 300
+> Training step
+> 0.61 0.63 0.65 0.67 10–20 20–30 30–40 40–50 50–60 60–70 70–80 80–90 Random 10
+> 90–100
+> Teacher-Ref
+> 0–10 → 0.005 (collapsed)
+
+Figure 7: Top-16 token overlap over training for Qwen3-1.7B under the JustRL teacher pair, using JSD deciles or random 10% selection. Panels compare the student with the post-RL teacher (left) and pre-RL reference (right). Overlap is the fraction of shared tokens between top-16 sets. so that the per-state overlap ratio is 
+
+Overlap k(S, C ; st) = VSk (st) ∩ V Ck (st)
+
+k . (21) which we report with k = 16 against both the post-RL teacher ( C = T ) and the reference ( C =
+
+Tref ). Every bin starts from the same student initialization, so the two panels record how training on a given decile moves the student relative to each checkpoint. Higher-JSD bins generally attain greater overlap with the post-RL teacher (Figure 7, left), broadly tracking the performance ordering in Figure 3a. This resembles the overlap growth observed in successful standard OPD (Li et al., 2026b), here under an objective that transfers the teacher’s policy shift. The reference panel adds a complementary observation: the highest-JSD bin increases teacher overlap while maintaining reference overlap above its initial level. Reference overlap alone does not follow the performance ordering; for example, the 10–20 bin recovers close to its initial reference overlap despite much smaller gains in teacher overlap. The strongest transfer occurs without a trade-off between overlap with the two checkpoints: the highest-JSD bin increases teacher overlap while sustaining reference overlap. This suggests that transferring the RL-induced policy shift need not entail moving from the reference’s high-probability candidate set. The teacher–reference log-ratio can favor a token that remains highly ranked under both checkpoints, allowing transfer through changes in relative preference among shared candidates. Related evidence from standard OPD shows that supervision restricted to tokens shared by the stu-dent and teacher recovers nearly the full benefit of student top-k supervision (Li et al., 2026b). Our JSD criterion identifies positions with substantial changes in candidate probabilities or total mass relative to the tail (Eq. 8). Together, these observations suggest a view of selective transfer as learn-ing substantial changes in probability allocation within largely overlapping candidate spaces. 
+
+D SENSITIVITY TO RETENTION RATIO 
+
+Our main experiments retain the 10% of positions with the highest teacher–reference JSD within each response. Figure 8 compares retention ratios of 5%, 10%, 15%, and 20% for Qwen3-1.7B under the JustRL teacher pair. All four settings yield broadly similar learning curves and substantial gains over the base model on AIME 2024 and AIME 2025. No retention ratio consistently dominates across both benchmarks and training checkpoints. Together with the decile analysis in Section 5.3, these results reveal an asymmetry in supervision selection. Training on low-JSD bins can substantially degrade transfer, whereas varying the retained fraction within the high-JSD region has a comparatively small effect. Moreover, the most selective setting does not consistently outperform the broader subsets. This pattern supports using JSD to 15 Not Every Token Is Worth Distilling: Selective Supervision for Direct-OPD 0 60 120 180 240 300 0.49 0.52 0.55 0.58 0.61         
+
+> Accuracy (avg@32)
+> AIME 2024
+> Base 0.493
+> 060 120 180 240 300 0.36 0.38 0.40 0.42 0.44 0.46
+> AIME 2025
+> Base 0.367
+> Training step
+> 80–100% 85–100% 90–100% 95–100%
+
+Figure 8: Sensitivity to the per-response retention ratio for Qwen3-1.7B under the JustRL teacher pair. The four settings retain the top 20%, 15%, 10%, and 5% of positions ranked by teacher– reference JSD. Dashed lines indicate base-model accuracy. 0 ln 2         
+
+> 3451rest −0.8 0+0.8 3451rest −0.8 0+0.8
+> …
+
+Earlier, I thought that the probability that A ≥2 and B ≥2 is 1 - [P(A ≤1 or B ≤1)] = 1 - [P(A ≤1) + P(B ≤1) -P(A ≤1 and B ≤1)] But for k ≥3, since P(A ≤1 and B ≤1) is 0 for k ≥ 3, because if A ≤1 and B ≤1, then A + B ≤ 2, which would imply k - 1 ≤ 2 ⇒ k ≤ 3. Therefore, for k ≥ 3, P(A ≤1 and B ≤1) = 0 when k ≥3. Wait, but if k=3, then k - 1 = 2, and A + B = 2. … 
+
+> JSD Δp = p(Teacher-RL) − p(Teacher-base)
+> filtered
+> JSD 0.0001
+> retained
+> JSD 0.1735
+> … k − 1 ≤ 2 ⇒ k ≤ 3. … for k ≥ 3, P(A ≤1 and B ≤1) = 0 …
+
+Figure 9: Same sampled token, different mask decisions. The mask filters a calculation on which the teacher and reference agree but retains supervision for a boundary correction. screen supervision, without requiring that larger divergence always imply greater transfer utility. It also accords with our theoretical motivation: small divergence bounds the observable policy change, while large divergence alone does not establish the value of transferring that change. The similar performance across retention ratios suggests that effective selection admits a broad operating range in this setting, and we adopt 10% as a common default. 
+
+E CASE STUDY : W HAT POLICY CHANGES DOES SELECTION PRESERVE ?
+
+To examine what the mask keeps and removes, we inspect states from 20 rollouts of the initial Qwen3-1.7B student on AIME 2026 under the JustRL pair. At each state, we compare the teacher and reference next-token distributions over the student’s top-K candidates and the residual token, and we mark the state as retained if its JSD falls within the top 10% of its response, following the per-response rule of Sec. 4.2. We write ∆p for the change in a token’s probability from the reference to the teacher. We selected the four cases below by hand for interpretability, so they illustrate how the score behaves rather than estimate how often each pattern occurs. 
+
+Selection acts on states, not on sampled tokens. Fig. 9 contrasts two states at which the student samples 3. At the first, 3 completes a valid calculation, and the teacher and reference distributions are nearly identical ( JSD = 0 .0001 ). At the second, 3 sets an incorrect boundary: k = 3 still permits A = B = 1 , so excluding their simultaneous occurrence requires k ≥ 4. Here RL moves probability from 3 to 4 (∆p ≈ − 0.55 and +0 .56 ), and the state is retained ( JSD = 0 .1735 ). The same token thus receives opposite mask decisions, because the score depends on how the teacher’s distribution changed at the state rather than on which token was sampled. 16 Not Every Token Is Worth Distilling: Selective Supervision for Direct-OPD 0 ln 2         
+
+> Alt. Given Let Wait rest −0.8 0+0.8 Alt. Let Given Since rest −0.8 0+0.8
+> …
+
+Alternatively, maybe we can find the angle of rotation by considering the relationship between OA and OC. Alternatively, since vector OA is (-2, 63/8) and vector OC is (7, -33/8). Let me compute the angle between OA and OC. Wait, but maybe not necessary. Alternatively, since the equation 3 cosθ +4 sinθ =0, so we can write this as 3 cosθ = -4 sinθ. So tanθ = -3/4. So θ is an angle whose tangent is -3/4. Let me compute sinθ and cosθ. … 
+
+> JSD Δp = p(Teacher-RL) − p(Teacher-base)
+> retained
+> JSD 0.1892
+> retained
+> JSD 0.5800
+> … Alternatively, maybe … … Alternatively, since …
+
+Figure 10: Retained shifts encode continuation preferences. At two retained states, the teacher shifts probability away from Alternatively ; the later state favors Let , Given , and Since .0 ln 2          
+
+> odd even equal arest −0.8 0+0.8 Theref. Wait But So rest −0.8 0+0.8
+> …
+
+But R1 = a_1 + a_2. Since a_1 is even and a_2 is odd, their sum is odd. Therefore, R1 is odd, and a_3 is even. Therefore, if a_3 = R1, then the total sum is a_1 + a_2 + a_3 = (a_1 + a_2) + a_3 = R1 + R1 = 2 R1 = 12 => R1 = 6. Therefore, R1 = 6, which is odd. Therefore, a_1 + a_2 = 6, and since a_1 is even and a_2 is odd, then a_1 is even, a_2 is odd, and their sum is 6. … 
+
+> JSD Δp = p(Teacher-RL) − p(Teacher-base)
+> retained
+> JSD 0.1197
+> retained
+> JSD 0.5393
+> … R1 = 6, which is odd. … … which is odd. Therefore, …
+
+Figure 11: A later reconsideration cue does not undo an earlier adverse shift. The mask retains a shift toward an incorrect parity judgment, followed by a teacher preference for reconsideration. 
+
+Retained shifts include preferences over how reasoning continues. Fig. 10 shows two retained states at which the student opens a new passage with Alternatively . At both, RL lowers the probability of this token; at the later state the decrease is large ( ∆p ≈ − 0.71 ), and the teacher instead favors Let , Given , and Since . Together with the arithmetic cases, this shows that the retained supervision covers both local corrections and preferences over how the reasoning proceeds, consistent with a score that measures behavioral change rather than correctness. 
+
+JSD does not judge correctness. In Fig. 11, the student describes R1 = 6 as odd . RL reinforces this error, raising the probability of odd (∆p ≈ +0 .41 ) and lowering that of even (∆p ≈ − 0.12 ). The JSD of 0.1197 exceeds the response’s retention cutoff of 0.0744, so this adverse shift is re-tained. At the next state, conditioned on the erroneous statement, the teacher favors Wait over 
+
+Therefore (from 0.01 to 0.71 and from 0.49 to 0.02), a preference compatible with reconsidera-tion, but this later shift does not cancel the reward for odd at the earlier state. The score thus selects states by the size of the teacher’s change, not by whether the change is correct. 
+
+Summary. These cases separate where supervision is applied from what it encourages. JSD decides which states are retained, while Direct-OPD’s log-ratio rewards decide which tokens are encouraged at those states. Because the score measures how much the teacher’s distribution changed on the student’s candidates, the retained states include numerical corrections, continuation preferences, and local errors alike. Masking therefore concentrates Direct-OPD supervision on the states where RL changed the teacher most, without filtering shifts by their correctness. 17 Not Every Token Is Worth Distilling: Selective Supervision for Direct-OPD Table 2: Default training and evaluation configuration.                                               
+
+> Setting Training Evaluation
+> Framework verl –Hardware 8×NVIDIA H200 –Global batch size 128 –Mini-batch size 128 –Rollout n4–Max. prompt length 1,024 –Max. response length 2,048 31,744 Samples per problem –32 Sampling temperature 1.0 0.7 OPD support size Top-K16 –Top-psampling 1.0 0.95 Learning rate 1×10 −6–Training steps 300 –KL coefficient αAdaptive –Controller ϵ0.01 –
+> [αmin , α max ][0 .5,2.5] –Checkpoint selection –AIME 24/25 Held-out evaluation –AIME 26, HMMT Nov.25 / Feb.26
+
+F TRAINING DETAILS 
+
+Data and prompt. All runs use the math subset of Skywork-OR1-RL-Data (He et al., 2025b) and apply the following prompt template.                                      
+
+> Solve the following math problem step by step. The last line of your response should be of the form Answer: $Answer (without quotes) where $Answer is the answer to the problem.
+> {Question }
+> Remember to put your answer on its own line after "Answer:".
+
+Training and evaluation. All experiments are implemented with verl and run on 8 NVIDIA H200 GPUs. Table 2 summarizes the default training and evaluation configuration used throughout our experiments. Owing to limited compute, each configuration is trained with a single run; the confidence interval in Sec. 5.2 resamples held-out problems and does not reflect variation across training seeds. 
+
+G LIMITATIONS 
+
+Our work has four main limitations. First, JSD is a proxy for how much RL changed the teacher, not a judge of whether the change is correct. Because it scores only the magnitude of the teacher– reference difference, S 2D-OPD retains a large shift toward an error as readily as a large correction (Fig. 11), so the quality of the retained supervision still depends on the teacher’s RL. Selectors that also account for the direction or correctness of a shift, for example through verifier or outcome signals, could filter such states. Second, JSD is blind to what the student needs. The score depends on the student only through its top-K candidate set: a state where the student already follows the teacher’s shift consumes the same budget as one where it does not, and a low-divergence shift that the student lacks is discarded. Combining teacher–reference divergence with student-side signals, in the spirit of the student-side calibration in Proxy-OPD (Fu et al., 2026a), is a natural extension. Third, our evidence is limited in scale and scope. We transfer from 1.5B teachers to students of up to 8B parameters, whereas weak-to-strong transfer is most valuable for much larger students, where RL is most costly. All experiments use mathematical reasoning with verifiable rewards; whether selective supervision helps in code generation or agentic tasks, where RL-induced shifts may be distributed 18 Not Every Token Is Worth Distilling: Selective Supervision for Direct-OPD differently across states, remains untested. Finally, owing to limited compute, each configuration is trained once, so our confidence interval reflects variation across held-out problems rather than across training seeds; repeated runs would strengthen the per-setting comparisons. 19
