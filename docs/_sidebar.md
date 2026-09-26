@@ -1,6 +1,9 @@
 * <a class="dpr-sidebar-root-link" href="#/">首页</a>
 * <a class="dpr-sidebar-root-link dpr-sidebar-noactive-link" href="javascript:void(0)" data-dpr-hash="#/tutorial/README">使用教程</a>
 * Daily Papers
+  * 2026-09-26 <!--dpr-date:20260926-->
+    * 速读区
+      * <a class="dpr-sidebar-item-link dpr-sidebar-item-structured" href="#/202609/26/2609.28107v1-distillation-for-efficient-multitask-manipulation-policies-via-conditional-flow-matching" data-sidebar-item="{&quot;title&quot;: &quot;Distillation for Efficient Multitask Manipulation Policies via Conditional Flow Matching&quot;, &quot;link&quot;: &quot;https://arxiv.org/abs/2609.28107v1-distillation-for-efficient-multitask-manipulation-policies-via-conditional-flow-matching&quot;, &quot;score&quot;: &quot;6.0&quot;, &quot;tags&quot;: [{&quot;kind&quot;: &quot;query&quot;, &quot;label&quot;: &quot;policy-dist&quot;}], &quot;evidence&quot;: &quot;多任务操作策略蒸馏&quot;}">Distillation for Efficient Multitask Manipulation Policies via Conditional Flow Matching</a>
   * 2026-09-25 <!--dpr-date:20260925-->
     * 精读区
       * <a class="dpr-sidebar-item-link dpr-sidebar-item-structured" href="#/202609/25/2609.28845v1-lastopd-taming-collapse-in-latent-on-policy-distillation" data-sidebar-item="{&quot;title&quot;: &quot;LastOPD: Taming Collapse in Latent On-Policy Distillation&quot;, &quot;link&quot;: &quot;https://arxiv.org/abs/2609.28845v1-lastopd-taming-collapse-in-latent-on-policy-distillation&quot;, &quot;score&quot;: &quot;10.0&quot;, &quot;tags&quot;: [{&quot;kind&quot;: &quot;query&quot;, &quot;label&quot;: &quot;policy-dist&quot;}], &quot;evidence&quot;: &quot;潜在在线策略蒸馏的崩溃分析与修复&quot;}">LastOPD: Taming Collapse in Latent On-Policy Distillation</a>
