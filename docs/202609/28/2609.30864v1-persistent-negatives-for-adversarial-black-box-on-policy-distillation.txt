@@ -1,0 +1,599 @@
+Title: Persistent Negatives for Adversarial Black-Box On-Policy Distillation
+
+URL Source: https://arxiv.org/pdf/2609.30864v1
+
+Published Time: Mon, 28 Sep 2026 00:49:09 GMT
+
+Number of Pages: 15
+
+Markdown Content:
+# Persistent Negatives for Adversarial Black-Box On-Policy Distillation 
+
+Haixu Ma 1,∗, Saad Lahrichi 1,2,∗,†, Weiwei Li 1, Kevin Han 1, Weiqiang Wu 1, Peggy Yang 1, Dongzhuo Li 1,
+
+Ruiyi Li 1, Serena Li 1, Gedi Zhou 1, Mingze Gao 1, Abhishek Kumar 1, Xiangjun Fan 1, Lizhu Zhang 11Meta AI, 2University of Missouri 
+
+> ∗
+
+Equal contribution , †This work was performed while at Meta 
+
+Black-box On-Policy Distillation (OPD) seeks to improve a student from its own generations when the teacher provides sampled responses but not token probabilities. Adversarial distillation offers one route: it learns a discriminator over prompt-matched teacher and student responses and uses its score as the policy reward. However, sampling discriminator negatives from the latest student at each step couples the learned reward to a negative distribution that changes after every policy update. We address this moving-target problem with persistent-negative adversarial distillation, a live-pool method that replaces a fraction of each discriminator batch with historical, prompt-matched teacher–student comparisons. Under matched discriminator compute, historical comparisons train the discriminator, while GRPO remains on-policy with fresh student responses. Our analysis identifies the Bayes-optimal reward as a teacher-to-negative log-density ratio and, under explicit assumptions, shows how persistent negatives anchor the discriminator and reduce reward-estimation MSE relative to fresh-negative training. Across two student families, three judges, and four judged-chat benchmarks, persistent-negative adversarial distillation consistently improves performance over current methods at matched discriminator compute. It also yields smoother fresh-policy discriminator trajectories, with fewer below-chance dips. These findings identify the discriminator’s negative distribution as an important design axis in black-box on-policy distillation.  
+
+> Date:
+
+September 28, 2026 
+
+# 1 Introduction 
+
+Knowledge distillation transfers capabilities from a strong teacher to a smaller student. In the white-box setting, the student can match the teacher’s token probabilities or hidden representations (Hinton et al., 2015). Proprietary teachers instead commonly expose only generated text. Sequence-level knowledge distillation (SeqKD; Kim and Rush, 2016) is compatible with this interface, but it trains the student only on teacher trajectories. On-policy distillation addresses this mismatch by learning from the student’s own generations, yet established likelihood-based objectives still require teacher probabilities (Gu et al., 2024; Agarwal et al., 2024). The central challenge is therefore how to provide useful feedback on the student’s own responses when the teacher supplies only generated text, without token-level probabilities. Adversarial distillation addresses this gap by learning a discriminator from prompt-matched teacher and student responses and using its scores as sequence-level rewards (Ye et al., 2025). For the same prompt, the discriminator learns to score a teacher response above a student response; its scores then serve as sequence-level rewards for a GRPO update (Shao et al., 2024). This converts text-only teacher outputs into an adaptive policy-learning signal, but it also creates a second estimation problem: the reward model must be learned from a negative distribution over student responses. When all negatives are freshly sampled, that distribution changes after every policy update. Failure modes that are rare in the latest rollout can disappear from discriminator training even when they remain reachable by the student. Our key observation is that these two notions of on-policy data are distinct. The policy update must use responses sampled from the current student, but the discriminator need not discard every valid comparison from earlier students. We therefore introduce persistent-negative adversarial distillation . Our primary live-pool method maintains a bounded collection of complete, prompt-matched teacher–student comparisons and 1arXiv:2609.30864v1 [cs.CL] 25 Sep 2026 Figure 1 Workflow of persistent-negative on-policy distillation. At iteration t, each prompt x is paired with a teacher response yT and a group of fresh student responses yt, 1: G. Fresh comparisons Ft are combined with historical comparisons from Pt to form the fixed-size discriminator batch BDt , from which the updated reward rφt+1 is learned. The discriminator then scores the fresh student group, and the resulting within-group advantages drive the GRPO update θt → θt+1 for student. 
+
+replaces a fixed fraction of each discriminator batch with historical comparisons. The updated discriminator then scores only fresh current-student responses for GRPO, so historical data affect the policy exclusively through the learned reward and the student update remains on-policy. Figure 1 illustrates the complete training loop. At each iteration, the current student generates fresh responses; fresh and historical prompt-matched comparisons train the discriminator; and the updated discriminator supplies rewards for a GRPO update computed from fresh student rollouts. The resulting student then generates the responses used in the next iteration. This design admits a theoretical account. First, the Bayes-optimal Bradley–Terry score (Bradley and Terry, 1952) is the log-density ratio between the teacher distribution and the negative distribution, so changing the negative pool changes the learned reward rather than merely its offset. Second, persistent comparisons provide explicit lower bounds on the historical loss contribution and discriminator curvature. Third, under variance-reduction and bias-control assumptions, the pooled estimator has lower reward MSE, which tightens the error bounds for the standardized advantages and local reward-gradient term used by GRPO. Using GPT-5 Chat responses as black-box teacher supervision (OpenAI, 2025; Ye et al., 2025), we evaluate Qwen2.5-7B-Instruct (Qwen Team, 2024) and Llama-3.1-8B-Instruct (Grattafiori et al., 2024) students across three judges and four judged-chat benchmarks. At matched discriminator compute, persistent-negative training outperforms current-only training (Ye et al., 2025) in cross student–judge–dataset evaluation, with equal-set-weighted gains of +1 .0 to +2 .0 percentage points. The resulting students also improve over their undistilled initializations by +1 .7 to +5 .3 points. In addition, persistent negatives reduce the temporal 2standard deviation of fresh-policy discriminator accuracy and reduce below-chance dips from six to one. 
+
+Our contributions are :• We identify the discriminator’s negative distribution as a first-class design choice in black-box adversarial distillation and introduce persistent-negative training, while keeping GRPO updates fully on-policy and discriminator compute fixed. • We characterize the Bayes-optimal reward as a teacher-to-negative density ratio and establish explicit historical-loss and curvature bounds, together with a bias–variance condition under which persistent negatives reduce reward MSE. • Experiments across two student families, three judges, and both in-domain and cross-dataset evaluations show broadly consistent gains over current-only training, together with reduced discriminator volatility and fewer below-chance dips. 
+
+# 2 Related Work  
+
+> Black-box and on-policy distillation.
+
+Classical knowledge distillation matches teacher output distributions (Hinton et al., 2015), whereas response-based methods learn from sampled teacher text (Kim and Rush, 2016; Jiang et al., 2023). On-policy distillation trains on student-generated trajectories, but conventional objectives require teacher probabilities on those trajectories (Gu et al., 2024; Agarwal et al., 2024; Lu and Thinking Machines Lab, 2025). Black-box alternatives instead derive sequence-level supervision from text: OVD uses teacher-provided verbal scores (Xiong et al., 2026), ROPD constructs prompt-specific rubrics (Fang et al., 2026), and GAD learns an adaptive discriminator from teacher–student responses (Ye et al., 2025). We develop the discriminator-based approach by introducing persistent comparisons that stabilize its learned reward while preserving fresh on-policy student updates. In addition, we focus on an orthogonal question within discriminator-based distillation: which student-response distribution should train the learned reward?  
+
+> Adversarial reward learning.
+
+Generative adversarial learning trains a discriminator to distinguish samples from two distributions (Goodfellow et al., 2014), while adversarial imitation learning uses the resulting discriminator as a policy reward (Ho and Ermon, 2016). Under logistic classification, the optimal discriminator logit recovers a log-density ratio between the positive and negative distributions. GAD applies this principle to teacher and student responses. Our analysis specializes it to prompt-conditional language generation and shows that the discriminator’s reward depends explicitly on the student distribution used to construct its negatives.  
+
+> Historical and mixed-policy negatives.
+
+History buffers and replay have been used to stabilize adversarial image generation and imitation learning (Shrivastava et al., 2017; Kostrikov et al., 2019). ORPO-Distill similarly mixes responses from different student policies when constructing preference pairs (Singh et al., 2025). In ORPO-Distill, these responses directly enter the student’s preference objective. Our historical responses instead remain paired with their prompts and teacher responses and train only the discriminator; GRPO continues to score and optimize fresh responses sampled from the current student. 
+
+# 3 Persistent-Negative Adversarial Distillation 
+
+Figure 1 provides an overview of the alternating training procedure. We now formalize its discriminator, negative distribution, and policy updates. 
+
+3.1 Adversarial reward formulation 
+
+Let D be a prompt distribution, τ (· | x) the teacher-response distribution, and πθt (· | x) the student policy at iteration t. We observe teacher-response samples T = {(x, y T )}, where x ∼ D and yT ∼ τ (· | x), but cannot query teacher token probabilities. We therefore learn a sequence-level score rφ(x, y ) from prompt-matched teacher and student responses. This construction connects adversarial generation to policy distillation. In a GAN, a discriminator separates observed from generated samples while the generator changes its distribution to become harder to distinguish 3(Goodfellow et al., 2014). Generative Adversarial Distillation (GAD; Ye et al., 2025) instantiates this game for conditional text: teacher responses play the role of observed samples and the autoregressive student plays the generator. For any negative response distribution q(· | x), define the population Bradley–Terry loss (Bradley and Terry, 1952) 
+
+LD (rφ; q) = Ex∼D , y T ∼τ (·| x),yS ∼q(·| x)
+
+[softplus( rφ(x, y S ) − rφ(x, y T ))] . (1) The discriminator minimizes this loss, increasing the score margin between teacher and student responses. When q = πθ , the corresponding response-level minimax game is 
+
+min  
+
+> φ
+
+max  
+
+> θ
+
+V(θ, φ ) = LD (rφ; πθ ). (2) The student maximization pushes probability toward responses receiving higher discriminator scores. Because sampled text is discrete, we use the standard non-saturating surrogate: the discriminator score becomes a sequence-level reward, and GRPO performs the student update instead of differentiating through generated tokens (Shao et al., 2024). Concretely, the updated discriminator scores a fresh group yt,i ∼ πθt (· | x),
+
+i = 1 , . . . , G , producing Rt,i = rφt+1 (x, y t,i ). GRPO forms the promptwise advantages 
+
+At,i = Rt,i − ¯Rt
+
+sR,t + ε , ¯Rt = G−1
+
+> G
+
+X
+
+> j=1
+
+Rt,j , s R,t = std j (Rt,j ), (3) and applies the standard clipped policy objective with a KL penalty to a frozen reference policy (Ye et al., 2025). Only fresh student responses enter this update.  
+
+> Why the reward transfers teacher behavior.
+
+Theorem 4.1 shows that the population-optimal reward is r⋆q (x, y ) = log[ τ (y | x)/q (y | x)] + c(x). So it favors responses characteristic of the teacher relative to the student negatives. GRPO increases the probability of fresh responses receiving higher within-group rewards, transferring teacher-compatible behavior without token-level supervision. 
+
+3.2 Persistent negatives for a moving reward target 
+
+The negative distribution in Eq. (1) determines the reward being learned. Using only q = πθt makes this target move after every policy update: response modes absent from the latest rollout stop contributing to discriminator training even when the student can produce them again. The learned reward can therefore react strongly to one policy snapshot and forget previously observed failure modes. We address this moving-target problem with persistent negative distribution. Let Pt be a bounded pool of complete comparisons (x, y T , y S ), and ht(· | x) be the historical student response distribution represented by that pool. Once the pool is filled, the discriminator negative distribution is 
+
+qρt (· | x) = (1 − ρ)πθt (· | x) + ρh t(· | x), ρ ∈ [0 , 1) . (4) Figure 2 summarizes the mechanism. As GRPO updates move the student distribution, the negative distribution constructed from a single policy snapshot also moves. Mixing fresh responses with ht keeps recent comparisons active in the discriminator objective, which can make the learned reward less sensitive to any individual rollout. Retaining the complete comparison preserves the prompt and teacher response that define the pairwise target for each historical student response. The primary live pool retains recent comparisons and refreshes them during training. Pooled comparisons train only rφ; GRPO continues to use fresh groups sampled from πθt . The special case ρ = 0 gives the nonpersistent comparator. 
+
+3.3 Alternating optimization 
+
+Let B be the discriminator batch size, C the pool capacity, and Ft the fresh prompt-matched comparisons constructed at iteration t. We initialize P0 as empty. During pool startup, kt = min {⌊ ρB ⌋, |Pt|} pooled rows are available, so the realized mixture weight is ρt = kt/B ; the remaining slots are filled with fresh comparisons. Algorithm 1 gives the complete alternating update. 4Figure 2 Why persistent negatives help. GRPO updates continually change the student distribution, so a discriminator trained from a single policy snapshot can lose constraints supplied by earlier student responses. Persistent-negative training uses qρt = (1 − ρ)πθt + ρh t, allowing fresh and historical comparisons to share a fixed-size discriminator batch. The historical term remains active in the discriminator objective, making the learned reward less dependent on any single rollout and providing steadier feedback for GRPO. Reward trajectories are schematic. 
+
+Pooled comparisons replace rather than augment fresh comparisons, so every variant uses B discriminator comparisons and the same number of discriminator optimizer steps per iteration. Historical data affect the student only through the updated score model. Moreover, because GRPO removes a promptwise reward offset, persistence changes the policy update only when it changes the ordering or relative spacing of scores within a fresh group. The following section analyzes the resulting reward target, discriminator stability, and GRPO signal. 
+
+# 4 Theoretical Analysis 
+
+Our analysis provides three complementary results. The Bayes-optimal Bradley–Terry reward is a teacher-to-negative log-density ratio. Persistent comparisons lower-bound both the historical loss contribution and the discriminator curvature. Finally, a bias–variance condition characterizes when persistence reduces reward MSE. The three results formalize the mechanism illustrated in Figure 2.  
+
+> Notation.
+
+We use distributions and discriminator loss defined in Section 3. In particular, qρt is given by Eq. (4), and LD(r; q) denotes Eq. (1) evaluated with score function r. For an arbitrary negative distribution q, let 
+
+r⋆q ∈ arg min r LD (r; q) denote a population-optimal score over the unrestricted class of real-valued functions. We abbreviate r⋆t := r⋆πθt and rρ,⋆ t := r⋆qρt
+
+. Because the loss depends only on score differences, these optima are defined up to a prompt-dependent additive constant. 5Algorithm 1 Persistent-negative adversarial distillation  
+
+> Require:
+
+Teacher-response data T , student πθ0 , and score model rφ0 
+
+> Require:
+
+Pool P0, ρ, B, C  
+
+> 1: for
+
+t = 0 , 1, . . . , N − 1 do  
+
+> 2:
+
+Sample prompt–teacher pairs (x, y T ) ∼ T  
+
+> 3:
+
+Sample fresh groups yt,i ∼ πθt (· | x), i = 1 , . . . , G  
+
+> 4:
+
+Form fresh comparisons Ft ← { (x, y T , y t,i )} 
+
+> 5:
+
+kt ← min {⌊ ρB ⌋, |Pt|}  
+
+> 6:
+
+BDt ← Sample (Ft, B − kt) ⊕ Sample (Pt, k t) 
+
+> 7:
+
+φt+1 ← Disc Update (φt, B Dt ) 
+
+> 8:
+
+Rt,i ← rφt+1 (x, y t,i ) for fresh responses  
+
+> 9:
+
+Compute At,i in (3)  
+
+> 10:
+
+θt+1 ← GRPO Update (θt, {yt,i , A t,i }) 
+
+> 11:
+
+Pt+1 ← Keep Recent (Pt ⊕ Ft, C )   
+
+> 12: end for
+> 13: return
+
+πθN
+
+4.1 The Bayes-optimal score is a density ratio 
+
+Theorem 4.1 (Bayes-optimal discriminator score) . Fix a prompt x. Suppose the response space is finite and 
+
+τ (y | x), q (y | x) > 0 for every response y. Over the unrestricted score class, 
+
+r⋆q (x, y ) = log τ (y | x)
+
+q(y | x) + cq (x), (5) 
+
+where cq (x) is independent of y. Consequently, we have 
+
+r⋆t (x, y ) = log τ (y | x)
+
+πθt (y | x) + ct(x), and rρ,⋆ t (x, y ) = log τ (y | x)
+
+qρt (y | x) + cρt (x). (6) 
+
+Example. Consider two response modes, A and B, with τ (A, B ) = (0 .8, 0.2) and πθt (A, B ) = (0 .2, 0.8) . Under fresh-negative training, r⋆t (A) − r⋆t (B) = log 0.80.2 − log 0.20.8 = log 16 ≈ 2.77 . If ht(A, B ) = (0 .5, 0.5) and ρ = 0 .5,then qρt (A) = 0 .5(0 .2) + 0 .5(0 .5) = 0 .35 and qρt (B) = 0 .5(0 .8) + 0 .5(0 .5) = 0 .65 . The corresponding gap is log[(0 .8/0.35) /(0 .2/0.65)] = log 7 .43 ≈ 2.01 . Here the current rollout may make the correct mode look unusually rare; the pool remembers that recent students produced it half of the time and avoids turning this transient shift into an excessively large reward gap. It preserves the useful ordering A > B while making the reward less reactive to one policy snapshot. With realistic multi-mode responses, pooling changes different gaps non-uniformly and therefore can also change the standardized GRPO advantages. 
+
+4.2 Persistent negatives anchor the discriminator 
+
+For a fixed prompt, let scores lie in the centered subspace S = {r : 1⊤r = 0 }. Define Lfresh  
+
+> t
+
+(r) = LD (r; πθt ) and 
+
+Lhist  
+
+> t
+
+(r) = LD (r; ht). At the population level, the negative-mixture distribution gives Lρt = (1 −ρ)Lfresh  
+
+> t
+
++ρLhist  
+
+> t
+
+.
+
+Proposition 1 (Persistent-negative lower bound) . For every score vector r and ρ ∈ [0 , 1) , we have Lρt (r) ≥
+
+ρLhist  
+
+> t
+
+(r). Moreover, suppose that, on a bounded convex subset of S, ∇2Lfresh  
+
+> t
+
+(r) ⪰ μfresh IS and ∇2Lhist  
+
+> t
+
+(r) ⪰
+
+μhist IS , where μfresh , μ hist ≥ 0. Then ∇2Lρt (r) ⪰ ρμ hist IS .
+
+Example. Consider a prompt with three response modes: a correct answer A, a hallucinated answer B, and an unhelpful refusal C. After a policy update, fresh negatives may shift abruptly from B to C. Fresh-only training then provides little signal about B, even though the student may produce it again. A live pool retains earlier teacher– B comparisons. With ρ = 0 .5, the pooled objective satisfies Lρt (r) ≥ 0.5Lhist  
+
+> t
+
+(r), so achieving low pooled loss requires continued control of the historical comparisons involving B. If those comparisons provide curvature in the corresponding score direction, they contribute at least 0.5μhist to the pooled curvature. 64.3 Bias–variance tradeoff of persistent negatives 
+
+For a reward function f , define the promptwise-centered seminorm as ∥f ∥2 
+
+> t,c
+
+:= Ex∼D , y ∼πθt (·| x)
+
+
+
+f (x, y ) − Ey′∼πθt (·| x)f (x, y ′)
+
+2
+
+This removes prompt-dependent score offsets, which do not affect pairwise comparisons or promptwise GRPO advantages. 
+
+Proposition 2 (Reward MSE under controlled pool bias) . Let brfresh  
+
+> t
+
+and brpool  
+
+> t
+
+be learned reward functions, and let r⋆t be the ideal fresh-negative reward from Theorem 4.1. Define Va = E∥brat − Ebrat ∥2 
+
+> t,c
+
+for a ∈ { fresh , pool }
+
+and B2pool = ∥Ebrpool  
+
+> t
+
+− r⋆t ∥2
+
+> t,c
+
+. Assume that Ebrfresh  
+
+> t
+
+= r⋆t and that, for some ∆t > 0, Vpool ≤ Vfresh − ∆t
+
+and B2pool < ∆t. Then we have, MSE( brfresh  
+
+> t
+
+, r ⋆t ) = Vfresh , MSE( brpool  
+
+> t
+
+, r ⋆t ) = Vpool + B2pool . Consequently, 
+
+MSE( brfresh  
+
+> t
+
+, r ⋆t ) − MSE( brpool  
+
+> t
+
+, r ⋆t ) ≥ ∆t − B2pool > 0.
+
+Appendix B provides complete proofs of above theorems and propositions. 
+
+# 5 Experimental setup 
+
+5.1 Models, data, and training 
+
+We evaluate two comparably sized student models from different families: Qwen2.5-7B-Instruct (Qwen Team, 2024) and Llama-3.1-8B-Instruct (Grattafiori et al., 2024), so that we can test whether the effect of persistent negatives transfers across model families rather than depending on a particular architecture or initialization. For each family, we evaluate the initial instruction-tuned checkpoint as the undistilled student. The teacher-response corpus contains 192 ,014 responses generated by GPT-5 Chat (OpenAI, 2025) and released with GAD over LMSYS-Chat-1M (Ye et al., 2025; Zheng et al., 2024). We use only sampled teacher responses: we neither query the teacher during training nor access its token probabilities. Training begins with one epoch of supervised fine-tuning on the teacher responses, during which the discriminator is also initialized. This warmup is followed by two adversarial epochs. Each adversarial step samples eight student responses per prompt. Our persistent-negative configuration uses mixture weight ρ = 0 .5, uniform pool sampling, and a bounded live pool containing 4, 096 complete comparisons (x, y T , y S ). Once sufficient history is available, half of each discriminator batch is sampled from the pool. Pooled comparisons replace current comparisons within the fixed discriminator batch size B = 256 .Consequently, GAD and persistent-negative training use the same number of discriminator examples and optimizer steps. Complete optimization, sequence-length, and hardware configurations appear in Appendix A. For each student family, we train GAD and our method with three paired random seeds. Within each pair, both methods share the warmup checkpoint, data order, initialization, and optimization settings. Across seeds, we vary data shuffling, response sampling, and optimizer randomness. Both student families use the same, one-epoch supervised warmup, two adversarial epochs, group size G = 8 , discriminator batch size B = 256 ,mixture weight ρ = 0 .5, and pool capacity of 4096 comparisons. We change only model-specific tokenization and chat templates. Memory-related microbatching may differ, but the effective batch size is held fixed. 
+
+5.2 Compared methods 
+
+For each student model, we compare the undistilled checkpoint, SeqKD (Kim and Rush, 2016), standard GAD (Ye et al., 2025), and our persistent-negative method. SeqKD performs supervised fine-tuning on teacher responses without a discriminator or GRPO. GAD and persistent-negative training resume from the same jointly initialized warmup checkpoint. Standard GAD uses only current-policy negatives, corresponding to 
+
+ρ = 0 . Our method instead replaces half of each discriminator batch with historical comparisons sampled from the live pool. Appendix A provides the complete configurations. 
+
+5.3 Evaluation and inference 
+
+We generate greedy responses for LMSYS ( n = 479 prompts), Dolly ( n = 500 ; Conover et al., 2023), Vicuna/MT-Bench ( n = 80 ; Zheng et al., 2023), and Self-Instruct ( n = 252 ; Wang et al., 2023). Evaluation 7Table 1 Judged-chat performance with Qwen2.5-7B-Instruct. Scores are percentages, with 50 denoting parity with the reference. Base is the undistilled student, and GAD uses current-only negatives. Improvements are reported in percentage points (pp). The average weights the four evaluation sets equally.                                                                                                  
+
+> Dataset Base SeqKD GAD Persistent-negative (ours)
+> ∆vs. Base ↑
+> (pp)
+> ∆vs. GAD ↑
+> (pp) Qwen2.5-72B-Instruct judge
+> LMSYS 48.5 48.9 49.1 50.7 +2 .2+1 .6
+> Dolly 47.5 46.8 47.9 49.1 +1 .6+1 .2
+> Vicuna 48.4 48.6 49.2 50.2 +1 .8+1 .0
+> Self-Instruct 48.1 48.5 48.7 49.4 +1 .3+0 .7
+> Average 48.1 48.2 48.7 49.9 +1 .7+1 .1
+> Qwen3.5-27B judge
+> LMSYS 39.1 39.5 39.6 41.6 +2 .5+2 .0
+> Dolly 42.4 42.7 42.5 43.4 +1 .0+0 .9
+> Vicuna 42.0 44.7 44.3 45.0 +3 .0+0 .7
+> Self-Instruct 42.4 43.2 43.9 45.6 +3 .2+1 .7
+> Average 41.5 42.5 42.6 43.9 +2 .4+1 .3
+> Gemma-3-27B-IT judge
+> LMSYS 41.2 42.8 44.6 47.2 +6 .0+2 .6
+> Dolly 43.2 43.8 45.1 46.8 +3 .6+1 .7
+> Vicuna 42.7 43.6 45.9 47.5 +4 .8+1 .6
+> Self-Instruct 42.4 42.7 44.6 46.3 +3 .9+1 .7
+> Average 42.4 43.2 45.1 47.0 +4 .6+1 .9
+
+prompts are excluded from the distillation cohort. All distillation prompts are drawn from LMSYS-Chat-1M. The held-out LMSYS evaluation set therefore measures in-domain generalization. Dolly, Vicuna/MT-Bench, and Self-Instruct are not used during training and provide cross-dataset out-of-domain evaluations. An offline judge assigns scores from 1 to 10 to the candidate and reference answers. Following Ye et al. (2025), we report candidate/(candidate+reference), for which 0.5 denotes parity. We use three judges to reduce dependence on the preferences and calibration of any single evaluator. Qwen2.5-72B-Instruct (Qwen Team, 2024) provides a large, established Qwen-family judge, while Qwen3.5-27B (Qwen Team, 2026) tests consistency under a newer Qwen generation. Gemma-3-27B-IT (Gemma Team et al., 2025) provides a cross-family judge, allowing us to test whether the conclusions persist outside the Qwen model family. All three judges score the same fixed student responses using the same evaluation rubric and deterministic decoding. Because their absolute scoring scales need not be calibrated, we report results separately for each judge and compare methods only within judge. The offline judges are independent of the discriminator used during training. We also measure pre-update discriminator accuracy on fresh current-policy comparisons. Every arm uses the same prompt–teacher slice, but student responses are generated by the corresponding current policy. This diagnostic therefore describes the coupled student–discriminator process rather than isolating discriminator variation alone. 
+
+# 6 Results 
+
+6.1 Persistent negatives improve judged-chat performance 
+
+Persistent-negative training improves judged-chat performance consistently across student and judge families. With Qwen2.5-7B-Instruct as the student, our method outperforms GAD on every evaluation set under all three judges (Table 1). The equal-set-weighted gains over GAD are +1 .1% under Qwen2.5-72B-Instruct, 
+
++1 .3% under Qwen3.5-27B, and +1 .9% under Gemma-3-27B-IT. Relative to the undistilled student, the corresponding gains are +1 .7% , +2 .4% , and +4 .6% .The improvement is not limited to the LMSYS evaluation set, which shares the source domain of the training 8Table 2 Judged-chat performance with Llama-3.1-8B-Instruct.                                                                                                  
+
+> Dataset Base SeqKD GAD Persistent-negative (ours)
+> ∆vs. Base ↑
+> (pp)
+> ∆vs. GAD ↑
+> (pp) Qwen2.5-72B-Instruct judge
+> LMSYS 46.7 47.2 48.5 49.4 +2 .7+0 .9
+> Dolly 45.8 45.9 46.7 48.2 +2 .4+1 .5
+> Vicuna 45.2 47.7 48.8 49.8 +4 .6+1 .0
+> Self-Instruct 46.3 47.2 48.2 48.9 +2 .6+0 .7
+> Average 46.0 47.0 48.1 49.1 +3 .1+1 .0
+> Qwen3.5-27B judge
+> LMSYS 36.5 37.9 39.6 40.7 +4 .2+1 .1
+> Dolly 38.1 39.2 41.2 42.2 +4 .1+1 .0
+> Vicuna 37.6 40.0 42.8 44.1 +6 .5+1 .3
+> Self-Instruct 37.8 39.6 42.7 43.8 +6 .0+1 .1
+> Average 37.5 39.2 41.6 42.7 +5 .2+1 .1
+> Gemma-3-27B-IT judge
+> LMSYS 39.5 39.8 42.3 45.6 +6 .1+3 .3
+> Dolly 40.1 42.0 43.9 44.9 +4 .8+1 .0
+> Vicuna 39.8 41.9 43.7 45.8 +6 .0+2 .1
+> Self-Instruct 39.9 42.0 42.5 44.2 +4 .3+1 .7
+> Average 39.8 41.4 43.1 45.1 +5 .3+2 .0
+
+corpus. Persistent-negative training also outperforms GAD on Dolly, Vicuna, and Self-Instruct, providing evidence of cross-dataset generalization. Although the judges use different absolute score scales, they agree on the direction of every comparison. The same pattern transfers to Llama-3.1-8B-Instruct (Table 2). Persistent-negative training improves the equal-set-weighted average over GAD by +1 .0% under Qwen2.5-72B-Instruct, +1 .1% under Qwen3.5-27B, and 
+
++2 .0% under Gemma-3-27B-IT. Relative to the undistilled Llama student, the corresponding gains are +3 .1,
+
++5 .2% , and +5 .3% . The Qwen student retains higher absolute scores, but the persistent-negative improvement over GAD is similar across the two model families. Across both students, all three judges favor persistent-negative training over GAD on all four evaluation sets, yielding positive point estimates in all 24 student–judge–dataset comparisons. These comparisons are correlated because they share prompts, references, and evaluation rubrics; we therefore treat their directional consistency as robustness evidence rather than as 24 independent tests. 
+
+6.2 Persistent negatives produce smoother discriminator trajectories 
+
+We measure pre-update discriminator accuracy on fresh current-policy comparisons. In the seed run, persistent-negative training reduces the temporal standard deviation from 0.087 to 0.068 , raises the minimum accuracy from 0.414 to 0.461 , and reduces below-chance dips from six to one. Because each student generates its own negatives, this diagnostic describes the coupled student–discriminator trajectory rather than the discriminator in isolation. Appendix D reports the complete statistics and common-probe analysis. 
+
+# 7 Conclusion 
+
+We introduce persistent-negative adversarial distillation for transferring behavior from a black-box teacher without access to token probabilities. A sequence-level discriminator learns rewards from prompt-matched teacher and student responses, while GRPO updates the student using fresh on-policy generations. Standard adversarial distillation trains the discriminator only against the current student distribution, so previously observed failure modes can disappear from discriminator training as the policy changes. We address this moving-target problem by retaining historical student responses as persistent negatives. This design preserves broader discriminator supervision while maintaining a fully on-policy student update. 9References 
+
+Rishabh Agarwal, Nino Vieillard, Yongchao Zhou, Piotr Stanczyk, Sabela Ramos Garea, Matthieu Geist, and Olivier Bachem. On-policy distillation of language models: Learning from self-generated mistakes. In The Twelfth International Conference on Learning Representations , 2024. Ralph Allan Bradley and Milton E. Terry. Rank analysis of incomplete block designs: I. the method of paired comparisons. Biometrika , 39(3/4):324–345, 1952. Mike Conover, Matt Hayes, Ankit Mathur, Jianwei Xie, Jun Wan, Sam Shah, Ali Ghodsi, Patrick Wendell, Matei Zaharia, and Reynold Xin. Free dolly: Introducing the world’s first truly open instruction-tuned LLM. Databricks blog, 2023. 
+
+https://www.databricks.com/blog/2023/04/12/dolly-first-open-commercially-viable-instruction-tuned-llm .Pavlos S. Efraimidis and Paul G. Spirakis. Weighted random sampling with a reservoir. Information Processing Letters ,97(5):181–185, 2006. Junfeng Fang, Zhepei Hong, Mao Zheng, Mingyang Song, Gengsheng Li, Houcheng Jiang, Dan Zhang, Haiyun Guo, Xiang Wang, and Tat-Seng Chua. Rubric-based on-policy distillation. arXiv preprint arXiv:2605.07396 , 2026. 
+
+https://arxiv.org/abs/2605.07396 .Gemma Team et al. Gemma 3 technical report. arXiv preprint arXiv:2503.19786 , 2025. https://arxiv.org/abs/2503. 19786 .Ian J. Goodfellow, Jean Pouget-Abadie, Mehdi Mirza, Bing Xu, David Warde-Farley, Sherjil Ozair, Aaron Courville, and Yoshua Bengio. Generative adversarial nets. In Advances in Neural Information Processing Systems , volume 27, 2014. Aaron Grattafiori, Abhimanyu Dubey, Abhinav Jauhri, Abhinav Pandey, Abhishek Kadian, Ahmad Al-Dahle, Aiesha Letman, Akhil Mathur, Alan Schelten, Alex Vaughan, et al. The llama 3 herd of models. arXiv preprint arXiv:2407.21783 , 2024. Yuxian Gu, Li Dong, Furu Wei, and Minlie Huang. MiniLLM: Knowledge distillation of large language models. In 
+
+International Conference on Learning Representations , 2024. Geoffrey Hinton, Oriol Vinyals, and Jeff Dean. Distilling the knowledge in a neural network. arXiv preprint arXiv:1503.02531 , 2015. Jonathan Ho and Stefano Ermon. Generative adversarial imitation learning. In Advances in Neural Information Processing Systems , volume 29, 2016. Yuxin Jiang, Chunkit Chan, Mingyang Chen, and Wei Wang. Lion: Adversarial distillation of proprietary large language models. In Proceedings of the 2023 Conference on Empirical Methods in Natural Language Processing ,pages 3134–3154, 2023. Yoon Kim and Alexander M. Rush. Sequence-level knowledge distillation. In Proceedings of the 2016 Conference on Empirical Methods in Natural Language Processing , pages 1317–1327, 2016. Ilya Kostrikov, Kumar Krishna Agrawal, Debidatta Dwibedi, Sergey Levine, and Jonathan Tompson. Discriminator-actor-critic: Addressing sample inefficiency and reward bias in adversarial imitation learning. In International Conference on Learning Representations , 2019. Kevin Lu and Thinking Machines Lab. On-policy distillation. Thinking Machines Lab: Connectionism, 2025. 
+
+https://thinkingmachines.ai/blog/on-policy-distillation .OpenAI. GPT-5 Chat. https://developers.openai.com/api/docs/models/gpt-5-chat-latest , 2025. Model documenta-tion; accessed September 12, 2026. Qwen Team. Qwen2.5 technical report. arXiv preprint arXiv:2412.15115 , 2024. Qwen Team. Qwen3.5: Towards native multimodal agents, February 2026. https://qwen.ai/blog?id=qwen3.5 .Zhihong Shao, Peiyi Wang, Qihao Zhu, Runxin Xu, Junxiao Song, Xiao Bi, Haowei Zhang, Mingchuan Zhang, Y. K. Li, Y. Wu, and Daya Guo. DeepSeekMath: Pushing the limits of mathematical reasoning in open language models. 
+
+arXiv preprint arXiv:2402.03300 , 2024. Ashish Shrivastava, Tomas Pfister, Oncel Tuzel, Josh Susskind, Wenda Wang, and Russ Webb. Learning from simulated and unsupervised images through adversarial training. In IEEE Conference on Computer Vision and Pattern Recognition , pages 2107–2116, 2017. 
+
+10 Aasheesh Singh, Vishal Vaddina, and Dagnachew Birru. ORPO-Distill: Mixed-policy preference optimization for cross-architecture LLM distillation. arXiv preprint arXiv:2509.25100 , 2025. https://arxiv.org/abs/2509.25100 .Accepted at the NeurIPS 2025 Workshop on Efficient Reasoning. Yizhong Wang, Yeganeh Kordi, Swaroop Mishra, Alisa Liu, Noah A. Smith, Daniel Khashabi, and Hannaneh Hajishirzi. Self-instruct: Aligning language models with self-generated instructions. In Proceedings of the 61st Annual Meeting of the Association for Computational Linguistics , pages 13484–13508, 2023. Jing Xiong, Hui Shen, Shansan Gong, Yuxin Cheng, Jianghan Shen, Chaofan Tao, Haochen Tan, Haoli Bai, Lifeng Shang, and Ngai Wong. OVD: On-policy verbal distillation. arXiv preprint arXiv:2601.21968 , 2026. https: //arxiv.org/abs/2601.21968 .Tianzhu Ye, Li Dong, Zewen Chi, Xun Wu, Shaohan Huang, and Furu Wei. Black-box on-policy distillation of large language models. arXiv preprint arXiv:2511.10643 , 2025. Lianmin Zheng, Wei-Lin Chiang, Ying Sheng, Siyuan Zhuang, Zhanghao Wu, Yonghao Zhuang, Zi Lin, Zhuohan Li, Dacheng Li, Eric P. Xing, Hao Zhang, Joseph E. Gonzalez, and Ion Stoica. Judging LLM-as-a-judge with MT-Bench and chatbot arena. In Advances in Neural Information Processing Systems , volume 36, 2023. Lianmin Zheng, Wei-Lin Chiang, Ying Sheng, Tianle Li, Siyuan Zhuang, Zhanghao Wu, Yonghao Zhuang, Zhuohan Li, Zi Lin, Eric P. Xing, Joseph E. Gonzalez, Ion Stoica, and Hao Zhang. LMSYS-Chat-1M: A large-scale real-world LLM conversation dataset. In International Conference on Learning Representations , 2024. 
+
+11 Appendix 
+
+# A Implementation and training details  
+
+> Table 3
+
+Training configuration. Pool rows describe the only intervention. Component Configuration Student / teacher Qwen2.5-7B-Instruct / sampled GPT-5-Chat responses Warmup one epoch of SFT on teacher responses (374 steps at 50% ); discriminator jointly initialized; GAD arms resume, SeqKD does not Adversarial phase two epochs; 748 steps at 50% , 492 at 33% 
+
+Optimization learning rate 10 −6; batch 256; rollout group 8; temperature 0.8 Lengths maximum prompt 2048 tokens; maximum response 1536 Regularization KL coefficient 10 −3; gradient clip 0.2; discriminator fp32 Reference pool 4096 BT rows; ρ = 0 .5; uniform sampling SeqKD learning rate 5 × 10 −6; batch 256; no discriminator or GRPO Hardware one node; 8×H200; tensor parallelism 1 
+
+A pool entry is a Bradley–Terry row (x, y T , y S ). The reference live-pool GAD arm uses a FIFO queue tagged with the step that produced each row. With 256 discriminator rows per rank per step, capacity 4096 covers 16 steps. Each pooled row replaces a fresh row; it does not enlarge the discriminator batch or enter the policy update. For exploratory live-pool sweeps, stale rows are sampled uniformly, by recency wi = exp[ −λ(t − si)] with 
+
+λ = 10 −3, or by push-time loss wi = pαi with pi = softplus( −mi) and α ∈ { 0.5, 1}. Weighted draws use A-Res (Efraimidis and Spirakis, 2006): sample ui ∼ Uniform(0 , 1) , form u1/w i 
+
+> i
+
+, and take the largest keys. 
+
+# B Proofs of the Theoretical Results 
+
+We provide complete proofs of the three results in Section 4. All expectations over learned score functions are taken over the randomness of the training procedure. 
+
+B.1 Proof of Theorem 4.1 
+
+Proof. Fix a prompt x and suppress it from the notation. Let the finite response space be Y = {1, . . . , m },and write τi = τ (i | x), qi = q(i | x), and ri = r(x, i ). The population loss is 
+
+LD (r; q) = X
+
+> i,j
+
+τiqj softplus( rj − ri).
+
+Terms with i = j are constant. For an unordered pair i̸ = j, let d = ri − rj . Its contribution is 
+
+gij (d) = τiqj softplus( −d) + τj qi softplus( d).
+
+Since all probabilities are positive, gij is strictly convex. Its derivative vanishes exactly when 
+
+d = log τiqj
+
+τj qi
+
+= log τi
+
+qi
+
+− log τj
+
+qj
+
+.
+
+These pairwise conditions are simultaneously satisfied by 
+
+ri = log τi
+
+qi
+
++ c, 
+
+12 where c is independent of the response. Because the complete loss is convex and this score minimizes every pairwise contribution, it is a global minimizer. Positivity of τi and qi makes the comparison graph connected, so all minimizing score differences are fixed. The only remaining freedom is the additive constant c. Restoring the prompt dependence gives 
+
+r⋆q (x, y ) = log τ (y | x)
+
+q(y | x) + cq (x).
+
+B.2 Proof of Proposition 1 
+
+Proof. By linearity of expectation in the negative distribution, 
+
+Lρt (r) = (1 − ρ)Lfresh  
+
+> t
+
+(r) + ρLhist  
+
+> t
+
+(r).
+
+The softplus loss is nonnegative. Therefore, 
+
+Lρt (r) ≥ ρLhist  
+
+> t
+
+(r).
+
+The softplus function is convex, so both component losses are convex in the score vector. Differentiating the mixture gives 
+
+∇2Lρt (r) = (1 − ρ)∇2Lfresh  
+
+> t
+
+(r) + ρ∇2Lhist  
+
+> t
+
+(r).
+
+Under the curvature assumptions in the theorem, it follows that 
+
+∇2Lρt (r) ⪰ (1 − ρ)μfresh + ρμ hist 
+
+IS ⪰ ρμ hist IS .
+
+For completeness, consider the stated connectedness condition for the historical comparison graph. For any direction v ∈ S ,
+
+v⊤∇2Lhist  
+
+> t
+
+(r)v = X
+
+> i,j
+
+τiht,j ℓ′′ (rj − ri)( vj − vi)2,
+
+where ℓ(u) = softplus( u) and ℓ′′ (u) = σ(u)σ(−u) > 0.On a bounded score set, ℓ′′ (rj − ri) is uniformly bounded away from zero. If the historical comparison graph is connected, the quadratic form can vanish only when vi = vj for every connected pair. Thus v must be constant. The centered constraint v ∈ S then implies v = 0 . Hence the historical Hessian is uniformly positive definite on S, establishing μhist > 0 and completing the proof. 
+
+B.3 Proof of Proposition 2 
+
+Proof. Define the promptwise-centering operator 
+
+(Ctf )( x, y ) = f (x, y ) − Ey′∼πθt (·| x)f (x, y ′).
+
+Then ∥f ∥2 
+
+> t,c
+
+= ∥Ctf ∥2 
+
+> t
+
+, where ∥ · ∥ t is the ordinary L2 norm under x ∼ D and y ∼ πθt (· | x).For either estimator brat , write 
+
+brat − r⋆t =  brat − Ebrat
+
+ +  Ebrat − r⋆t
+
+.
+
+The first term has zero expectation. Consequently, the expected cross term vanishes after applying the linear centering operator Ct, giving the bias–variance decomposition 
+
+E∥brat − r⋆t ∥2 
+
+> t,c
+
+= Va + ∥Ebrat − r⋆t ∥2
+
+> t,c
+
+.
+
+The assumed unbiasedness of the fresh estimator therefore gives 
+
+MSE( brfresh  
+
+> t
+
+, r ⋆t ) = Vfresh ,
+
+13 Figure 3 Performance gains across paired training seeds. Each point shows the equal-set-weighted improvement of persistent-negative training over GAD for one paired seed, measured in percentage points. Large markers denote the mean across three seeds, and error bars show one standard deviation. Positive values favor persistent-negative training. 
+
+whereas the pooled estimator satisfies 
+
+MSE( brpool  
+
+> t
+
+, r ⋆t ) = Vpool + B2pool .
+
+Using Vpool ≤ Vfresh − ∆t, we obtain 
+
+MSE( brfresh  
+
+> t
+
+, r ⋆t ) − MSE( brpool  
+
+> t
+
+, r ⋆t ) ≥ ∆t − B2pool .
+
+Finally, B2pool < ∆t makes the right-hand side strictly positive. Hence the pooled estimator has lower reward MSE under the stated bias–variance condition. 
+
+# C Seed-Level Robustness 
+
+We evaluate GAD and persistent-negative training using three paired random seeds for each student family. Within each pair, both methods start from the same seed-specific warmup checkpoint and use matched training configurations, differing only in the discriminator negative distribution. Figure 3 reports the persistent-negative-minus-GAD difference for each seed. Each effect is averaged equally across the four judged-chat datasets. The individual points expose training-run variability; the mean and standard deviation summarize the three paired effects. Because only three seeds are available, the standard deviation is descriptive and should not be interpreted as a precise uncertainty interval. 
+
+# D Additional Discriminator Diagnostics 
+
+D.1 Fresh-policy discriminator accuracy 
+
+We evaluate the discriminator immediately before each update using fresh current-policy comparisons. The prompt–teacher slice is fixed across methods, but each student generates its own negative responses. Consequently, this diagnostic measures the behavior of the coupled student–discriminator system rather than holding the student distribution fixed. Table 4 reports results from the initial primary run across 748 adversarial updates. Persistent-negative training has slightly higher mean accuracy, lower temporal variability, a higher minimum, and fewer below-chance evaluations than GAD. Because consecutive measurements come from the same training trajectory, these statistics are descriptive rather than independent observations. These measurements are consistent with a smoother discriminator trajectory under persistent-negative training. They do not, however, isolate changes in the discriminator from changes in the evolving student policy. 14 Table 4 Fresh-policy discriminator accuracy in the initial primary run. Standard deviation is computed across adversarial updates, and “dips” counts pre-update evaluations below chance. Method Mean Std. Minimum Dips < 0.5        
+
+> GAD 0.894 0.087 0.414 6Persistent-negative (ours) 0.903 0.068 0.461 1
+
+D.2 Common-probe reward geometry 
+
+Fresh-policy accuracy does not reveal whether two discriminators assign different rewards to identical responses. We therefore construct a common probe by sampling eight responses for each of 128 held-out prompts from the shared warmup policy. The resulting response groups are fixed and scored by the final GAD and persistent-negative discriminators. Across groups, the discriminators have a mean within-group Spearman rank correlation of 0.803 and a mean correlation of 0.846 between their standardized reward profiles. Thus, the learned reward functions are substantially aligned, but they are not related solely by transformations removed by promptwise GRPO normalization. Differences in response ordering and relative score spacing therefore remain visible to the policy update. This diagnostic uses one final discriminator pair and should be interpreted as evidence that the pool changes the policy-facing reward geometry, not as evidence that this change mediates the final performance improvement. 15
