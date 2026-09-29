@@ -1,0 +1,395 @@
+Title: CapField-OPD: Learning Continuous Capability Fields via Joint-Anchored Multi-Teacher On-Policy Distillation for Flow Models
+
+URL Source: https://arxiv.org/pdf/2609.34658v1
+
+Published Time: Tue, 29 Sep 2026 03:51:40 GMT
+
+Number of Pages: 16
+
+Markdown Content:
+# CAP FIELD -OPD: L EARNING CONTINUOUS CAPABIL -
+
+# ITY FIELDS VIA JOINT -A NCHORED MULTI -T EACHER 
+
+# ON-P OLICY DISTILLATION FOR FLOW MODELS 
+
+Pengyang Ling 1,* , Yujie Zhou 2,* , Jiazi Bu 2,* , Yibin Wang 3, Xiaoxiao Ma 1,Yi Jin 1, Huaian Chen 1,† , Yuhang Zang 4,† 
+
+> 1
+
+University of Science and Technology of China 2Shanghai Jiao Tong University 
+
+> 3
+
+Fudan University 4Shanghai Artificial Intelligence Laboratory 
+
+* Equal contribution. † Corresponding authors. 
+
+## ABSTRACT 
+
+Reward-specialized post-training produces strong experts for flow-based genera-tive models, while multi-teacher on-policy distillation (OPD) consolidates their capabilities into a single student. Existing methods, however, route each prompt to a single teacher according to its semantic category, implicitly binding the de-sired capability to prompt content. This coupling makes capability invocation vulnerable to prompt perturbations and prevents users from explicitly adjusting the strength of the desired capability at inference time. In this work, we introduce CapField-OPD, an OPD framework that integrates multiple teachers into a con-tinuous capability field through explicit capability coordinates. We use teacher models as anchors to construct this field, with the coordinates determining how their outputs are combined. Each capability configuration thus receives a unique supervision target, and capability control no longer depends on prompt semantics. Since the training anchors may not be optimal at inference time, we further pro-file the learned field on a small calibration set. The coordinate with the highest mean reward serves as the recommended default, while coordinates that are fre-quently optimal offer a promising candidate set for test-time scaling. Extensive experiments on compositional generation, text rendering, and visual aesthetics demonstrate that CapField-OPD consolidates multiple specialized teachers into a single student while preserving or surpassing their performance, reliably invokes the desired capabilities under semantics-preserving prompt variations, and sup-ports continuous capability control and coordinate-based test-time scaling. 
+
+## 1 INTRODUCTION 
+
+Flow-matching models (Esser et al., 2024; Lipman et al., 2022; Liu et al., 2022) have recently become a popular framework for image generation (Labs, 2024; Team, 2025; Wu et al., 2025), in which a learned velocity field can transport Gaussian noise to data samples via iterative denoising. Reward-based post-training (Liu et al., 2025a; Xue et al., 2025b; Zhou et al., 2026b) further improves specific generation capabilities, such as text-rendering accuracy, compositional fidelity, and visual aesthetics, producing strong and diverse domain experts. However, training and deploying a separate model for each capability is costly. Multi-teacher on-policy distillation (OPD) (Fang et al., 2026) addresses this problem by consolidating reward-specialized teachers into a single student, which is supervised by teachers’ outputs evaluated along student-generated trajectories. Nevertheless, existing flow-based multi-teacher OPD methods (Fang et al., 2026; Li et al., 2026c; Zhou et al., 2026a) typically split training prompts by task type and assign each subset to one teacher via semantics-driven hard routing. Without an explicit capability signal, the student must infer the desired capability category from prompt semantics, binding capability intent to prompt content. Capability activation thus becomes sensitive to prompt wording and style, especially on out-of-distribution prompts, and users cannot explicitly control capabilities at inference time. As shown in Fig. 1(b), for the same prompt describing a handwritten sign reading “JAZZ LEGENDS ON VINYL HERE,” one user may prioritize accurate text rendering, another may prefer visual aesthetics, while a third may require both with different strengths. A semantic router cannot distinguish these intentions 1arXiv:2609.34658v1 [cs.CV] 28 Sep 2026 Three vibrant flowers in red, yellow, and purple bloom in a peaceful forest. Vinyl record store wall with handwritten sign "JAZZ LEGENDS ON VINYL HERE".   
+
+> (b) Continuous capability control: GenEval→Aesthetic (top) OCR→Aesthetic (bottom) (a) Coordinate-based capability field (c) Stability to prompt rewriting (d) Test-time scaling
+
+Figure 1: Overview of CapField-OPD. (a) Teacher anchors define a continuous capability field con-trolled by explicit, potentially extrapolative coordinates. (b-d) The learned field supports continuous control, robust capability invocation under prompt rewriting, and coordinate-based test-time scaling. from the prompt alone. When a prompt requires multiple capabilities, naively activating multiple teachers yields conflicting velocity targets under the same student condition. These limitations point to a key issue: capability intent requires explicit representation and control. To this end, we propose CapField-OPD, built on the principle that desired capabilities should be explicitly specified rather than implicitly inferred. Specifically, we condition the student on an ex-plicit capability coordinate whose axes control capability strengths, and reinterpret the base, single-capability, and joint-capability teachers as anchors of a shared capability field. A joint-anchored target field combines their outputs through coordinate-dependent activation weights. For coordi-nates activating multiple capabilities, the corresponding joint-capability teacher supplies the shared capability components, and remaining activation is allocated to the single-capability teachers, so the field exactly preserves each anchor’s capability while providing a continuous velocity target over the capability space. The student can thus invoke desired capabilities even on boundary or out-of-distribution prompts where semantic routing may fail (Fig. 1(c)). Coordinate conditioning also adds an inference-time scaling axis. Although supervision spans a bounded range, varying the coordi-nates teaches the student how its velocity field changes as capabilities strengthen or combine. The teacher anchors therefore define reference states rather than hard performance limits. As shown in Fig. 1(a), extending coordinates beyond the training range continues the learned capability response, and this bounded extrapolation can yield higher rewards than the teacher anchors. To identify reli-able extrapolative settings, we profile in-range and extrapolative coordinates on a small calibration set of prompt–noise pairs. The coordinate with the highest mean reward serves as the default, and frequently optimal coordinates provide candidates for prompt-specific search, enabling coordinate-based test-time scaling (Fig. 1(d)). Our contributions are as follows: (1) We identify semantic-capability entanglement of hard routing as a central limitation of multi-teacher OPD. (2) We propose CapField-OPD, which learns a contin-uous capability field through explicit capability conditioning and joint-anchored field supervision, with capability landscape profiling for default-coordinate selection and test-time search. (3) Experi-ments show CapField-OPD consolidates reward-specialized experts, enhances robustness to prompt perturbations, and supports continuous capability control and coordinate-based test-time scaling. 
+
+## 2 RELATED WORK 
+
+2.1 PREFERENCE ALIGNMENT IN FLOW MODELS 
+
+Aligning pretrained flow models with human preferences (Liu et al., 2025b; Xue et al., 2025b; Bu et al., 2026) has emerged as an effective post-training strategy for adapting them to downstream 2objectives. Existing approaches can be broadly divided into offline preference learning and online reward optimization. Offline DPO-style methods (Wallace et al., 2024; Yang et al., 2024) trans-late preferred—dispreferred comparisons into flow-matching objectives (Liu et al., 2025b), thereby avoiding explicit reward-model training and online rollouts. Online methods (Liu et al., 2025a; Ling et al., 2026; Li et al., 2026b), in contrast, formulate the sampling trajectory as a Markov de-cision process (MDP) and interleave trajectory sampling and reward scoring with policy updates. Specifically, the PPO-style methods (DPOK (Fan et al., 2023), DDPO (Black et al., 2023)) apply policy gradients along denoising trajectories, whereas GRPO-style approaches (Liu et al., 2025a; Li et al., 2025; Wang & Yu, 2025) convert an ordinary differential equation (ODE) sampling into an equivalent stochastic differential equation (SDE) and optimize the sampling distribution using esti-mated relative advantages. Both of them rely on tractable stochastic transition densities and perform on-policy optimization along the sampled trajectories. In comparison, DiffusionNFT (Zheng et al., 2026) and Advantage Weighted Matching (AWM) (Xue et al., 2025a) develop a different approach. They collect and score generated images, and then re-noise them for reward-derived weighted op-timization, achieving substantially faster convergence. Collectively, these techniques improve the performance of preference alignment toward specific reward functions. 2.2 ON-POLICY DISTILLATION IN FLOW MODELS 
+
+Unlike conventional distillation methods (Yin et al., 2024a;b; Cheng et al., 2025; Chen et al., 2025) that primarily aim to reduce sampling steps, on-policy distillation (OPD) (Fang et al., 2026; Li et al., 2026c; Zhou et al., 2026a) has recently emerged as an effective approach for consolidating the capabilities of multiple teachers into a single student model. Instead of relying on fixed data or teacher-generated results, OPD samples trajectories from the current student and queries teachers at student-visited states, reducing exposure bias while providing dense velocity-field supervision. Specifically, Flow-OPD (Fang et al., 2026) and DiffusionOPD (Li et al., 2026c) independently train reward-specialized teachers and consolidate their capabilities into a unified student through task routing and trajectory-level matching. Subsequent works extend OPD in several directions. For ex-ample, DreOPD (Lin et al., 2026) moves beyond direct teacher imitation through degraded-reference velocity extrapolation, while Any-OPD (Fu et al., 2026) enables distillation between heterogeneous teacher–student pairs through representation-space alignment. In addition, CFG-OPD (Li et al., 2026a) separately constrains the positive prediction and the CFG direction, reducing sensitivity to guidance scales. Although these methods improve OPD for flow models, existing multi-teacher OPD methods still rely on semantics-driven hard routing, assigning each trajectory to one expert. This entangles prompt content with capability intent, limiting capability composition and strength control and causing conflicting supervision for multi-capability or boundary prompts. 
+
+## 3 METHOD 
+
+3.1 PRELIMINARIES 
+
+Flow Matching Models. Flow matching (Lipman et al., 2022; Liu et al., 2022) learns a time-dependent velocity field that transports Gaussian noise to clean data. Given a paired sample (x, c ) ∼
+
+pdata , Gaussian noise ϵ ∼ N (0, I), and a timestep t ∼ U [0 , 1] , the interpolated noisy state is 
+
+xt = (1 − t)x + tϵ, where x0 = x is the clean sample and x1 = ϵ is pure noise. Differentiating the path with respect to t gives the target velocity 
+
+vt = dxt
+
+dt = ϵ − x. (1) The flow model vθ (xt, t, c ) is then trained with the flow matching loss 
+
+LFM (θ) = E(x,c ),ϵ,t 
+
+h
+
+∥vθ (xt, t, c ) − vt∥22
+
+i
+
+, (2) where c is an optional condition such as text or image. 
+
+On-Policy Distillation. On-policy distillation (OPD) (Li et al., 2026c) aims to transfer the capa-bilities of frozen teachers to a student by imitating the teacher’s behavior on student-visited states, thereby offering supervision that adapts to the student’s evolving distribution. Let vϕ and vθ denote 3the teacher and student velocity fields, respectively, and let τ = {xti }Mi=0 be the trajectory sampled by the student model; the OPD objective is defined as: 
+
+LOPD (θ) = Ec,τ ∼pθ (τ |c)
+
+"M −1X
+
+> i=0
+
+w(ti) ∥vθ (xti , t i, c ) − vϕ(xti , t i, c )∥22
+
+#
+
+, (3) where w(ti) is a timestep-dependent weight. When the student and teacher models share the same per-step covariance, this velocity-matching loss is equivalent to minimizing the per-step KL diver-gence between the two models (omit the time-dependent coefficient): 
+
+DKL (πθ (· | xti ) ∥ πϕ(· | xti )) ∝ ∥ vθ − vϕ∥22 . (4) 3.2 OBSERVATION 
+
+Suppose that K reward-specialized teachers encode capabilities such as compositional fidelity, text rendering, and visual aesthetics. To mitigate cross-teacher supervision conflicts, existing multi-teacher OPD methods partition the training prompts into non-overlapping subsets {D k}Kk=1 and assign each subset to one teacher: 
+
+v⋆ = vϕk , k = ρ(c) for c ∈ D k, (5) where ρ is the fixed task-based routing rule and vϕk denotes the k-th teacher. The selected index k
+
+determines the supervision target but is not provided to the student, forcing it to infer the intended capability solely from c and thereby entangling prompt semantics with capability activation. Composition generation DiffusionOPD DanceOPD    
+
+> Raw prompt
+> a photo of three oranges
+> Rewritten prompt
+> Exactly three oranges appear together in a realistic, uncluttered image.
+> Text rendering
+> Raw prompt
+> ..., an ancient book with a spine titled " How to Disappear Completely "rests on a dusty shelf, ...
+> Rewritten prompt
+> A photo of an ancient book with a spine titled "How to Disappear Completely "
+
+Figure 2: Visualization under prompt rewriting. This design leads to two limitations. First, ca-pability activation is sensitive to linguistic vari-ation: when the wording or style of a prompt deviates from the routed training subsets, the prompt may activate a different expert behav-ior even if its visual intent is nearly identical (Fig. 1(c) and Fig. 2). This resembles the lin-guistic hacking observed in reward-based post-training Wang et al. (2026), but is more pro-nounced here because a perturbation can switch which capability is activated rather than only changing its strength. Second, semantic rout-ing fixes both capability selection and activa-tion strength in the prompt, so users cannot ad-just the strength of a single capability or invoke multiple capabilities together for the same prompt. These limitations arise from entangling semantic content with capability intent and motivate an ex-plicit capability-conditioning mechanism that decouples what to generate from which capabilities to activate and at what strength , so that capability control no longer depends on prompt wording and users can combine and adjust capabilities at inference time. 3.3 JOINT -A NCHORED EXPLICIT CAPABILITY FIELD 
+
+We parameterize capability intent by λ ∈ [0 , 1] K , where λi continuously controls capability i, and multiple nonzero entries indicate a request for capability combination. The student vθ (xt, t, c, λ)
+
+receives the coordinate through a small projection added to its global conditioning, i.e., 
+
+h(t, c, λ) = h(t, c ) + W2 SiLU( W1λ). (6) The projection is bias-free, and W2 is initialized to zero. This separates capability control from the text prompt without changing the text encoder or transformer blocks. Let v0 denote the frozen base model without post-training, vi the expert specialized for capability i,and vij the joint teacher obtained by jointly optimizing the objectives for capabilities i and j during post-training. Consider a capability coordinate λ that is nonzero only on a supported pair (i, j ). The corresponding target velocity is defined by the piecewise-linear capability field 
+
+v∗(λ) = (1 − λi − λj + λmin )v0 + ( λi − λmin )vi + ( λj − λmin )vj + λmin vij , (7) 4where λmin = min( λi, λ j ) and, all velocities at the same student-visited state (xt, t, c ), omitted for clarity. The overlap λmin of the two requests goes to the joint teacher, and each single expert covers only the excess of its own coordinate. Specifically, the corner (λi, λ j ) = (0 , 0) recovers the base model, (1 , 0) and (0 , 1) recover the two individual experts, and (1 , 1) recovers the joint teacher (Fig. 1(a)). Anchored at these four corners, the field is continuous and leaves each teacher exactly reachable from any direction, so composing capabilities does not degrade individual performance. More broadly, Eq. 7 is not tied to a specific pair but provides a general rule for composing any two interacting capabilities, which effectively alleviates conflicts between capabilities. The joint teacher 
+
+vij contributes to the target only when both coordinates are nonzero, since its coefficient λmin van-ishes otherwise. At an axis-aligned coordinate such as (λi, 0) , the target reduces to interpolation between the base model and a single expert, v∗ = (1 − λi)v0 + λivi, and single-capability supervi-sion never involves a joint teacher. The sampling region of each pair is therefore chosen according to its available anchors. For a pair with a joint teacher, coordinates are sampled over the full unit square, so that combined activations are also supervised. For a pair without a joint teacher, only axis-aligned coordinates are sampled, and the joint term is never used. The training objective adopts the standard OPD loss, with both the student and target velocity con-ditioned on the capability coordinates, i.e., 
+
+LOPD (θ) = E
+
+h
+
+∥vθ (xt, t, c, λ) − v∗(xt, t, c, λ)∥22
+
+i
+
+. (8) As the target velocity varies with λ, each requested capability configuration is matched with its unique target, thus the same prompt can be supervised by different teachers or their combinations under different capability coordinates, without introducing inconsistent targets for the same input. 3.4 CAPABILITY LANDSCAPE PROFILING 
+
+The value λi = 1 marks the training anchor of capability i, but does not necessarily yield the strongest student response. We therefore profile the reward landscape of the learned capability field to identify the coordinate with the highest mean reward and measure how often each coordinate is optimal across prompt–noise pairs. Given a capability set S, we fix all coordinates outside S to zero and construct a probe grid ΛS 
+
+> probe
+
+= Λ S 
+
+> in
+
+∪ ΛS
+
+> ext
+
+, covering the training range and a bounded extrap-olation region. Every coordinate is evaluated on the same calibration bank BS 
+
+> cal
+
+= {(cm, z m)}Mm=1 ,where cm is a training prompt and zm is its fixed initial noise. The resulting reward records are 
+
+rm(λ) = qS (Gθ (zm, c m, λ)) , m = 1 , . . . , M, λ ∈ ΛS
+
+> probe
+
+, (9) where qS is the corresponding reward function for capability set S (can be a weighted objective under multiple capabilities), and Gθ (·) is the image generator. Reusing the same prompt–noise pairs ensures that only the capability coordinates vary across evaluations. From these records, we compute the mean reward and the empirical frequency of optimality at each coordinate: 
+
+¯rS (λ) = 1
+
+M
+
+> M
+
+X
+
+> m=1
+
+rm(λ), bPS (λ) = 1
+
+M
+
+> M
+
+X
+
+> m=1
+
+1{λ ∈ Λ⋆m}|Λ⋆m| , (10) where ¯rS (λ) is the average reward of coordinate λ over the M pairs, bPS (λ) is the fraction of pairs for which λ is optimal, with ties split evenly among the optimal coordinates, and Λ⋆m =arg max λ∈ΛS 
+
+> probe
+
+rm(λ) is the set of optimal coordinates for the prompt-noise pair (cm, z m). These two statistics measure different things: a coordinate that is best on many pairs can still score poorly on the rest ( bPS can be high while ¯rS stays moderate), and a coordinate can also score well on every pair without ever being the best (the highest ¯rS can correspond to low bPS ). We therefore define: 
+
+bλS 
+
+> peak
+
+= arg max 
+
+> λ∈ΛS
+> probe
+
+¯rS (λ), ΛS 
+
+> search
+
+=
+
+n
+
+λ ∈ ΛS 
+
+> probe
+
+: bPS (λ) > 0
+
+o
+
+, (11) where bλS 
+
+> peak
+
+is the recommended coordinate, and ΛS 
+
+> search
+
+collects every coordinate that is optimal for at least one prompt-noise pair, offering the candidate set for test-time search. Since bPS sums to one and is nonzero exactly on ΛS
+
+> search
+
+, it can be used directly as the sampling distribution for test-time scaling. The performance gain of coordinate extrapolation can thus be quantified as follows: 
+
+∆S 
+
+> ext
+
+= max 
+
+> λ∈ΛS
+> ext
+
+¯rS (λ) − max 
+
+> λ∈ΛS
+> in
+
+¯rS (λ). (12) 53.5 TEST -T IME SCALING OVER CAPABILITY COORDINATES 
+
+Although the default coordinate bλS 
+
+> peak
+
+achieves the highest mean reward during profiling, the op-timal coordinate can vary across prompt–noise pairs. We therefore perform test-time search over capability coordinates to improve generation quality for a given initial noise. Specifically, we draw 
+
+N coordinates from ΛS 
+
+> search
+
+without replacement, with probability proportional to bPS . Each coordi-nate produces a candidate record (xn, r n, λn):
+
+CN = {(xn, r n, λn)}Nn=1 , xn = Gθ (z, c, λn), rn = qS (xn), (13) where the same initial noise z is used for all candidates, so that only the capability coordinates vary. We then select the record with the highest reward: 
+
+(x∗, r ∗, λ∗) ∈ arg max 
+
+> (x,r, λ)∈C N
+
+r. (14) Such a search explores different capability configurations for the same initial noise, allowing higher-reward outputs to be obtained without resampling random seeds. 
+
+## 4 EXPERIMENTS 
+
+Tasks and datasets. Following prior work (Fang et al., 2026), we investigate three capabilities: compositional generation, text rendering, and visual aesthetics. For compositional generation and text rendering, we use the training and test splits released by Flow-GRPO (Liu et al., 2025a) for GenEval (Ghosh et al., 2023) and OCR, respectively; for visual aesthetics, prompts are drawn from the HPD (Wu et al., 2023) dataset. Compositional generation and text rendering are evaluated with the GenEval and OCR rewards, while the aesthetic objective combines HPSv3 (Ma et al., 2025), CLIP (Radford et al., 2021), and PickScore (Kirstain et al., 2023) with equal weights 1:1:1 . For capability landscape profiling, the calibration bank is drawn from the training split with 200 prompts per capability set, so that coordinate selection never touches testing data. 
+
+Teacher construction. We train five teacher models using Flow-GRPO-Fast (Liu et al., 2025a). The three single-capability teachers are trained on the corresponding prompts and rewards above. We additionally train two joint-capability teachers, GenEval+aesthetics on GenEval prompts and OCR+aesthetics on OCR prompts, where every generated sample is evaluated by the task reward together with HPSv3, CLIP, and PickScore at a coefficient ratio of 3:1:1:1 . We do not build a GenEval+OCR teacher because the two prompt sets have incompatible formats: GenEval prompts are template-based scene descriptions, whereas OCR prompts must contain a quoted string to render, so no natural prompt requires both capabilities. Aesthetics imposes no constraint on prompt format and thus pairs with either task; the joint teachers directly learn the combination of task correctness and visual quality, providing anchors for coordinates where both capabilities are activated. 
+
+Baselines. We use FLUX.1-dev (Labs, 2024) as the backbone for all teacher and student models and apply LoRA with r = 64 and α = 128 . Rollout and distillation use 10 sampling steps; evalua-tion uses 28 steps, and all images are generated at a resolution of 512 × 512 . We compare CapField-OPD with the three single-capability teachers, a multi-task teacher trained through multi-objective reinforcement learning (Xue et al., 2025b), DiffusionOPD (Li et al., 2026c), and DanceOPD (Zhou et al., 2026a); all OPD methods use the same teacher models for a fair comparison. More imple-mentation details can be found in the Appendix. 4.1 MAIN RESULTS 
+
+Tab. 1 presents the main quantitative comparison. The single-capability teachers perform strongly on their target tasks, while the joint teachers provide better balance between correctness and visual quality. Multi-task GRPO and existing OPD methods consolidate these capabilities into one model with a single operating point, and adding joint teachers (Single+Joint) lifts several aesthetic metrics but consistently lowers the GenEval and OCR scores. Without teacher identity as input, this su-pervision shifts the learned compromise rather than creating separately accessible capability modes. In comparison, the two CapField-OPD rows come from the same student model and differ only in capability coordinates. Single-capability coordinates achieve the best GenEval and OCR scores 6Table 1: Quantitative comparison. Single-only and Single+Joint distill from the three single-capability teachers without and with the two joint-capability teachers, respectively. The two CapField-OPD modes share one student model and differ only in their inference coordinates. Bold and underlined values denote the best and second-best results among unified models. Since aesthetic prompts contain no composition target or text-rendering target, the joint mode does not apply, and the corresponding entries are marked “–”. Method Composition-task prompts Text-rendering prompts Aesthetic prompts GenEval HPSv3 CLIP PickScore OCR HPSv3 CLIP PickScore HPSv3 CLIP PickScore FLUX.1-dev 0.6616 8.65 0.3966 23.40 0.5735 13.00 0.4466 22.91 13.28 0.3868 22.58 GenEval teacher 0.9417 9.16 0.4092 23.27 0.6170 13.43 0.4585 22.97 13.49 0.3946 22.47 OCR teacher 0.7166 8.90 0.4030 23.59 0.9417 12.74 0.4567 22.88 13.57 0.3834 22.64 Aesthetic teacher 0.3228 10.62 0.4117 24.04 0.4824 15.14 0.4688 23.95 15.23 0.4181 23.68 GenEval+Aesthetic teacher 0.9253 11.75 0.4210 24.11 0.6235 14.74 0.4525 23.32 14.65 0.3968 22.71 OCR+Aesthetic teacher 0.6041 9.46 0.4019 23.59 0.9031 14.40 0.4631 23.53 14.50 0.3945 23.06 Multi-task GRPO 0.8608 9.43 0.4196 23.89 0.9369 13.20 0.4638 23.19 14.32 0.4024 23.15 DiffusionOPD (Single-only) 0.9514 8.37 0.4167 23.02 0.9409 12.76 0.4574 22.90 15.25 0.4174 23.72                                                                
+
+> DiffusionOPD (Single+Joint) 0.9434 10.96 0.4188 23.58 0.9229 13.86 0.4632 23.36 15.25 0.4180 23.70 DanceOPD (Single-only) 0.9239 7.72 0.4092 22.97 0.9289 12.87 0.4579 22.95 15.19 0.4156 23.64 DanceOPD (Single+Joint) 0.9236 11.19 0.4123 23.73 0.8875 14.09 0.4604 23.44 15.27 0.4162 23.70
+> CapField-OPD (Single mode) 0.9531 8.50 0.4170 23.02 0.9592 11.96 0.4439 22.51 15.32 0.4182 23.71
+> CapField-OPD (Joint mode) 0.9322 11.76 0.4201 23.94 0.9256 14.08 0.4538 23.32 –––A photo of a
+> blue cup left of ayellow
+> bowl. A train station board reads "NORTHBO UND TRAIN DEPARTS SOON ". A photo of a
+> purple cube
+> behind a
+> green
+> sphere. A wooden cabin sign reads "WELCOM E TO PINE LAKE ".
+
+Figure 3: Visual demonstration of different methods, from left to right: FLUX.1-dev, Multi-task GRPO, DiffusionOPD(Single-only), DiffusionOPD(Single+Joint), DanceOPD(Single-only), DanceOPD(Single+Joint), CapField-OPD(Single mode), and CapField-OPD(Joint mode). overall and slightly exceed the aesthetic teacher on all three aesthetic metrics, and some of these coordinates lie beyond the training anchors, so the anchors do not limit the learned field. Joint-capability coordinates give better-balanced operating points while retaining strong task accuracy. CapField-OPD thus supports capability extrapolation and direct switching between specialized and joint behaviors in one model, without retraining. Fig. 3 shows the same trend qualitatively: in single mode, CapField-OPD matches the strongest baseline on text rendering, and joint mode improves visual quality while keeping the text correct. 4.2 ROBUSTNESS TO PROMPT REWRITING 
+
+We rewrite the benchmark prompts with GPT-5.6 (OpenAI, 2026) while preserving their task con-tent and evaluate all methods without retraining. As shown in Tab. 2, CapField-OPD achieves the best result on all three metrics, while the compared OPD methods degrade significantly, especially in the GenEval and OCR tasks. This is because these methods infer the capability from prompt semantics, so the rewriting operator perturbs the inferred capability. CapField-OPD instead invokes it through an explicit coordinate that does not change with the wording, decoupling control from prompt phrasing: the learned capabilities transfer to new prompt types and styles. 7Table 2: Robustness evaluation under semantics-preserving prompt rewriting. 
+
+Metric FLUX.1-dev Multi-task GRPO DiffusionOPD DanceOPD CapField-OPD Single mode Single Single+Joint Single Single+Joint GenEval ↑ 0.6550 0.8461 0.6241 0.6132 0.6838 0.5560 0.9267 
+
+OCR ↑ 0.6115 0.9242 0.8662 0.8718 0.8879 0.8097 0.9677 
+
+HPSv3 ↑ 13.46 14.45 15.13 15.15 15.08 15.17 15.28 (1.1, 0.0, 0.0) (1.1, 0.0, 0.8) (0.8, 0.0, 1.1) (0.0, 0.0, 1.1)   
+
+> GenEval Aesthetic
+> (0.0, 0.7, 1.1) (0.0, 0.0, 1.1)
+> A photo of two dogs right of a pink toy car, on a sandy beach with gentle waves. A photo of three white birds soaring above a blue tree. A worn pizza box stamped "A beautiful holiday for all" rests on a gritty sidewalk ... A tag reading "Wishing you a Merry Christmas" hangs on a bench in the morning light.
+> Aesthetic
+> (0.0, 1.2, 0.9) (0.0, 1.5, 0.0)
+> OCR
+
+Figure 4: Illustration of continuous capability control at inference time. 4.3 CONTINUOUS CAPABILITY CONTROL 
+
+As shown in Fig. 4, sweeping the capability coordinates with the prompt and initial noise fixed produces smooth transitions between task-oriented and aesthetic behaviors. Moving from GenEval toward aesthetics gradually enriches scene details, whereas moving from OCR toward aesthetics changes lighting and visual style while text fidelity is strongest near the OCR endpoint. The main subjects and overall content remain recognizable throughout each sweep, showing that the coordi-nates adjust the relative capability emphasis without abrupt behavior changes. 4.4 TEST -T IME SCALING OVER CAPABILITY COORDINATES 
+
+We compare coordinate-based scaling with conventional seed-based scaling under the same genera-tion budget N ∈ { 3, 6, 9}. Seed-based scaling fixes the capability configuration and resamples the initial noise, while coordinate-based scaling fixes the noise and searches over capability coordinates. As shown in Fig. 5, coordinate-based scaling improves the reward steadily as the budget grows and matches seed-based scaling across the three reward objectives, with a difference of about 0.5% .Moreover, seed-based scaling gains reward by resampling the noise, so a higher-reward candidate often comes with a different scene layout or visual appearance. In comparison, coordinate-based scaling keeps the noise fixed and adjusts only capability strengths, so task errors such as incorrect text or wrong object counts are corrected while the original scene is largely preserved. Coordi-nate search is therefore preferable when the initial generation is largely satisfactory and only minor capability defects remain to be fixed. 4.5 ABLATION STUDIES 
+
+Effect of explicit capability coordinates. Tab. 1 illustrates the limitation of consolidating teacher behaviors into a single operating point. For DiffusionOPD and DanceOPD, adding joint teachers improves aesthetic metrics but reduces task accuracy, because the student receives no capability signal and one prompt can correspond to several plausible targets. CapField-OPD resolves this ambiguity by making capability intent explicit through coordinates, enabling a single student to support both specialized and joint behaviors. 
+
+Effect of joint teachers. Tab. 3 isolates the contribution of joint anchors under the same condi-tioning architecture. Adding joint teachers increases GenEval from 0.7723 to 0.9322 and OCR from 
+
+0.8716 to 0.9256 under joint activation, while improving all three aesthetic metrics for both capabil-ity pairs. Thus, single-capability anchors alone do not fully determine the behavior required at joint coordinates; joint teachers directly anchor these combined operating points. 8Figure 5: Demonstration of coordinate-based and seed-based test-time scaling. Table 3: Effect of joint-teacher anchors at jointly activated tasks.                                  
+
+> Training anchors Composition + Aesthetics Text Rendering + Aesthetics GenEval ↑HPSv3 ↑CLIP ↑PickScore ↑OCR ↑HPSv3 ↑CLIP ↑PickScore ↑
+> Base + single 0.7723 9.38 0.4034 22.23 0.8716 13.50 0.4481 22.84 Base + single + joint 0.9322 11.76 0.4201 23.94 0.9256 14.08 0.4538 23.32
+
+Table 4: Effect of coordinate extrapolation. Each ˆλS 
+
+> peak
+
+(Eq. 11) reports the full selected coordinate over (GenEval, OCR, aesthetics), with S being the single capability of the corresponding metric.                                        
+
+> Coordinate selection Composition Text Rendering Aesthetics
+> ˆλS
+> peak GenEval ↑ˆλS
+> peak OCR ↑ˆλS
+> peak HPSv3 ↑CLIP ↑PickScore ↑
+> Teacher model /0.9417 /0.9417 /15.23 0.4181 23.68 In-range profiling (1.0, 0.0, 0.0) 0.9487 (0.0, 1.0, 0.0) 0.9390 (0.0, 0.0, 1.0) 15.25 0.4171 23.70 Expanded profiling (1.05, 0.0, 0.0) 0.9531 (0.0, 1.5, 0.0) 0.9592 (0.0, 0.0, 1.3) 15.32 0.4182 23.71
+
+Effect of coordinate extrapolation. As shown in Tab. 4, expanded profiling improves all metrics over in-range profiling, and the selected coordinates lie beyond the training range. This improvement arises from the continuity of the learned field: it maps coordinate changes to response changes, so the trend observed between anchors extends past them. The training anchors therefore define reference states rather than the best inference settings of the learned field. 4.6 LIMITATION 
+
+Although the training target is constructed by fusing multiple teacher outputs, these outputs do not participate in rollout and require no gradients, so the extra cost is limited. In practice, compared to DiffusionOPD under the same backbone, batch size, and sampling steps, the per-step training time increases only from 11 s to 12 s (about 9% ), which comes from the additional frozen-teacher forward passes used to build the joint-anchored target. Additionally, the proposed method builds the student by consolidating the capabilities of the teachers. If a teacher trained in the RL stage suffers from problems such as reward hacking, the student may inherit similar behaviors from its supervision. 
+
+## 5 CONCLUSION 
+
+In this work, we present CapField-OPD, an on-policy distillation framework that learns a continuous capability field over explicit capability coordinates, where reward-specialized teachers serve as an-chors. Existing multi-teacher OPD methods infer the desired capability from prompt content, which binds capability control to prompt wording and prevents users from adjusting it at inference time. By conditioning the student on these coordinates, CapField-OPD decouples capability control from prompt semantics. The student thus matches or exceeds every anchor on its target task, and the re-quested capability stays active under prompt rewriting. The coordinates can also extend beyond the training anchors, which serve as reference states rather than hard performance limits. More broadly, explicit capability coordinates offer a way to build generative models whose behaviors are specified by users rather than inferred from prompts. 9REFERENCES 
+
+Kevin Black, Michael Janner, Yilun Du, Ilya Kostrikov, and Sergey Levine. Training diffusion models with reinforcement learning. arXiv preprint arXiv:2305.13301 , 2023. Jiazi Bu, Pengyang Ling, Yujie Zhou, Yibin Wang, Yuhang Zang, Tianyi Wei, Xiaohang Zhan, Jiaqi Wang, Tong Wu, Xingang Pan, et al. From sparse to dense: Multi-view grpo for flow models via augmented condition space. In European Conference on Computer Vision , pp. 371–389. Springer, 2026. Junsong Chen, Shuchen Xue, Yuyang Zhao, Jincheng Yu, Sayak Paul, Junyu Chen, Han Cai, Song Han, and Enze Xie. Sana-sprint: One-step diffusion with continuous-time consistency distilla-tion. In 2025 IEEE/CVF International Conference on Computer Vision (ICCV) , pp. 16185–16195. IEEE, 2025. Zhenglin Cheng, Peng Sun, Jianguo Li, and Tao Lin. Twinflow: Realizing one-step generation on large models with self-adversarial flows. arXiv preprint arXiv:2512.05150 , 2025. Patrick Esser, Sumith Kulal, Andreas Blattmann, Rahim Entezari, Jonas M¨ uller, Harry Saini, Yam Levi, Dominik Lorenz, Axel Sauer, Frederic Boesel, et al. Scaling rectified flow transformers for high-resolution image synthesis. In Forty-first international conference on machine learning ,2024. Ying Fan, Olivia Watkins, Yuqing Du, Hao Liu, Moonkyung Ryu, Craig Boutilier, Pieter Abbeel, Mohammad Ghavamzadeh, Kangwook Lee, and Kimin Lee. Dpok: Reinforcement learning for fine-tuning text-to-image diffusion models. Advances in Neural Information Processing Systems ,36:79858–79885, 2023. Zhen Fang, Wenxuan Huang, Yu Zeng, Yiming Zhao, Shuang Chen, Kaituo Feng, Yunlong Lin, Lin Chen, Zehui Chen, Shaosheng Cao, et al. Flow-opd: On-policy distillation for flow matching models. arXiv preprint arXiv:2605.08063 , 2026. Siming Fu, Zheming Fu, Ruizhe He, Hualiang Wang, Jie Huang, Xiaoxiao Ma, Mingchen Zhong, Weihu Huang, Xiaoxuan He, and Haojun Xu. Any-opd: Heterogeneous on-policy distillation for flow-matching models via representation-space bridging. arXiv preprint arXiv:2608.03316 ,2026. Dhruba Ghosh, Hannaneh Hajishirzi, and Ludwig Schmidt. Geneval: An object-focused framework for evaluating text-to-image alignment. Advances in Neural Information Processing Systems , 36: 52132–52152, 2023. Yuval Kirstain, Adam Polyak, Uriel Singer, Shahbuland Matiana, Joe Penna, and Omer Levy. Pick-a-pic: An open dataset of user preferences for text-to-image generation. Advances in neural information processing systems , 36:36652–36663, 2023. Black Forest Labs. Flux. https://github.com/black-forest-labs/flux , 2024. Bingnan Li, Haozhe Wang, Haozhong Xiong, Fangtai Wu, Jinpeng Yu, Yang Shi, Jiaming Liu, and Ruihua Huang. Rethinking classifier-free guidance in on-policy diffusion distillation. arXiv preprint arXiv:2607.24731 , 2026a. Jiaming Li, Chenyu Zhu, Nanxi Yi, Youjun Bao, Li Sun, Quanying Lv, Xiang Fang, Daizong Liu, Jianjun Li, Kun He, et al. Tmpo: Trajectory matching policy optimization for diverse and efficient diffusion alignment. arXiv preprint arXiv:2605.10983 , 2026b. Junzhe Li, Yutao Cui, Tao Huang, Weijie Kong, Yiming Cheng, Chuxuan Zeng, Yinping Ma, Chun Fan, Miles Yang, Zhao Zhong, et al. Mixgrpo: Unlocking flow-based grpo efficiency with mixed ode-sde. arXiv preprint arXiv:2507.21802 , 2025. Quanhao Li, Junqiu Yu, Kaixun Jiang, Yujie Wei, Zhen Xing, Pandeng Li, Ruihang Chu, Shiwei Zhang, Yu Liu, and Zuxuan Wu. Diffusionopd: A unified perspective of on-policy distillation in diffusion models. arXiv preprint arXiv:2605.15055 , 2026c. 10 Mingfeng Lin, Chengfei Cai, Lin Xu, Yuxiang Wei, and Liang Han. Dreopd: Degraded-reference extrapolative on-policy distillation for flow-matching models. arXiv preprint arXiv:2608.09233 ,2026. Pengyang Ling, Jiazi Bu, Yujie Zhou, Yibin Wang, Zhenyu Hu, Zihan Zhang, Yi Jin, Huaian Chen, and Yuhang Zang. Pave-grpo: Beyond instantaneous guidance through principled average veloc-ity decomposition. arXiv preprint arXiv:2606.01636 , 2026. Yaron Lipman, Ricky TQ Chen, Heli Ben-Hamu, Maximilian Nickel, and Matt Le. Flow matching for generative modeling. arXiv preprint arXiv:2210.02747 , 2022. Jie Liu, Gongye Liu, Jiajun Liang, Yangguang Li, Jiaheng Liu, Xintao Wang, Pengfei Wan, Di Zhang, and Wanli Ouyang. Flow-grpo: Training flow matching models via online rl. arXiv preprint arXiv:2505.05470 , 2025a. Jie Liu, Gongye Liu, Jiajun Liang, Ziyang Yuan, Xiaokun Liu, Mingwu Zheng, Xiele Wu, Qiulin Wang, Wenyu Qin, Menghan Xia, et al. Improving video generation with human feedback. arXiv preprint arXiv:2501.13918 , 2025b. Xingchao Liu, Chengyue Gong, and Qiang Liu. Flow straight and fast: Learning to generate and transfer data with rectified flow. arXiv preprint arXiv:2209.03003 , 2022. Yuhang Ma, Xiaoshi Wu, Keqiang Sun, and Hongsheng Li. Hpsv3: Towards wide-spectrum human preference score. In 2025 IEEE/CVF International Conference on Computer Vision (ICCV) , pp. 15086–15095. IEEE, 2025. OpenAI. GPT-5.6 System Card, 2026. URL https://deploymentsafety.openai.com/ gpt-5-6/gpt-5-6.pdf .Alec Radford, Jong Wook Kim, Chris Hallacy, Aditya Ramesh, Gabriel Goh, Sandhini Agarwal, Girish Sastry, Amanda Askell, Pamela Mishkin, Jack Clark, et al. Learning transferable visual models from natural language supervision. In International conference on machine learning , pp. 8748–8763. PmLR, 2021. Z-Image Team. Z-image: An efficient image generation foundation model with single-stream diffu-sion transformer. arXiv preprint arXiv:2511.22699 , 2025. Bram Wallace, Meihua Dang, Rafael Rafailov, Linqi Zhou, Aaron Lou, Senthil Purushwalkam, Stefano Ermon, Caiming Xiong, Shafiq Joty, and Nikhil Naik. Diffusion model alignment using direct preference optimization. In Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition , pp. 8228–8238, 2024. Feng Wang and Zihao Yu. Coefficients-preserving sampling for reinforcement learning with flow matching. arXiv preprint arXiv:2509.05952 , 2025. Fu-Yun Wang, Han Zhang, Michael Gharbi, Hongsheng Li, and Taesung Park. Promptrl: Prompt matters in rl for flow-based image generation. arXiv preprint arXiv:2602.01382 , 2026. Chenfei Wu, Jiahao Li, Jingren Zhou, Junyang Lin, Kaiyuan Gao, Kun Yan, Sheng-ming Yin, Shuai Bai, Xiao Xu, Yilei Chen, et al. Qwen-image technical report. arXiv preprint arXiv:2508.02324 ,2025. Xiaoshi Wu, Yiming Hao, Keqiang Sun, Yixiong Chen, Feng Zhu, Rui Zhao, and Hongsheng Li. Human preference score v2: A solid benchmark for evaluating human preferences of text-to-image synthesis. arXiv preprint arXiv:2306.09341 , 2023. Shuchen Xue, Chongjian Ge, Shilong Zhang, Yichen Li, and Zhi-Ming Ma. Advantage weighted matching: Aligning rl with pretraining in diffusion models. arXiv preprint arXiv:2509.25050 ,2025a. Zeyue Xue, Jie Wu, Yu Gao, Fangyuan Kong, Lingting Zhu, Mengzhao Chen, Zhiheng Liu, Wei Liu, Qiushan Guo, Weilin Huang, et al. Dancegrpo: Unleashing grpo on visual generation. arXiv preprint arXiv:2505.07818 , 2025b. 11 Kai Yang, Jian Tao, Jiafei Lyu, Chunjiang Ge, Jiaxin Chen, Weihan Shen, Xiaolong Zhu, and Xiu Li. Using human feedback to fine-tune diffusion models without any reward model. In 2024 IEEE/CVF Conference on Computer Vision and Pattern Recognition (CVPR) , pp. 8941–8951. IEEE, 2024. Tianwei Yin, Micha¨ el Gharbi, Taesung Park, Richard Zhang, Eli Shechtman, Fredo Durand, and William T Freeman. Improved distribution matching distillation for fast image synthesis. In The Thirty-eighth Annual Conference on Neural Information Processing Systems , 2024a. Tianwei Yin, Micha¨ el Gharbi, Richard Zhang, Eli Shechtman, Fredo Durand, William T Freeman, and Taesung Park. One-step diffusion with distribution matching distillation. In 2024 IEEE/CVF Conference on Computer Vision and Pattern Recognition (CVPR) , pp. 6613–6623. IEEE, 2024b. Kaiwen Zheng, Huayu Chen, Haotian Ye, Haoxiang Wang, Qinsheng Zhang, Kai Jiang, Hang Su, Stefano Ermon, Jun Zhu, and Ming-Yu Liu. Diffusionnft: Online diffusion reinforcement with forward process. In International Conference on Learning Representations , volume 2026, pp. 134129–134150, 2026. Wei Zhou, Xiongwei Zhu, Zelin Xu, Bo Dong, Lixue Gong, Yongyuan Liang, Meng Chu, Leigang Qu, Lingdong Kong, Wei Liu, et al. Danceopd: On-policy generative field distillation. arXiv preprint arXiv:2606.27377 , 2026a. Yujie Zhou, Pengyang Ling, Jiazi Bu, Yibin Wang, Yuhang Zang, Jiaqi Wang, Li Niu, and Guangtao Zhai. Fine-grained grpo for precise preference alignment in flow models. In Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition (CVPR) , pp. 20045–20054, June 2026b. 12 A APPENDIX 
+
+This appendix provides the training pseudocode of CapField-OPD (Sec. A.1), the full hyperparam-eter configuration together with the capability curves during distillation (Sec. A.2), and additional visualizations of coordinate-based strength control (Sec. A.3). A.1 PSEUDOCODE 
+
+Algorithm 1 summarizes CapField-OPD training. The single-capability and joint teachers are ob-tained by reward-based post-training and then frozen, and they supervise the student only at student-visited states. Each prompt c is paired with a set Λ( c) of matching capability coordinates, and all coordinate sampling is tied to this set. Each rollout is conditioned on a coordinate λroll drawn from 
+
+Λ( c), and the capability coordinates can be different when computing OPD loss. A single rollout thus supervises many coordinates, so the rollout cost does not scale with the number of supervised coordinates. For pairs without a joint teacher, both the rollout and the supervised coordinates are restricted to axis-aligned ones (Sec. 3.3). 
+
+Algorithm 1 CapField-OPD Training 
+
+Input: Frozen base teacher v0, single and joint teachers {vi}, {vij }; prompt datasets {D k }, where each prompt c is paired with its matching capability coordinates Λ( c); noise schedule {tr }Sr=0 .
+
+Output: Student vθ (x, t, c, λ).Initialize vθ from v0 with a trainable LoRA; add the coordinate conditioner (Eq. 6) with W2 ← 0.
+
+for each training iteration do 
+
+Sample a balanced batch of prompts c ∼ D k ; for each prompt, draw a rollout coordinate λroll ∼ Λ( c).Roll out the student on each (c, λroll ) to obtain on-policy trajectories {xtr }Sr=0 . ▷ no gradient 
+
+for each intermediate state (xtr , t r , c ) do 
+
+Draw a capability coordinate λ ∼ Λ( c) for loss computation. Compute the teacher target v⋆ via Eq. 7 at (xtr , t r , c ). ▷ no gradient Accumulate the squared error ∥vθ (xtr , t r , c, λ) − v⋆∥22 into LOPD .
+
+end for 
+
+Update the LoRA and the coordinate conditioner based on the mean of LOPD .
+
+end for 
+
+A.2 HYPERPARAMETER CONFIGURATION AND CAPABILITY CURVES 
+
+Table 5 lists the hyperparameter settings used for CapField-OPD training. Fig. 6 reports the valida-tion reward of each capability over distillation steps, evaluated every 200 steps on validation prompts per capability set, in which all the capabilities improve steadily during training. Table 5: Hyperparameter settings used for CapField-OPD. 
+
+Parameter Value Parameter Value 
+
+Random seed 42 Learning rate 2×10 −4
+
+Optimizer AdamW Weight decay 1×10 −4
+
+AdamW β1, β 2 0.9, 0.999 AdamW ϵ 1×10 −8
+
+LR scheduler Constant Text length (CLIP / T5) 77 / 256 
+
+LoRA rank / α 64 / 128 Cond. dimensions 3 → 256 → 3072 
+
+Batch size 8 Number of GPUs 8
+
+Mixed precision bfloat16 Max. grad norm 1.0
+
+Denoising steps 10 Train time indices 0, . . . , 9
+
+Resolution 512 ×512 Guidance scale 4.5
+
+Loss target Velocity Timestep aggregation Mean EMA decay 0.9 EMA update interval 8 steps Calibration size M 200 Probe grid spacing 0.05 
+
+Extrapolation bound 1.5 Search budget N {3, 6, 9}
+
+13 0 200 400 600 800 1k 0.65 0.75 0.85 0.95                     
+
+> GenEval
+> 0200 400 600 800 1k 0.60 0.70 0.80 0.90
+> OCR
+> 0200 400 600 800 1k 13.5 14.0 14.5 15.0
+> HPSv3
+> 0200 400 600 800 1k 0.40 0.41 0.42 0.43
+> CLIP
+> 0200 400 600 800 1k 22.5 23.0 23.5 24.0
+> PickScore
+> Training step Validation score
+
+Figure 6: Capability curves during CapField-OPD training. A.3 ADDITIONAL VISUALIZATIONS OF CAPABILITY CONTROL 
+
+Fig. 7 and Fig. 8 represent more visual results of coordinate sweeping at inference time for the two supported pairs, (GenEval, aesthetics) and (OCR, aesthetics). Each row fixes the prompt and the initial noise and varies only the coordinates, so the differences within a row come from the capability field rather than the seed. For a given prompt-noise pair, sweeping the coordinate moves the output smoothly along the corresponding capability axis while the composition stays close to the shared starting point. The control behavior is therefore a property of the field itself, not of a particular capability pair or seed. 14 GenEval Aesthetic Figure 7: Additional coordinate sweeps at inference time from GenEval to aesthetics. 15 OCR Aesthetic Figure 8: Additional coordinate sweeps at inference time from OCR to aesthetics. 16

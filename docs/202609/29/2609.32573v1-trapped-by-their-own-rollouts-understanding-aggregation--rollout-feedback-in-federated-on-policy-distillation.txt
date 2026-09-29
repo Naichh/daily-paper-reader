@@ -1,0 +1,1477 @@
+Title: Trapped by Their Own Rollouts: Understanding Aggregation–Rollout Feedback in Federated On-Policy Distillation
+
+URL Source: https://arxiv.org/pdf/2609.32573v1
+
+Published Time: Tue, 29 Sep 2026 01:02:15 GMT
+
+Number of Pages: 30
+
+Markdown Content:
+Preprint. Under review. 
+
+# TRAPPED BY THEIR OWN ROLLOUTS :UNDERSTANDING AGGREGATION –R OLLOUT FEED -
+
+# BACK IN FEDERATED ON-P OLICY DISTILLATION 
+
+Jinqian Chen, Jihua Zhu ∗
+
+, Chang Liu 
+
+School of Software Engineering, Xi’an Jiaotong University 
+
+chenjinqian@stu.xjtu.edu.cn, zhujh@xjtu.edu.cn 
+
+# ABSTRACT 
+
+On-policy distillation (OPD) is a promising approach to language-model adapta-tion, aligning teacher supervision with the student’s own generated trajectories. When adaptation prompts are distributed across clients, can this process benefit from federated collaboration? We study federated OPD and find that substantial collaboration gains can be obscured by learning-rate sensitivity: FedAvg can per-form no better than independent local training at a small learning rate, yet recover a clear advantage at a larger rate. We explain this phenomenon through the student’s dual role as learner and generator of future training data. An aggregation-induced optimization lag can delay access to useful teacher supervision, which in turn slows subsequent learning. Our theory establishes this aggregation–rollout feedback in a solvable model with a common optimum and stable updates, and identifies two coupled roles of learning rate: learning from current supervision and reaching future supervision. Guided by this analysis, we propose FedTOPS (Federated Teacher-guided On-Policy Scaling), which reuses teacher feedback on current tra-jectories to adapt the FedAvg update magnitude under clientwise predictive-change constraints. Across six mathematical reasoning benchmarks, FedTOPS improves macro Avg@8 over FedAvg by 4.56–14.57 percentage points across the evaluated student models and local learning rates. 
+
+# 1 INTRODUCTION 
+
+On-policy distillation (OPD) offers an effective way to adapt language models using a stronger teacher (Agarwal et al., 2024; Gu et al., 2024). By learning from teacher feedback on its own generations, a student receives supervision on the states it actually visits. In downstream applications, however, the prompts needed for adaptation may be held by separate clients and cannot be pooled. Federated learning offers a natural way for these clients to collaborate by sharing model updates. This raises a basic question: can on-policy distillation benefit from federated collaboration? 
+
+At first glance, this appears to be a familiar federated optimization problem: combine local updates while accounting for heterogeneous client objectives (McMahan et al., 2017; Karimireddy et al., 2020). Yet OPD gives the student a second role. It is both the model being trained and the generator of future training data . In conventional fixed-data federated learning, aggregation changes the learner while the available examples remain fixed. In FedOPD, it also changes the trajectories on which the teacher will provide subsequent supervision. Even when each client’s prompt distribution stays fixed, the distribution of visited prefixes evolves with the student. Aggregation therefore couples progress across heterogeneous clients with changes in what those clients will learn from next. We present, to our knowledge, the first systematic study of FedOPD under a shared teacher. We uncover a counterintuitive pattern: federation can provide essentially no gain over independent local training at a small learning rate, yet become substantially beneficial at a larger one (Figure 1). Learning rate therefore governs more than the pace of optimization: it can determine whether OPD benefits from federated collaboration within a given training budget . This sensitivity raises a question specific to the student’s dual role: how does the progress made by aggregation affect the supervision available in subsequent rounds? 
+
+> ∗
+
+Corresponding author 
+
+1arXiv:2609.32573v1 [cs.LG] 26 Sep 2026 Preprint. Under review. Our central insight is that an aggregation-induced optimization lag can become a lag in access to future supervision . If the aggregated student progresses more slowly toward an ability needed to reach useful teaching states, those states occur less often in its next rollouts. The student then receives less of the supervision that would support further progress. This creates aggregation–rollout feedback :an optimization discrepancy affects the data generated next, which in turn affects subsequent learning. A shared, fixed teacher does not eliminate this feedback, because access to its supervision still depends on the student. 1 × 3 ×         
+
+> Local LR
+> 020 40 60 80
+> Accuracy (%)
+> (a) MATH500
+> 1 × 3 ×
+> Local LR
+> 0510
+> Gain (pp)
+> +10.51 +5.00
+> (b) Collaboration
+> Avg@8 Pass@8
+> Centralized FedAvg Local mean
+> Figure 1: Learning rate changes collaboration gains.
+> MATH500, student: Qwen3-0.6B, teacher: Qwen3-8B, matched total rollout budgets. Left: Avg@8 (solid) and Pass@8 (dashed). Right: FedAvg minus Local mean.
+
+Our theory makes this mechanism precise. In an exactly solvable two-stage model, aggregation delays access to downstream teaching states even though all clients share a realizable teacher and a common optimum, and every local update remains stable. Changing only the rollout source isolates the resulting supervision delay. The analysis reveals two coupled roles of learning rate: learning from current supervision and reaching future supervi-sion . Their interaction reproduces the ob-served change in the value of collabora-tion within a finite budget. A general up-date decomposition further separates ordi-nary optimization effects from the propa-gation of discrepancies through the evolv-ing rollout distribution. This understanding suggests calibrating the aggregate before it generates the next round’s trajectories. We propose FedTOPS (Federated Teacher-guided On-Policy Scaling), which uses teacher feedback on current training trajectories to select how far to move along the FedAvg update. Clientwise predictive-change constraints limit the adjustment, and reusing the trajectories avoids additional rollout generation. A controlled server-scaling experiment supports update magnitude as a useful intervention. Across six mathematical reasoning benchmarks, FedTOPS improves macro Avg@8 over FedAvg by 4.56–14.57 percentage points across the evaluated student models and learning rates. Our contributions are threefold: • We establish FedOPD as a setting where collaboration can improve distillation, while revealing that its benefits depend strongly on the local learning rate. • We explain how aggregation-induced optimization lag can delay future supervision and characterize the two roles of learning rate through a solvable construction and a general feedback decomposition. • We introduce FedTOPS, a simple teacher-guided aggregation rule, and demonstrate improved performance across student models and local learning rates. 
+
+# 2 PHENOMENON AND THEORETICAL ANALYSIS 
+
+We first establish the learning-rate sensitivity of collaboration gains, then explain it through the student’s coupled roles as learner and generator. 2.1 WHEN DOES COLLABORATION HELP ?Figure 1 compares FedAvg, independent Local training, and Centralized training from a common 0.6B student under matched total rollout budgets. Local mean averages three separately trained client models. At the reference learning rate, FedAvg offers essentially no collaboration gain; at the larger rate, its MATH500 Avg@8 gain over Local rises from −0.60 to +10 .51 pp . The six-benchmark macro average follows the same pattern. The key observation is that learning rate changes whether collaboration is useful within the budget. In OPD, aggregation also sets the generator of the next training trajectories. An optimization discrepancy can therefore change the supervision available in subsequent rounds. 2Preprint. Under review. 
+
+FedOPD protocol. Clients have prompt distributions Di and positive weights wi summing to one, and share a fixed teacher q. Each round starts from θt: client i generates student trajectories and minimizes 
+
+Li(θ) = 1
+
+|H i|
+
+X
+
+> h∈H i
+
+DKL (pθ (· | h) ∥ q(· | h)) , (1) where Hi contains sampled response-token prefixes, held fixed during optimization. The server aggregates the updated parameters as θt+1 = P 
+
+> i
+
+wiθt,i . Independent Local training uses the same objective but retains each client’s learner and generator without aggregation. 
+
+One model, two roles. Distinguish the learner πθ from the generator πϕ. Let dϕi be its prefix distri-bution, averaging positions up to horizon L with zero-loss padding after termination (Appendix B). The fixed-source loss and training gradient are 
+
+Li(θ; ϕ) = Es∼dϕi
+
+[ℓ(θ; s)] , gi(θ; ϕ) = ∇θ Li(θ; ϕ), (2) where ℓ is a conditional distillation loss, such as forward or reverse token KL. On-policy rounds start at ϕ = θ, but the training field g◦ 
+
+> i
+
+(θ) = gi(θ; θ) does not differentiate through the sampled-prefix distribution. 
+
+Theoretical protocol. We analyze E population gradient steps of size η, freezing the source within each round. Let Fη (θ; ϕ) denote local steps followed by averaging, and Pη (θ; ϕ) denote E
+
+synchronous steps on P 
+
+> i
+
+wiLi(θ; ϕ). This pooled reference isolates the effect of local optimization followed by aggregation. Appendix B states the regularity assumptions. 2.2 HOW OPTIMIZATION LAG DELAYS SUPERVISION 
+
+Consider a prerequisite ability u that controls access to teaching states and a downstream ability v
+
+learned there. A two-stage Gaussian autoregressive model realizes this setting exactly (Appendix C). For client features xi > 0, let hi = x2 
+
+> i
+
+, the access threshold be c < b , and the precision be λ > 0.The access probability is 
+
+ρi(u) = Φ  xi(u − c), (3) where Φ is the standard normal CDF. Summing the two conditional distillation losses gives exactly 
+
+Li(( u, v ); ϕ) = hi 
+
+> 2
+
+(u − b)2 + λρ i(ϕu)2 (v − 1) 2. (4) Forward and reverse conditional KL agree here. All clients share a realizable teacher and optimum 
+
+(b, 1) , and every fixed-source objective is a convex quadratic. Thus u controls access to supervision for v, without conflicting client targets. Let u0 < c < b , 0 ≤ v0 < 1, and 0 < η max i{hi, λ } < 1. Define 
+
+rη = X
+
+> i
+
+wi(1 − ηh i)E , sη (u) = X
+
+> i
+
+wi(1 − ηλρ i(u)) E . (5) Exact local updates followed by averaging satisfy 
+
+b − uFt+1 = rη (b − uFt ), 1 − vFt+1 = sη (uFt )(1 − vFt ). (6) For synchronous pooled updates, the corresponding factors are rPη = (1 − η¯h)E and sPη (u) = (1 − ηλ ¯ρ(u)) E , with weighted means ¯h and ¯ρ.
+
+Theorem 1 (Stable optimization can delay future teaching) . For the construction above and E ≥ 2,
+
+uFt ≤ uPt and vFt ≤ vPt at every round. Define a source-swapped process that retains federated learner updates but generates each round with uPt instead of uFt . Then 
+
+vFT ≤ vswap  
+
+> T
+
+≤ vPT , log 1 − vFT
+
+1 − vswap 
+
+> T
+
+= 
+
+> T−1
+
+X
+
+> t=0
+
+Z uPt
+
+> uFt
+
+κη (z) d z, (7) 
+
+where κη (u) = −∂u log sη (u) > 0. If each ρi is made model-independent, the source-swap difference is exactly zero. Under the original Gaussian access law, FedAvg, pooled, and independent Local iterates converge monotonically to the common optimum. 
+
+3Preprint. Under review. 
+
+Why this is an additional OPD cost. Jensen’s inequality gives rη ≥ rPη : averaging delays prerequisite learning, reducing ρi and hence downstream supervision. For E = 2 , the one-round prerequisite lag is exactly η2 Var w(hi)( b − u). Changing only the source in Eq.(7) isolates the additional rollout-mediated cost. This is a finite-budget bottleneck under stable updates, even though all processes converge to the same target. 2.3 THE TWO ROLES OF LEARNING RATE 
+
+Learning rate affects both movement toward the teacher and the states available for subsequent learning. The residual downstream error makes these two roles explicit: 
+
+1 − vFT = (1 − v0)e−C T (η), CT (η) = − 
+
+> T−1
+
+X
+
+> t=0
+
+log sη (uFt (η)) . (8) The quantity CT is an effective supervision clock : it depends on both the update size and the history of visited teaching states. Its derivative separates these effects: 
+
+dCT
+
+dη = − X
+
+> t
+
+∂η log sη (uFt )
+
+| {z }
+
+> learning on the same prefixes
+
++ X
+
+> t
+
+κη (uFt ) duFt
+
+dη
+
+| {z }
+
+> accessing different supervision
+
+. (9) Both terms are nonnegative in the stable construction; the second disappears under a common source schedule independent of η. The rate also determines whether substantial supervision is reached within the training budget; Appendix C.6 gives the exact access-time formula. 0.02 0.04 0.06 0.08  
+
+> Local step size η
+> 0.0 0.5 1.0
+> Score  S(vT)
+> FedAvg Local mean Pooled
+
+Figure 2: A sign reversal with stable updates. Exact recurrences; marked step sizes 0.02 and 0.06. Details: Appendix C.7. 
+
+An explicit sign reversal against Local. 
+
+Figure 2 instantiates the exact recurrences with two heterogeneous clients and evalu-ates downstream learning through S(v) = 1 − (1 − v)2 on a common fixed teaching state. At the smaller step size, FedAvg scores below the mean of independently trained Lo-cal models; tripling the step size reverses this ordering. All updates remain stable. Swap-ping the source alone recovers most of the gap to pooled training at both step sizes. This reproduces the change in collaboration gain and isolates a contribution from delayed su-pervision. Appendix C.7 gives parameters and scores. 
+
+What changes when supervision is fixed? Replace ρi(u) by client-specific constants while retaining the protocol and score S(v). Corollary 4 gives a nonnegative FedAvg-minus-Local gain at every stable step size. Thus fixed curvature heterogeneity alone cannot explain this construction’s negative gain: model-dependent supervision access is essential. 2.4 SEPARATING THE TWO EFFECTS IN GENERAL 
+
+For a general OPD update, let Hi = ∂θ gi and Bi = ∂ϕgi. The on-policy derivative is Dg ◦ 
+
+> i
+
+= Hi +Bi:
+
+Hi describes learning at a fixed source, while Bi couples teacher gradients to earlier generation decisions. The latter has no predetermined sign. Appendix B derives its score-function expression. 
+
+Proposition 2 (Creation and propagation of a discrepancy) . Under the regularity conditions of Appendix B, for fixed E and a frozen source ϕ,
+
+Fη (θ; ϕ) − P η (θ; ϕ) = 
+
+E
+
+2
+
+
+
+η2 X
+
+> i
+
+wi(Hi − H)( gi − g) + O(η3), (10) 
+
+where gi, H i are evaluated at (θ; ϕ), g = P 
+
+> i
+
+wigi, and H = P 
+
+> i
+
+wiHi. For the self-generated processes, write δt = θFt − θPt and et = ( Fη − P η )( θPt ; θPt ). Then locally 
+
+δt+1 = I − ηE (Ht + Bt)δt + et + O
+
+
+
+η2 ∥δt∥ + ∥δt∥2
+
+. (11) 4Preprint. Under review. 
+
+The matrices in Eq. (11) are evaluated at the synchronous reference, and Bt = P 
+
+> i
+
+wiBi,t .
+
+Eq.(10) creates an ordinary aggregation discrepancy, which vanishes at E = 1 . Eq.(11) propagates it through both learning and generation. A common external source removes the first-order Btδt
+
+contribution, motivating the source intervention in Section 4.4. 
+
+From explanation to intervention. The aggregate determines both the next learner and its training trajectories. We therefore use current teacher feedback to calibrate the aggregate update magnitude, addressing the coupled roles of learning rate without changing the update direction. 
+
+# 3 TEACHER -G UIDED MAGNITUDE SELECTION 
+
+The analysis suggests a practical design principle: calibrate the aggregated update before it becomes the source of the next training trajectories. Moving farther along a useful update can improve the current student and advance its access to future supervision. Whether a larger move remains useful, however, depends on the current model and local updates. FedTOPS (Federated Teacher-guided On-Policy Scaling) therefore uses the teacher to select the update magnitude in each round. 3.1 FROM THE ANALYSIS TO AN AGGREGATION RULE 
+
+Let ¯θt be the FedAvg result and ∆t = ¯θt − θt its increment from the round’s starting model. The two-stage construction gives a concrete justification for scaling this increment. A constant multiplier satisfying 
+
+1 ≤ a ≤ min 
+
+ 11 − rη
+
+, 11 − (1 − ηλ )E
+
+
+
+, (12) keeps updates non-overshooting and both coordinates no worse than FedAvg. Moreover, the frozen-source teacher loss decreases along the safe interval (Appendix D). Thus teacher feedback on the current trajectories can help select an update that also advances future learning. FedTOPS implements this principle with a small set of candidates: 
+
+θt(a) = θt + a∆t, a ∈ A = {0.5, 1, 2, 3, 5, 10 }. (13) Here θ contains the trainable LoRA coordinates. The local learning rate η determines the client updates; the server multiplier a scales their aggregate, with a = 1 recovering FedAvg. All candidates follow the same increment. 3.2 SELECTING AN UPDATE FROM CURRENT TEACHER FEEDBACK 
+
+Reuse the training trajectories. Before local optimization, each client caches a small sample of the round’s student-generated prefixes and their teacher distributions. Every candidate is evaluated on this same cache. This gives a common basis for comparison without generating additional trajectories or querying the teacher for each candidate. Let eq, eπt, and eπt,a denote the cached teacher, starting-student, and candidate distributions, respectively. The tilde denotes a shared vocabulary partition, specified below. We measure teacher agreement and predictive change by 
+
+bJt(a) = X
+
+> i
+
+wi bEiDKL (eq∥eπt,a ), bKi,t (a) = bEiDKL (eπt∥eπt,a ) ≤ δ ∀i. (14) Here bEi averages cached positions on client i, and δ is a predictive-change budget shared across clients within a run. The forward KL in bJt favors candidates closer to the teacher. The constraint is imposed separately on each client, so a small weighted-average change cannot conceal a large change on one client’s trajectories. 
+
+Choose the magnitude. Among feasible candidates, FedTOPS selects the smallest teacher score. FedAvg is the default when feasible and is replaced only by a strictly better score. If no candidate satisfies the constraint, the server retains the round’s starting model. Algorithm 1 in Appendix E summarizes one round and the implementation details. 5Preprint. Under review.                                                                                                                                                
+
+> Table 1: Avg@8 across benchmarks, learning rates, and student scales. Scores are percentages; Macro weights all six benchmarks equally. Best/second-best scores within each setting are bold/underlined. Base is repeated for reference; Olympiad denotes OlympiadBench.
+> Method MATH500 AMC23 Minerva Olympiad AIME24 AIME25 Macro
+> 0.6B student, 1 ×LR
+> Base student 9.07 4.06 2.85 3.12 0.42 0.42 3.32 Centralized 31.70 16.88 7.95 10.31 0.42 0.83 11.35 Local mean 12.35 3.96 3.57 4.32 0.42 0.14 4.13 FedAvg 11.75 3.44 3.95 4.30 0.00 0.00 3.91 Fixed a= 3 31.80 14.37 8.04 9.40 0.42 0.83 10.81 Fixed a= 10 44.12 21.25 12.87 15.56 2.08 1.25 16.19
+> FedTOPS 45.98 24.06 13.83 15.50 0.83 0.83 16.84
+> 0.6B student, 3 ×LR
+> Base student 9.07 4.06 2.85 3.12 0.42 0.42 3.32 Centralized 45.02 20.94 13.83 15.34 1.67 2.08 16.48 Local mean 26.77 13.12 7.08 8.04 1.11 0.69 9.47 FedAvg 37.28 16.56 9.56 11.18 1.67 0.42 12.78 Fixed a= 3 45.20 20.00 14.38 15.49 1.67 1.67 16.40 Fixed a= 10 32.40 14.69 8.73 10.00 0.83 1.25 11.32
+> FedTOPS 47.02 22.81 13.83 17.41 2.08 0.83 17.33
+> 1.7B student, 1 ×LR
+> Centralized 62.10 34.69 23.30 27.17 6.67 3.33 26.21 Local mean 29.41 15.62 10.09 11.99 2.92 1.39 11.90 FedAvg 28.82 15.94 10.20 11.29 2.50 1.67 11.74
+> FedTOPS 62.38 33.75 23.71 27.58 6.25 4.17 26.31
+
+A compact scoring cache. Each client caches four training rollouts and at most 16 evenly spaced prediction positions per rollout. The vocabulary partition is the teacher/starting-student top-16 union plus the remaining probability mass, fixed across candidates. Cache details and the full-distribution analysis appear in Appendices E and D. 3.3 CONNECTION TO LEARNING -R ATE ROBUSTNESS 
+
+Magnitude selection can offset local learning-rate changes when these mainly rescale the update. For ∆( η) = ηd + O(η2), write β = aη . The local quadratic teacher-score problem under the predictive-change constraint yields a preferred effective step β⋆, and hence a⋆ ≃ β⋆/η (Appendix D). This compensates update scale while preserving the FedAvg direction. 
+
+# 4 EXPERIMENTS 
+
+We evaluate collaboration gains across learning rates and student scales (RQ1), adaptive versus fixed aggregate scaling (RQ2), and rollout-source effects on subsequent learning (RQ3). 4.1 EXPERIMENTAL SETUP 
+
+Models and federated task. We distill Qwen3-8B into Qwen3-0.6B-Base and Qwen3-1.7B-Base students (Yang et al., 2025). Three clients each hold 570 MATH prompts (Hendrycks et al., 2021) from disjoint subject groups: foundational algebra, discrete mathematics, and advanced algebra. All clients participate in 50 rounds, generating 32 responses each per round. We aggregate rank-8 LoRA factor coordinates. The 0.6B local learning rates are 3 × 10 −6 (1 ×LR) and 9 × 10 −6 (3 ×LR); 1.7B uses the reference rate. Each configuration uses one training seed. 
+
+Comparisons and evaluation. Local trains clients independently; Centralized pools their prompts. FedAvg averages updates; fixed a = 3 /a = 10 amplify this increment every round without selection or a trust constraint. FedTOPS selects its magnitude (Algorithm 1), with trust budgets 0.05 for all student models. All trained methods share initialization. Each Local model uses 1,600 rollouts; each federated or Centralized run uses 4,800 system-wide. The adapter-free 0.6B Base is evaluated once. We sample eight answers per problem on MATH500, AMC23, Minerva, OlympiadBench, and 6Preprint. Under review.                                                                                                                                                
+
+> Table 2: Pass@8 across benchmarks, learning rates, and student scales. Scores are percentages. Settings, abbreviations, and highlighting follow Table 1.
+> Method MATH500 AMC23 Minerva Olympiad AIME24 AIME25 Macro
+> 0.6B student, 1 ×LR
+> Base student 46.80 22.50 16.54 16.91 3.33 3.33 18.24 Centralized 68.40 50.00 26.47 33.68 3.33 6.67 31.43 Local mean 51.93 22.50 18.14 22.55 2.22 1.11 19.74 FedAvg 51.80 22.50 18.75 21.96 0.00 0.00 19.17 Fixed a= 3 69.00 42.50 28.31 31.90 3.33 6.67 30.28 Fixed a= 10 71.40 52.50 30.15 35.91 13.33 6.67 34.99 FedTOPS 72.40 57.50 31.62 36.65 6.67 3.33 34.69
+> 0.6B student, 3 ×LR
+> Base student 46.80 22.50 16.54 16.91 3.33 3.33 18.24 Centralized 71.00 52.50 31.25 36.65 6.67 10.00 34.68 Local mean 67.00 45.00 24.88 30.42 7.78 4.44 29.92 FedAvg 72.00 45.00 29.04 33.68 6.67 3.33 31.62 Fixed a= 3 73.00 55.00 31.99 35.76 6.67 13.33 35.96
+> Fixed a= 10 69.80 42.50 29.04 32.49 3.33 6.67 30.64
+> FedTOPS 72.20 55.00 32.72 39.76 6.67 6.67 35.50
+> 1.7B student, 1 ×LR
+> Centralized 84.20 60.00 40.44 50.74 13.33 13.33 43.67 Local mean 75.20 55.83 35.17 40.26 14.44 10.00 38.48 FedAvg 76.20 50.00 34.19 39.47 10.00 10.00 36.64
+> FedTOPS 83.60 67.50 41.54 52.82 13.33 23.33 47.02
+
+AIME24/25 (Hendrycks et al., 2021; Lewkowycz et al., 2022; He et al., 2024). Avg@8 measures average correctness; Pass@8 measures whether any answer is correct. Macro weights benchmarks equally; Local mean averages client-model scores. Gains are percentage points (pp). Appendices F and H give settings and client-level results. 4.2 RECOVERING COLLABORATION ACROSS LEARNING RATES AND STUDENT SCALES 
+
+Weak FedAvg performance conceals substantial collaboration gains. At the reference learning rate, FedAvg reaches only 3.91% macro Avg@8, close to the untrained student’s 3.32% and below Local’s 4.13% (Table 1). With the same local learning rate, FedTOPS reaches 16.84%, improving on FedAvg by 12 .93 pp and exceeding the Centralized reference. This recovery extends across all six benchmarks. Pass@8 improves from 19.17% to 34.69% (Table 2), showing gains in both average correctness and the probability of finding a correct response. Weak FedAvg performance need not imply little potential for collaboration. 
+
+The advantage persists at the larger learning rate. At 3 ×LR, FedAvg itself gains from col-laboration, but FedTOPS further improves macro Avg@8 by 4.56 pp and Pass@8 by 3.88 pp . Its macro Avg@8 is similar at the two evaluated settings: 16.84% and 17.33%, compared with 3.91% and 12.78% for FedAvg. The 0.49 pp versus 8.87 pp gap describes these two configurations. Ta-ble 1 shows positive collaboration gains on every benchmark at both rates, although FedTOPS ties Centralized on Minerva and trails it on AIME25 at the larger rate. 
+
+The benefit extends to a larger student. With the 1.7B student, FedTOPS improves macro Avg@8 over FedAvg by 14 .57 pp , reaching the Centralized reference, and achieves the highest Pass@8 among the compared methods (Tables 1 and 2). Its cap-hit rate falls from FedAvg’s 38.66% to 9.89%, accompanying the accuracy improvement (Appendix H.3). This experiment tests transfer across student scales at the reference learning rate. 4.3 AGGREGATE SCALING AND ADAPTIVE SELECTION 
+
+Fixed amplification recovers much of the gain. Tables 1 and 2 include fixed a = 3 and a = 10 
+
+at both 0.6B learning rates. At 1 ×LR, increasing the server multiplier raises macro Avg@8 from FedAvg’s 3.91% to 10.81% and 16.19%, respectively, without changing local optimization. Thus a simple magnitude correction already recovers much of the collaboration gain. 7Preprint. Under review. FedAvg Fixed           
+
+> a= 3 Fixed
+> a= 10 FedTOPS 0510 15 20
+> Macro Avg@8 (%)
+> 3.91 10.81 16.19 16.84
+> (a) 1×LR
+> FedAvg Fixed
+> a= 3 Fixed
+> a= 10 FedTOPS 12.78 16.40 11.32 17.33
+> (b) 3×LR
+
+Figure 3: Fixed amplification versus adaptive selection. Six-benchmark macro Avg@8 for the 0.6B student. The stronger fixed rule changes from a = 10 to a = 3 as the local learning rate increases; FedTOPS performs well in both settings. Tables 1 and 2 give benchmark-level accuracy. 1 25 50             
+
+> Round
+> 0.5 123510
+> Scale  a
+> (a) 1×LR trace
+> 125 50
+> Round
+> 0.5 123510
+> (b) 3×LR trace
+> -0.5 -0.1 -0.01 00.01 0.1 0.5 ̂
+> Jt(a) − ̂Jt(1) (nats) Selected KL-infeasible
+
+Figure 4: Teacher-guided selection across rounds. Candidate-score differences bJt(a) − bJt(1) on a shared symmetric-log scale: blue is better, circles are selected, crosses are infeasible. 
+
+The effective multiplier changes with the training setting. The preference between fixed rules reverses at 3 ×LR (Figure 3): a = 3 reaches 16.40% macro Avg@8, whereas a = 10 falls to 11.32%, below FedAvg’s 12.78%. Always taking the largest candidate is therefore insufficient. FedTOPS achieves the highest macro Avg@8 in both settings, at 16.84% and 17.33%. It does not dominate every metric: fixed a = 10 has higher macro Pass@8 at 1 ×LR (34.99% versus 34.69%), and fixed 
+
+a = 3 does at 3 ×LR (35.96% versus 35.50%). These controls motivate selecting the magnitude from current teacher feedback. 
+
+Selection changes across rounds. The reference-rate trace selects a = 10 in 37 of 50 rounds, but also selects every other candidate at least once. The higher-rate trace uses a = 10 in 10 rounds and smaller scales in the remaining 40. Within each run, Figure 4 shows how teacher scores and feasibility vary as training evolves. Frequent upper-bound selections coexist with rounds that favor smaller steps, consistent with the need to reassess magnitude during training. 
+
+Computational cost. FedTOPS reuses training trajectories and adds forward evaluations for caching and candidate scoring. Recorded caching and round-finalization time accounts for 8.44–15.17% of the training-progress interval across the reported runs. Finalization includes scoring and saving; this fraction is not a measured slowdown relative to FedAvg. Appendix G.3 gives the timing breakdown and forward-pass accounting. 4.4 ROLLOUT SOURCES AND SUBSEQUENT LEARNING 
+
+The theory identifies the rollout source as a mediator between aggregation and future learning. Two receiving students start from the same round-9 checkpoint and train at the same local learning rate. Their data come from sources ϕ1 = θt + ∆ t and ϕ3 = θt + 3∆ t, constructed from the same round-10 increment. The intervention changes the generator supplying training data while holding the receiving students’ starting point fixed (Appendix G.2). From a common start of 8.97% Avg@8 and 46.20% Pass@8, source a = 3 yields a receiver scoring 10.17% and 53.00%; source a = 1 yields 9.18% and 44.60% (Figure 5). Changing the source changes subsequent learning from the same receiving model, supporting the proposed rollout-mediated mechanism. 8Preprint. Under review. Common start After training 9.0 9.5 10.0             
+
+> Receiver score (%)
+> a= 1: 9.18
+> a= 3: 10.17 8.97
+> (a) Avg@8
+> Common start After training 44 48 52 56
+> a= 1: 44.60
+> a= 3: 53.00 46.20
+> (b) Pass@8
+> Figure 5: Rollout source changes subsequent learning. MATH500 scores before and after short receiver training with source a= 1 or a= 3 . Segments connect the common start to the two measured endpoints; they are not intermediate training trajectories. Both branches share the initial checkpoint and local learning rate.
+
+# 5 RELATED WORK 
+
+Federated low-rank adaptation. FFA-LoRA identifies a mismatch between jointly optimizing LoRA factors locally and averaging them separately, motivating a frozen-factor design (Sun et al., 2024). FLoRA uses stacking to aggregate heterogeneous adapters (Wang et al., 2024), while FedEx-LoRA incorporates the aggregation residual into frozen weights (Singhal et al., 2025). These works address the representation of aggregated updates. FedOPD introduces a further coupling: the aggregated student generates the next training trajectories. We study how optimization discrepancies affect this evolving supervision and use teacher feedback to calibrate the existing update. 
+
+On-policy distillation and model-dependent data. Learning from states visited by the learner is central to interactive imitation learning (Ross et al., 2011) and language-model OPD (Agarwal et al., 2024; Gu et al., 2024). Recent work studies teacher compatibility (Li et al., 2026), entropy-aware supervision (Jin et al., 2026), data selection (Hou et al., 2026), and the distinction between state coverage and supervision absorption (Fu et al., 2026). More broadly, performative prediction and performative FL formalize model–data feedback (Perdomo et al., 2020; Jin et al., 2024); federated SARSA studies evolving policies in heterogeneous environments (Zhang et al., 2024; Mangold et al., 2025). Our analysis identifies a specific consequence for FedOPD: aggregation lag can delay access to supervision, giving learning rate two coupled roles in finite-budget learning. 
+
+Federated optimization and extrapolation. FedAvg combines local updates (McMahan et al., 2017), and SCAFFOLD addresses heterogeneous client drift (Karimireddy et al., 2020). FedExP selects a server step size from client-update geometry (Jhunjhunwala et al., 2023). In centralized OPD, EffOPD extrapolates checkpoint displacements using validation feedback (Cai et al., 2026). FedTOPS selects the magnitude of the current FedAvg increment using cached teacher distributions and clientwise predictive-change constraints. Its frozen-prefix score and bounded predictive change are related to trust-region policy optimization (Schulman et al., 2015). The motivation here is the effect of aggregation on both current progress and subsequent supervision. 
+
+# 6 LIMITATIONS 
+
+Our theory explains aggregation–rollout feedback without quantitatively predicting LLM dynamics. Experiments are limited to mathematical reasoning, three fully participating clients, one model family, and one training seed per configuration. FedTOPS scales LoRA factor updates and uses cached teacher agreement as a proxy for future learning benefits. Inexact LoRA aggregation and nonlinear weight-space extrapolation lie outside our analysis; integrating aggregation corrections, more OPD objectives and exploring broader settings remain future work. 
+
+# 7 CONCLUSION 
+
+Federated on-policy distillation couples model aggregation with the generation of future training data. We find that this coupling can make the benefit of collaboration strongly sensitive to learning rate. Our analysis explains how an aggregation-induced optimization lag can delay access to teacher supervision, giving learning rate a second role beyond learning from the current data. This insight motivates FedTOPS, a simple teacher-guided adjustment of the FedAvg update magnitude that improves performance across the evaluated student models and learning rates. More broadly, effective aggregation in FedOPD must account for both the progress made by the current update and the learning opportunities created by the resulting student. 9Preprint. Under review. AI U SE STATEMENT 
+
+We used generative AI tools to polish an existing author-written draft, improving clarity, readability, and linguistic expression. We also used AI tools to assist with code development. The authors reviewed and verified all AI-assisted text and code and take full responsibility for the final content of the paper. REPRODUCIBILITY STATEMENT 
+
+Appendices B–D provide assumptions and complete proofs. The source package includes theory verification, figure-generation code, machine-readable aggregate transcriptions, and table-generation code. Appendix F specifies the training and evaluation protocol, Appendix G reports supplementary analyses, and Appendix H gives complete benchmark results. The bundled experimental figures and tables can be rebuilt from the supplied data and reported summaries. We also upload the code as the supplementary materials for reproduction. 
+
+# REFERENCES 
+
+Rishabh Agarwal, Nino Vieillard, Yongchao Zhou, Piotr Stanczyk, Sabela Ramos, Matthieu Geist, and Olivier Bachem. On-policy distillation of language models: Learning from self-generated mistakes. In International Conference on Learning Representations , 2024. Yuchen Cai, Ding Cao, Liang Lin, Chunxi Luo, Xin Xu, Kai Yang, Weijie Liu, Saiyong Yang, Tianxiang Zhao, Guangzhong Sun, Guiquan Liu, and Junfeng Fang. Learning to foresee: Unveiling the unlocking efficiency of on-policy distillation. arXiv preprint arXiv:2605.11739 , 2026. Zixuan Fu, Bingxiang He, Yuxin Zuo, Haohuan Huang, Jinqian Zhang, Ruhang Xiao, Cheng Qian, Qinyu Luo, Huan-ang Gao, Yudong Wang, Zhiyuan Liu, Ning Ding, and Chaojun Xiao. Rethinking on-policy distillation of large language models II: One training example. arXiv preprint arXiv:2609.04172 , 2026. Yuxian Gu, Li Dong, Furu Wei, and Minlie Huang. MiniLLM: Knowledge distillation of large language models. In International Conference on Learning Representations , 2024. Chaoqun He, Renjie Luo, Yuzhuo Bai, Shengding Hu, Zhen Leng Thai, Junhao Shen, Jinyi Hu, Xu Han, Yujie Huang, Yuxiang Zhang, Jie Liu, Lei Qi, Zhiyuan Liu, and Maosong Sun. Olympiad-Bench: A challenging benchmark for promoting AGI with olympiad-level bilingual multimodal scientific problems. In Proceedings of the 62nd Annual Meeting of the Association for Computa-tional Linguistics , 2024. Dan Hendrycks, Collin Burns, Saurav Kadavath, Akul Arora, Steven Basart, Eric Tang, Dawn Song, and Jacob Steinhardt. Measuring mathematical problem solving with the MATH dataset. In 
+
+NeurIPS Datasets and Benchmarks , 2021. Zhinan Hou, Jiaqi Zhang, Xunliang Cai, and Keyou You. What matters in on-policy distillation? a perspective on data efficiency and data selection. arXiv preprint arXiv:2609.05198 , 2026. Divyansh Jhunjhunwala, Shiqiang Wang, and Gauri Joshi. FedExP: Speeding up federated averaging via extrapolation. In International Conference on Learning Representations , 2023. Kun Jin, Tongxin Yin, Zhongzhu Chen, Zeyu Sun, Xueru Zhang, Yang Liu, and Mingyan Liu. Performative federated learning: A solution to model-dependent and heterogeneous distribution shifts. In Proceedings of the AAAI Conference on Artificial Intelligence , volume 38, pp. 12938– 12946, 2024. Woogyeol Jin, Taywon Min, Yongjin Yang, Dennis Wei, Yi Zhou, Swanand Ravindra Kadhe, Nathalie Baracaldo, and Kimin Lee. Entropy-aware on-policy distillation of language models. arXiv preprint arXiv:2603.07079 , 2026. Sai Praneeth Karimireddy, Satyen Kale, Mehryar Mohri, Sashank Reddi, Sebastian Stich, and Ananda Theertha Suresh. SCAFFOLD: Stochastic controlled averaging for federated learning. In 
+
+Proceedings of the 37th International Conference on Machine Learning , volume 119 of Proceed-ings of Machine Learning Research , pp. 5132–5143, 2020. 10 Preprint. Under review. Aitor Lewkowycz, Anders Andreassen, David Dohan, Ethan Dyer, Henryk Michalewski, Vinay Ramasesh, Ambrose Slone, Cem Anil, Imanol Schlag, Theo Gutman-Solo, Yuhuai Wu, Behnam Neyshabur, Guy Gur-Ari, and Vedant Misra. Solving quantitative reasoning problems with language models. In Advances in Neural Information Processing Systems , volume 35, 2022. Yaxuan Li, Yuxin Zuo, Bingxiang He, Jinqian Zhang, Chaojun Xiao, Cheng Qian, Tianyu Yu, Huan-ang Gao, Wenkai Yang, Zhiyuan Liu, and Ning Ding. Rethinking on-policy distillation of large language models: Phenomenology, mechanism, and recipe. arXiv preprint arXiv:2604.13016 ,2026. Paul Mangold, Eloïse Berthier, and Eric Moulines. Convergence guarantees for federated SARSA with local training and heterogeneous agents. arXiv preprint arXiv:2512.17688 , 2025. Brendan McMahan, Eider Moore, Daniel Ramage, Seth Hampson, and Blaise Aguera y Arcas. Communication-efficient learning of deep networks from decentralized data. In Proceedings of the 20th International Conference on Artificial Intelligence and Statistics , volume 54 of Proceedings of Machine Learning Research , pp. 1273–1282, 2017. Juan Perdomo, Tijana Zrnic, Celestine Mendler-Dünner, and Moritz Hardt. Performative predic-tion. In Proceedings of the 37th International Conference on Machine Learning , volume 119 of 
+
+Proceedings of Machine Learning Research , pp. 7599–7609, 2020. Stéphane Ross, Geoffrey Gordon, and Drew Bagnell. A reduction of imitation learning and structured prediction to no-regret online learning. In Proceedings of the Fourteenth International Conference on Artificial Intelligence and Statistics , volume 15 of Proceedings of Machine Learning Research ,pp. 627–635, 2011. John Schulman, Sergey Levine, Pieter Abbeel, Michael Jordan, and Philipp Moritz. Trust region policy optimization. In Proceedings of the 32nd International Conference on Machine Learning ,volume 37 of Proceedings of Machine Learning Research , pp. 1889–1897, 2015. Raghav Singhal, Kaustubh Ponkshe, and Praneeth Vepakomma. FedEx-LoRA: Exact aggregation for federated and efficient fine-tuning of large language models. In Proceedings of the 63rd Annual Meeting of the Association for Computational Linguistics (Volume 1: Long Papers) , pp. 1316–1336, 2025. Youbang Sun, Zitao Li, Yaliang Li, and Bolin Ding. Improving LoRA in privacy-preserving federated learning. In International Conference on Learning Representations , 2024. Ziyao Wang, Zheyu Shen, Yexiao He, Guoheng Sun, Hongyi Wang, Lingjuan Lyu, and Ang Li. FLoRA: Federated fine-tuning large language models with heterogeneous low-rank adaptations. In 
+
+Advances in Neural Information Processing Systems , volume 37, 2024. An Yang, Anfeng Li, Baosong Yang, Beichen Zhang, Binyuan Hui, Bo Zheng, Bowen Yu, Chang Gao, Chengen Huang, Chenxu Lv, et al. Qwen3 technical report. arXiv preprint arXiv:2505.09388 ,2025. Chenyu Zhang, Han Wang, Aritra Mitra, and James Anderson. Finite-time analysis of on-policy heterogeneous federated reinforcement learning. In International Conference on Learning Repre-sentations , 2024. 11 Preprint. Under review. 
+
+# A NOTATION AND ORGANIZATION OF THE ANALYSIS 
+
+We distinguish the receiving learner θ from the trajectory generator ϕ throughout the analysis. Table 3 summarizes the notation. Appendix B derives the update decomposition and propagation of learner– generator discrepancies. Appendix C gives the solvable model, its exact recurrences, and the source intervention. Appendix D analyzes aggregate scaling and the relation between full-distribution and finite-cache trust constraints.   
+
+> Table 3: Main notation. Pηdenotes the matched-depth synchronous reference used in the analysis; Centralized denotes the pooled-data training baseline in the experiments.
+
+Symbol Meaning 
+
+K, w i, D i Number of clients, aggregation weight, and fixed prompt distribution 
+
+q, π θ , π ϕ Fixed teacher, receiving learner, and trajectory generator 
+
+L, d ϕi Maximum horizon and uniformly position-sampled prefix distribution 
+
+Li(θ; ϕ), g i(θ; ϕ) Fixed-source loss and its learner gradient 
+
+Hi, B i Learner response and generator response of the update vector field 
+
+E, η, T Local gradient steps per round, step size, and communication rounds 
+
+Fη , Pη Local-then-average map and matched-depth synchronous map 
+
+δt, e t Cross-process state gap and one-round algorithm discrepancy 
+
+u, v Prerequisite and downstream parameters in the construction 
+
+hi, b, c, λ Client curvature, shared prerequisite target, access threshold, and downstream precision 
+
+ρi(u) Probability of reaching a downstream teaching state 
+
+rη , s η (u) Exact prerequisite and downstream residual factors 
+
+κη , CT Access sensitivity and effective supervision clock 
+
+∆t, a, δ FedAvg increment, server multiplier, and predictive KL budget 
+
+# B GENERAL MECHANISM : ASSUMPTIONS AND COMPLETE DERIVATIONS 
+
+B.1 THE LEARNER AND SOURCE ARE DIFFERENT ARGUMENTS 
+
+For a prompt x and a length-L padded trajectory, write 
+
+P ϕi (x, y 1: L) = Di(x)
+
+> L
+
+Y
+
+> h=1
+
+πϕ(yh | x, y <h ). (15) After termination, both policies use a common absorbing symbol, and the corresponding losses and score derivatives are zero. Drawing h uniformly from {1, . . . , L } and retaining (x, y <h , h ) defines dϕi .For continuous outputs, products and expectations refer to densities and integrals. The fixed-source objective is 
+
+Li(θ; ϕ) = 1
+
+L
+
+> L
+
+X
+
+> h=1
+
+EP ϕi
+
+ℓ(θ; x, y <h , h ). (16) The conditional loss can be either exact forward or reverse KL; the following derivations only require the stated regularity. In particular, 
+
+∇θ [Li(θ; θ)] = gi(θ; θ) + ∂ϕLi(θ; ϕ)|ϕ=θ . (17) Frozen-prefix training uses the first term. It does not generally optimize the diagonal risk by its full gradient. 
+
+Assumption 1 (Local regularity and round protocol) . The client set and positive weights are fixed. Each round uses all clients, a common starting learner, and E exact gradient steps with one frozen source per client. There is a compact parameter neighborhood containing all points used in the local expansions and their intervening line segments. The functions gi(θ; ϕ) have bounded continuous derivatives through order two there, with locally Lipschitz second derivatives. The prefix laws have common support on the nonabsorbing states. A dominating integrable function justifies differentiating 12 Preprint. Under review. each expectation with respect to the learner and source. The bounds hold uniformly for the sufficiently small step sizes under consideration and for fixed E.This is a sufficient local assumption, not a global boundedness assertion for neural-network KL losses. In the Gaussian construction all relevant expectations are analytic and these bounds hold on compact parameter sets. The fixed teacher supplies no parameter-dependent derivative. B.2 PROOF OF THE LEARNER –GENERATOR DECOMPOSITION 
+
+At the learner–source pair, define Hi = ∂θ gi and Bi = ∂ϕgi. The on-policy chain rule gives 
+
+Dg ◦ 
+
+> i
+
+(θ) = Hi(θ; θ) + Bi(θ; θ). (18) For sh = ( x, y <h , h ) and zθ (s) = ∇θ ℓ(θ; s), the source response is 
+
+Bi(θ; θ) = 1
+
+L
+
+> L
+
+X
+
+> h=1
+
+E
+
+zθ (sh)
+
+X
+
+> j<h
+
+∇θ log πθ (yj | x, y <j )
+
+
+
+> ⊤
+
+ . (19) Let zθ (s) = ∇θ ℓ(θ; s). At a fixed learner, 
+
+∂ϕgi(θ; ϕ) = 1
+
+L
+
+X
+
+> h
+
+Z
+
+zθ (sh)[ ∇ϕP ϕi (sh)] ⊤ dsh (20) 
+
+= 1
+
+L
+
+X
+
+> h
+
+EP ϕi
+
+h
+
+zθ (sh) ∇ϕ log P ϕi (sh)⊤i
+
+. (21) The prompt distribution has no parameter dependence, so 
+
+∇ϕ log P ϕi (sh) = X
+
+> j<h
+
+∇ϕ log πϕ(yj | x, y <j ). (22) Evaluation at ϕ = θ proves Eq.(19). Applying the chain rule to gi(θ; θ) gives Dg ◦ 
+
+> i
+
+= Hi + Bi. The first prediction position has no earlier generated decisions, so its source-score term is zero. None of these expressions implies that Bi is positive semidefinite, symmetric, or harmful. B.3 PROOF OF THE FIXED -SOURCE AGGREGATION DISCREPANCY 
+
+Fix (θ, ϕ ) and suppress those arguments in gi and Hi. Let θi, 0 = θ and 
+
+θi,e +1 = θi,e − ηg i(θi,e ; ϕ). (23) For fixed E, bounded gradients give θi,e − θ = O(η). Induction and Taylor expansion yield 
+
+θi,e = θ − eηg i +
+
+e
+
+2
+
+
+
+η2Higi + O(η3). (24) Indeed, substituting the induction hypothesis into gi(θi,e ; ϕ) = gi + Hi(θi,e − θ) + O(η2) adds 
+
+eη 2Higi to the second-order term, and  e
+
+> 2
+
+ + e =  e+1 2
+
+. Averaging Eq.(24) at e = E gives 
+
+Fη (θ; ϕ) = θ − Eηg +
+
+E
+
+2
+
+
+
+η2 X
+
+> i
+
+wiHigi + O(η3). (25) The identical expansion for E steps on the pooled frozen-source gradient gives 
+
+Pη (θ; ϕ) = θ − Eηg +
+
+E
+
+2
+
+
+
+η2Hg + O(η3). (26) Finally, X
+
+> i
+
+wi(Hi − H)( gi − g) = X
+
+> i
+
+wiHigi − Hg, (27) which proves Eq.(10). For E = 1 , both maps are exactly θ − η P 
+
+> i
+
+wigi(θ; ϕ), so equality is exact rather than merely second-order. If all client gradient functions agree, the maps also agree for every 
+
+E. Identical optima alone do not imply identical gradient functions. 13 Preprint. Under review. 
+
+Why the source term does not appear here. Within this protocol, ϕ is fixed while each local learner changes. Consequently the within-round curvature is Hi, not Hi + Bi. Replacing it by 
+
+Hi + Bi would analyze a different algorithm that refreshes the source within the local loop. Client drift itself is not a new OPD-specific result (Karimireddy et al., 2020); the next derivation concerns its additional propagation channel. B.4 PROOF OF THE CROSS -ROUND PROPAGATION FORMULA 
+
+Write the diagonal maps as F ◦(θ) = Fη (θ; θ) and P ◦(θ) = Pη (θ; θ). The smooth local-step composition and Assumption 1 imply the derivative expansion 
+
+DF ◦(θ) = I − Eη (H + B) + O(η2), (28) where the remainder is uniform on the neighborhood. This follows either by differentiating the smooth update composition, or by applying Eq.(24) with its uniform differentiated remainder. It does not rely on differentiating an uncontrolled big-O bound. At θPt , add and subtract F ◦(θPt ):
+
+δt+1 = F ◦(θPt + δt) − F ◦(θPt ) + F ◦(θPt ) − P ◦(θPt ) (29) 
+
+= DF ◦(θPt )δt + et + O(∥δt∥2). (30) Substitution of Eq.(28) proves Eq.(11). If both processes instead use the same externally specified source ϕt, differentiation of Fη (θ; ϕt)
+
+gives I − EηH t + O(η2). The first-order generator contribution is absent because the source does not move with the receiving learner. Static optimization discrepancies, finite-sample noise, and effects of different optimizer states need not disappear. The proposition is a local decomposition, not a global contraction or divergence theorem. B.5 A GENERAL BOUND ON CAPABILITY -SPECIFIC SUPERVISION 
+
+Lemma 3 (Access-limited movement) . Let v be a block of the learner parameters and S a set of prefixes. Suppose, throughout the relevant local trajectories, 
+
+∥∇ v ℓ(θ; s)∥ ≤ G1s∈S + ϵ1s / ∈S , 0 ≤ ϵ ≤ G. (31) 
+
+If ρi(ϕt) = Pr dϕti
+
+(s ∈ S ) and the source is fixed within each round, population local gradient descent followed by averaging satisfies 
+
+∥vT − v0∥ ≤ ηE  
+
+> T−1
+
+X
+
+> t=0
+
+X
+
+> i
+
+wi [ϵ + ( G − ϵ)ρi(ϕt)] . (32) 
+
+Proof. For any local learner iterate, Jensen’s inequality for the norm gives ∥∇ v Li(θ; ϕt)∥ ≤ ϵ +(G − ϵ)ρi(ϕt). Summing E steps bounds the local movement. The convexity of the norm bounds the aggregated movement by the weighted local bounds, and the triangle inequality over rounds proves the claim. At ϵ = 0 , no capability-related movement can be arbitrarily large without accumulating visits to the teaching states. With nonnegative server multipliers, the same argument inserts at in each round’s bound. The lemma does not apply unchanged to arbitrary momentum states. Its prefix-gradient assumption is capability-specific: it does not state that all incorrect or long trajectories are uninformative. B.6 AN ELEMENTARY LONG -HORIZON EXTENSION 
+
+Let a trajectory-level teaching event be exactly S = THh=1 Ah, where Ah are specified succes-sive events. Define pjh = Pr j (Ah | A1, . . . , A h−1) for j ∈ { F, P }, with positive conditioning probabilities and pPh > 0. If pFh ≤ rp Ph for every h, with 0 < r < 1, then the chain rule gives 
+
+Pr F (S)Pr P (S) =
+
+> H
+
+Y
+
+> h=1
+
+pFh
+
+pPh
+
+≤ rH . (33) 14 Preprint. Under review. If the numerator is zero, the bound is immediate without defining conditionals beyond a zero-probability prefix. The equality requires a complete event characterization: if S is only a subset of T 
+
+> h
+
+Ah, an additional conditional success factor is needed, and the prerequisite inequalities alone do not imply Eq.(33). With N independent trajectories from a fixed generator, the probability of no visit to this event is 
+
+(1 − Pr( S)) N . This illustrates how horizon and sampling budget can regulate rare-supervision access. It does not imply domination of all state occupancies or that long reasoning is inherently harmful. B.7 RELATION TO PRACTICAL OPD IMPLEMENTATIONS 
+
+An exact conditional reverse KL fits Eq.(2). A clipped importance-weighted surrogate can additionally depend explicitly on the behavior policy through its likelihood ratios, saved advantages, and clipping sets. Its source derivative must include those dependencies, and may require piecewise or generalized derivatives at clipping boundaries. Persistent Adam states require augmenting the state space beyond θ.Likewise, if the rollout sampler uses temperature or top-p truncation, the source-score expression must use that actual sampling law; the raw model softmax is not automatically the generator distribution. The controlled population experiments isolate the mechanism before these implementation effects are introduced. 
+
+# C A SOLVABLE ON -POLICY CONSTRUCTION AND ITS CONSEQUENCES 
+
+C.1 DERIVING THE OBJECTIVE FROM A SHARED CONDITIONAL TEACHER 
+
+A client prompt is the deterministic feature xi > 0. The teacher is a single conditional function of (x, Y ), not a different target chosen independently for each client. At the first prediction it uses 
+
+N (xb, 1) , while the student uses N (xu, 1) . At the second prediction, if Y ≥ xc , the teacher uses 
+
+N (1 , λ −1) and the student uses N (v, λ −1). Otherwise both use a common distribution independent of (u, v ), for example N (0 , λ −1).For equal-variance Gaussians, 
+
+DKL 
+
+ N (m1, σ 2)∥N (m2, σ 2) = (m1 − m2)2
+
+2σ2 . (34) The first-position conditional loss is x2 
+
+> i
+
+(u − b)2/2. Under a source ϕ, the probability of the second teaching state is 
+
+Pr( Y ≥ xic | Y ∼ N (xiϕu, 1)) = Φ( xi(ϕu − c)) . (35) The second-position conditional loss, whenever reached, is λ(v − 1) 2/2. Summing both positions proves Eq.(4). This convention differs from the position average in Appendix B by the constant factor two; the step size absorbs that factor. Equality of forward and reverse KL here is an equality of the 
+
+conditional losses. It does not assert equality of the two joint trajectory KLs evaluated under different source laws. For every finite ϕu, ρi(ϕu) > 0. Thus the frozen-source Hessian is diagonal with positive entries hi
+
+and λρ i(ϕu), and the unique optimum is (b, 1) for every client. There is no teacher incompatibility and no conflict between client optima. The threshold is fixed in the generated variable; the expected objective is smooth in its parameter arguments. C.2 EXACT ITERATES FOR ALL FOUR PROCESSES 
+
+Let hi = x2 
+
+> i
+
+, u0 < c < b , v0 ∈ [0 , 1) , and 
+
+0 < η max {h1, . . . , h K , λ } < 1. (36) With the round-t source fixed, the local gradient is 
+
+gi(( u, v ); ϕt) =  hi(u − b), λρ i(ϕt,u )( v − 1) ⊤. (37) Starting at (ut, v t), the E-step residuals on client i are exactly 
+
+b − ui,E = (1 − ηh i)E (b − ut), 1 − vi,E = (1 − ηλρ i(ϕt,u )) E (1 − vt). (38) 15 Preprint. Under review. For FedAvg, ϕt,u = uFt . Averaging Eq.(38) gives Eq.(6) and hence 
+
+uFt = b − (b − u0)rtη , 1 − vFT = (1 − v0) 
+
+> T−1
+
+Y
+
+> t=0
+
+sη (uFt ). (39) For the synchronous reference, each of the E gradient steps uses the mixed frozen-source loss. Its exact factors are rPη and sPη in the main text, so 
+
+uPt = b − (b − u0)( rPη )t, 1 − vPT = (1 − v0) 
+
+> T−1
+
+Y
+
+> t=0
+
+sPη (uPt ). (40) Independent Local training has 
+
+uLi,t = b − (b − u0)(1 − ηh i)Et , (41) 
+
+1 − vLi,T = (1 − v0) 
+
+> T−1
+
+Y
+
+> t=0
+
+(1 − ηλρ i(uLi,t )) E . (42) Finally, the source-swapped federated learner retains the E-step local updates and averaging, but uses the predetermined uPt source schedule. The generator’s second coordinate is irrelevant to the distribution of prefixes at the second prediction. Therefore 
+
+1 − vswap  
+
+> T
+
+= (1 − v0) 
+
+> T−1
+
+Y
+
+> t=0
+
+sη (uPt ). (43) The swapped experiment changes supervision generation, not the receiving learner’s number of updates or its update rule. C.3 PROOF OF THEOREM 1
+
+Prerequisite lag. For E ≥ 2, the second derivative of f (z) = (1 − ηz )E is E(E − 1) η2(1 −
+
+ηz )E−2 ≥ 0 on the stable interval. Jensen’s inequality yields 
+
+rη = X
+
+> i
+
+wif (hi) ≥ f X
+
+> i
+
+wihi
+
+!
+
+= rPη . (44) Both factors lie in (0 , 1) , so Eq.(39)–Eq.(40) imply uFt ≤ uPt . For E = 2 the Jensen gap is exact: 
+
+rη − rPη = η2
+
+X
+
+> i
+
+wih2 
+
+> i
+
+− X
+
+> i
+
+wihi
+
+!2 = η2 Var w(hi). (45) From a common starting point u, the one-round prerequisite difference is therefore η2 Var w(hi)( b −
+
+u).
+
+The two downstream costs. The Gaussian CDF has derivative 
+
+ρ′
+
+> i
+
+(u) = xi
+
+√2π exp 
+
+
+
+− x2 
+
+> i
+
+(u − c)2
+
+2
+
+
+
+> 0. (46) Consequently sη (u) decreases with u. Jensen’s inequality applied to ρi(u) also gives 
+
+sη (uFt ) ≥ sη (uPt ) ≥ sPη (uPt ). (47) All factors and the initial residual 1 − v0 are positive. Multiplying over t proves vFT ≤ vswap  
+
+> T
+
+≤
+
+vPT . The first comparison changes only the source; the second compares local-then-average and synchronous learning from the same source schedule. 16 Preprint. Under review. 
+
+Exact source attribution. Direct differentiation gives 
+
+κη (u) = Eηλ P 
+
+> i
+
+wiρ′
+
+> i
+
+(u)(1 − ηλρ i(u)) E−1
+
+sη (u) > 0. (48) Taking the logarithm of the ratio of Eq.(39) and Eq.(43) yields 
+
+log 1 − vFT
+
+1 − vswap 
+
+> T
+
+= X
+
+> t
+
+ log sη (uFt ) − log sη (uPt ) (49) 
+
+= X
+
+> t
+
+Z uPt
+
+> uFt
+
+κη (z) d z. (50) If each ρi is replaced by a model-independent constant, sη no longer depends on u, κη = 0 , and the source-swapped and original federated v iterates coincide exactly. Constants can still differ across clients, so ordinary Jensen discrepancies between local and synchronous learning can remain. 
+
+Monotonic convergence, not divergence. Since 0 < r η < 1, uFt increases to b. Because uFt ≥ u0,
+
+0 < s η (uFt ) ≤ sη (u0) < 1. (51) The uniform upper bound follows from ρi(u0) > 0. Hence 0 ≤ 1 − vFT ≤ (1 − v0)sη (u0)T → 0.The same argument applies to the pooled and Local recurrences and also to the swapped process. No step overshoots its shared target under Eq.(36). This proves all statements of Theorem 1. C.4 THE COUPLING IS PRESENT WITHOUT AN UNSTABLE EIGENVALUE 
+
+The exact federated map has Jacobian 
+
+DFη (u, v ) = 
+
+ rη 0
+
+−(1 − v)s′ 
+
+> η
+
+(u) sη (u)
+
+
+
+. (52) Both eigenvalues lie in (0 , 1) , and the lower-left entry is nonnegative when v ≤ 1. An upstream lag can therefore affect downstream learning without an eigenvalue exceeding one. The matrix need not be normal or a Euclidean contraction; monotonic convergence above was established directly, rather than inferred from a local eigenvalue calculation. At the gradient level, the source response is particularly transparent: 
+
+Hi =
+
+hi 00 λρ i(u)
+
+
+
+, Bi =
+
+ 0 0
+
+λρ ′
+
+> i
+
+(u)( v − 1) 0
+
+
+
+. (53) The generator term transmits prerequisite differences to the downstream coordinate. C.5 A FIXED -SOURCE CONTRAST AGAINST INDEPENDENT LOCAL TRAINING 
+
+Corollary 4 (No negative gain in the constant-access counterfactual) . Replace the access laws in Eq. (4) by client-specific constants pi ∈ [0 , 1] , held fixed across rounds, learning rates, and training processes. Under Eq. (36) , use the same E, T, η, w i, and initial downstream parameter v0 for FedAvg and independent Local training. On the common evaluation score S(v) = 1 − (1 − v)2,
+
+S(vFT ) − X
+
+> i
+
+wiS(vLi,T ) = (1 − v0)2
+
+X
+
+> i
+
+wiζ2Ti − X
+
+> i
+
+wiζi
+
+!2T  ≥ 0, (54) 
+
+where ζi = (1 − ηλp i)E .Proof. The constant-access residuals are 1 − vFT = (1 − v0)( P 
+
+> i
+
+wiζi)T and 1 − vLi,T = (1 − v0)ζTi .Substitute them into S. Since T ≥ 1 and ζi ∈ [0 , 1] , convexity of z 7 → z2T proves the inequality by Jensen’s inequality. 17 Preprint. Under review. Thus the negative low-step federated gain in this construction cannot be reproduced by merely retaining different constant downstream curvatures. Its model-dependent access law matters. This contrast is specific to the scalar common-state score, shared initialization, and time-constant access rates; it is not a general superiority theorem for FedAvg on static data. An arbitrary time-varying source schedule need not satisfy the same comparison. C.6 BOUNDS AND SENSITIVITY OF THE SUPERVISION CLOCK 
+
+Let γ = ηλ ∈ (0 , 1) . From Eq.(39), 1 − vFT = (1 − v0) exp( −C T ) with CT = − P 
+
+> t
+
+log sη (uFt ). For any ρ ∈ [0 , 1] ,
+
+1 − (1 − γρ )E =
+
+Z γρ 
+
+> 0
+
+E(1 − z)E−1 dz ≥ Eγρ (1 − γ)E−1. (55) Using − log s ≥ 1 − s gives the lower bound below. For the upper bound, convexity of − log gives 
+
+− log sη (u) ≤ − E X
+
+> i
+
+wi log(1 − γρ i(u)) (56) 
+
+≤ E X
+
+> i
+
+wi
+
+γρ i(u)1 − γρ i(u) ≤ Eγ 
+
+1 − γ ¯ρ(u). (57) Consequently, 
+
+Eγ (1 − γ)E−1 X
+
+> t
+
+¯ρ(uFt ) ≤ C T ≤ Eγ 
+
+1 − γ
+
+X
+
+> t
+
+¯ρ(uFt ). (58) The history of accessible supervision therefore regulates the effective amount of downstream learning. For the derivative, first observe 
+
+r′ 
+
+> η
+
+= −E X
+
+> i
+
+wihi(1 − ηh i)E−1 < 0, duFt
+
+dη = −(b − u0)tr t−1 
+
+> η
+
+r′ 
+
+> η
+
+≥ 0, (59) where the derivative for t = 0 is zero. At fixed u,
+
+−∂η log sη (u) = Eλ P 
+
+> i
+
+wiρi(u)(1 − ηλρ i(u)) E−1
+
+sη (u) ≥ 0. (60) The chain rule then proves Eq.(9); its second term is nonnegative by Eq.(48). If every learning rate is assigned the same external source schedule, independent of η, that second term is absent. This comparison requires fixing the source across learning rates, not merely freezing each rate’s own source within a round. The first source index at which every client has access probability at least 1/2 is 
+
+Thit =
+
+ log(( b − c)/(b − u0)) log rη
+
+
+
+(61) The first source index t with uFt ≥ c satisfies rtη ≤ (b − c)/(b − u0), which proves Eq.(61). Since 
+
+ρi(c) = 1 /2 for every client, this is a half-access threshold, not the onset of nonzero supervision: 
+
+ρi(u) > 0 for every finite u. A run of T rounds uses sources u0, . . . , u T −1, so the number of rounds at or above this threshold is max {T − Thit , 0}. A crossing at t = T cannot influence that run’s preceding updates. This is a finite-budget access boundary, not a singular phase transition. Increasing 
+
+η outside the non-overshooting interval has not been analyzed by these inequalities. Nor does the theory predict that a vanishing step size increases one-round aggregation error. C.7 NUMERICAL ILLUSTRATION 
+
+All illustrations use the fixed parameters 
+
+K = 2 , w1 = w2 = 12 , (h1, h 2) = (1 , 9) , E = 4 , T = 5 ,b = 10 , c = 7 .25 , λ = 2 , u0 = v0 = 0 . (62) 18 Preprint. Under review. 0.01 0.02 0.03 0.04 0.05 0.06 0.07 0.08   
+
+> Local step size η(analytical example)
+> 0510 15 20 25
+> dCT/dη
+> Direct optimization effect Supervision-access effect
+
+Figure 6: Two contributions to step-size sensitivity. Both curves are exact derivatives of the construction’s supervision clock. The mediated contribution changes the source along with the learner; it is absent under a source schedule held fixed across learning rates. 
+
+The common evaluation state is a downstream teaching prefix, and its score is S(v) = 1 − (1 −
+
+v)2. Thus the evaluation distribution is fixed independently of the training generator. Local mean is P 
+
+> i
+
+wiS(vLi,T ), not S(P 
+
+> i
+
+wivLi,T ). These scores are not percentages or fitted language-model accuracy estimates. 
+
+Table 4: Exact-recursion scores for the same construction. All update factors satisfy the stated stability condition. 
+
+η FedAvg Local mean Pooled Source-swapped FedAvg 
+
+0.02 0.281532 0.311221 0.360625 0.360494 0.06 0.950782 0.575594 0.977725 0.977670 The federated gain changes from −0.029689 to +0 .375187 . At the smaller step, the faster client can independently reach downstream teaching states before the repeatedly averaged student does. At the larger step, the federated student reaches those states sufficiently early to share the acquired downstream capability. The comparison is finite-budget; all processes eventually reach the shared optimum. At η = 0 .02 , the direct and mediated derivatives are approximately 8.368607 and 19 .770051 ; at 
+
+η = 0 .06 , they are 26 .682896 and 3.410686 . The mediated contribution dominates at the smaller step size, whereas the direct contribution is larger at the higher step size, illustrating how their relative importance changes with access to downstream teaching states. 
+
+# D MAGNITUDE CALIBRATION : CONSTRUCTIVE AND LOCAL GUARANTEES 
+
+D.1 PURE SERVER SCALING IN THE CONSTRUCTION 
+
+Proposition 5 (A safe amplitude intervention) . Under the construction’s stability conditions, define 
+
+amax = min 
+
+ 11 − rη
+
+, 11 − (1 − ηλ )E
+
+
+
+. (63) 
+
+For a constant a ∈ [1 , a max ], scaling the FedAvg increment by a yields non-overshooting updates and, from the same initial state, 
+
+u(a) 
+
+> t
+
+≥ u(1)  
+
+> t
+
+, v(a) 
+
+> t
+
+≥ v(1)  
+
+> t
+
+for all t. (64) 
+
+Moreover, the population teacher loss evaluated on the current frozen source is nonincreasing in a
+
+throughout this safe interval. Proof. Let ∆u = (1 − rη )( b − u) and ∆v = (1 − sη (u))(1 − v). The scaled residuals are 
+
+b − u+ = [1 − a(1 − rη )]( b − u), 1 − v+ = [1 − a(1 − sη (u))](1 − v). (65) 19 Preprint. Under review. Because ρi(u) ≤ 1, we have sη (u) ≥ (1 − ηλ )E . The bound on a therefore places both bracketed factors in [0 , 1] . For the prerequisite, the scaled factor is no larger than rη , so u(a) 
+
+> t
+
+≥ u(1)  
+
+> t
+
+follows directly by induction. For the downstream coordinate, write qa(u) = 1 −a(1 −sη (u)) . If u(a) ≥ u(1) ,monotonicity of sη gives 
+
+0 ≤ qa(u(a)) ≤ sη (u(a)) ≤ sη (u(1) ). (66) Multiplication by the ordered nonnegative residuals in Eq.(65) completes the induction. On the frozen round-start source, the mixed teacher loss at the candidate is exactly 
+
+Jt(a) = ¯h 
+
+> 2
+
+(b − ut)2[1 − a(1 − rη )] 2
+
++ λ ¯ρ(ut)2 (1 − vt)2[1 − a(1 − sη (ut))] 2. (67) Each squared term is nonincreasing while its bracket is nonnegative. Thus J′ 
+
+> t
+
+(a) ≤ 0 on the safe interval. For the numerical instance at η = 0 .02 , the fixed-state scores at a = 1 , 2, 3 are 0.281532 , 0.884641 ,and 0.991698 . No new direction is introduced. Proposition 5 does not guarantee the behavior of a finite-cache selector, which can choose a < 1 and does not know this construction’s safe interval. It demonstrates that correcting a progress deficit can be sufficient without correcting the direction. In this construction, a full predictive-change score on a client’s frozen prefixes has a particularly simple form: 
+
+Ki,t (a) = a2
+
+> 2
+
+hi(∆ ut)2 + λρ i(ut)(∆ vt)2 . (68) This uses the sum of both prediction-position KLs; dividing by two gives the position average. It makes explicit why a larger beneficial step can nevertheless be bounded by a behavior-change budget. D.2 LOCAL SCALE COMPENSATION IN A GENERAL PARAMETERIZATION 
+
+At a fixed learner and optimizer state, suppose ∆( η) = ηd + η2ξη with uniformly bounded ξη . For 
+
+β = aη , the actual candidate displacement is 
+
+a∆( η) = βd + βηξ η . (69) Thus extrapolation amplifies the original O(η2) direction error to O(|β|η), rather than leaving it 
+
+O(η2). For a smooth fixed-source teacher score along the limiting ray, 
+
+J(θ + βd ) = J(θ) − b0β + 12 c0β2 + o(β2), (70) where b0 = −∇ J(θ)⊤d and c0 = d⊤∇2J(θ)d. In a favorable local model, b0, c 0 > 0. Expanding the old-to-candidate KL yields 
+
+Ki(θ + βd ) = 12 β2fi + o(β2), fi = d⊤Fid ≥ 0, (71) where Fi is the conditional Fisher information averaged over the fixed source. These KL expansions require differentiable, normalized conditionals with common support and justified exchange of differentiation and expectation. For the actual candidate in Eq.(69), the score expansion acquires an additional O(|β|η) term and the KL expansion an O(β2η) term, locally for small η and |β|; the latter uses the zero KL gradient at the starting policy. Consequently, the quadratic model discards both displacement and direction remainders. If fmax = max i fi > 0, its continuous constrained problem over β ≥ 0 has the solution 
+
+β⋆ = min 
+
+(
+
+b0
+
+c0
+
+,
+
+s
+
+2δfmax 
+
+)
+
+. (72) Hence the idealized compensating multiplier is a⋆ ≃ β⋆/η . This is a local quadratic design calcula-tion, not an exact optimizer for the nonlinear problem. In particular, if a grows like 1/η , the candidate displacement must still remain in the neighborhood where the expansion is accurate; making η small does not alone ensure that. A finite candidate grid, changed directions, clipping, and persistent optimizer states all limit compensation. If b0 ≤ 0, a positive multiple of the proposed direction need not improve the teacher objective at all. 20 Preprint. Under review. D.3 WHAT AN IDEAL FULL -DISTRIBUTION TRUST CONSTRAINT CONTROLS 
+
+The use of a frozen-state surrogate with a bounded policy change is related to trust-region policy optimization (Schulman et al., 2015). Here we provide the precise statement needed for the distillation setting, separately from its empirical implementation. Throughout, logarithms are natural and 
+
+TV( P, Q ) = sup A |P (A) − Q(A)|, equivalently one half of the L1 distance between densities. 
+
+Proposition 6 (An ideal source-transfer bound) . Let θ be the old policy and θ′ a candidate, with the same prompt distribution and padded horizon L. Define the full-vocabulary population constraint 
+
+Ki(θ′) = Es∼dθi DKL 
+
+ πθ (· | s)∥πθ′ (· | s). (73) 
+
+Assume the same policies are used for sampling and for this KL, the trajectory laws have the necessary absolute continuity, and 0 ≤ ℓ(θ′; s) ≤ M on the relevant states. Then 
+
+|Li(θ′; θ′) − Li(θ′; θ)| ≤ M
+
+r LK i(θ′)2 . (74) 
+
+If Ki(θ′) ≤ δ for every client, then 
+
+L(θ′; θ′) ≤ L(θ′; θ) + M
+
+r Lδ 
+
+2 . (75) 
+
+Proof. The KL chain rule, with unchanged prompts, gives 
+
+DKL (P θi ∥P θ′ 
+
+> i
+
+) = 
+
+> L
+
+X
+
+> h=1
+
+EP θi DKL (πθ (· | sh)∥πθ′ (· | sh)) = LK i(θ′). (76) Sampling a uniform position and taking its prefix is a common Markov transformation of the trajectory. Data processing and Pinsker’s inequality therefore imply 
+
+TV( dθi , d θ′ 
+
+> i
+
+) ≤ TV( P θi , P θ′ 
+
+> i
+
+) ≤ pLK i(θ′)/2. (77) The expectation of any function taking values in [0 , M ] changes by at most M times the total variation distance. Apply this to ℓ(θ′; ·), then average over clients. A corresponding change-from-start inequality is 
+
+L(θ′; θ′) − L(θ; θ) ≤ L(θ′; θ) − L(θ; θ)
+
+| {z }
+
+> fixed-source score change
+
++M pLδ/ 2. (78) The bounded-loss assumption is additional and nontrivial for KL; a suitable probability floor or restricted domain can imply it, but the deployed neural model does not automatically satisfy it. For long sequences the bound can also be vacuous. The result bounds a distillation-loss distribution shift, not task accuracy or access to useful reasoning states. D.4 FINITE -C ACHE AND VOCABULARY APPROXIMATIONS 
+
+Fix a prefix and a set S of retained token IDs, and combine the complement T into one tail bucket. Let pT = P 
+
+> v∈T
+
+pv , qT = P 
+
+> v∈T
+
+qv , and let ep, eq be the partitioned distributions. Expanding the tail sum gives the exact identity 
+
+DKL (p∥q) = DKL (ep∥eq) + pT DKL 
+
+ p(· | T )∥q(· | T ), (79) when pT , q T > 0, with extended-real KL if some conditional support is missing. If pT = 0 , the tail term contributes zero. If pT > 0 = qT , both full and coarsened KL are infinite, and no undefined tail conditional is needed to assert the lower bound. Thus the coarsened KL is a lower bound. Its being below δ cannot certify that the full KL is below δ, and changes within the tail are invisible to the coarsened score. Comparing candidates requires the same fixed partition for every candidate at that prefix. The implemented cache also differs from a population prefix average: it uses few trajectories, regularly selected positions, and training-dependent candidates. Positions within a trajectory are 21 Preprint. Under review. correlated. Because the same round’s data help create the candidates, a naive independent-validation finite-candidate bound is inapplicable. Finally, the current rule does not always compare a feasible update with a = 0 . Even an accurately measured score better than the ordinary FedAvg candidate need not be better than the round start. Proposition 6 thus bounds source-distribution shift under its stated population assumptions; it does not establish monotonic improvement for the finite-cache selection rule. 
+
+# E ALGORITHM AND IMPLEMENTATION DETAILS 
+
+Algorithm 1 gives one round of FedTOPS. Local OPD determines the update direction, and the teacher-guided selector chooses its magnitude using a fixed cache of that round’s training trajectories. 
+
+Algorithm 1 FedTOPS: teacher-guided magnitude selection (one round)                                                                                         
+
+> Require: Starting model θt, client weights wi, teacher q, budget δ, candidates A
+> 1: for each client iin parallel do
+> 2: Generate local training trajectories from θt; cache sampled prefixes and distributions 3: Perform local OPD with learning rate ηto obtain θ+
+> i,t
+> 4: end for
+> 5: ∆t←P
+> iwiθ+
+> i,t −θt
+> 6: for a∈ A do
+> 7: Form θt(a)←θt+a∆t
+> 8: Evaluate bJt(a)and each bKi,t (a)on the fixed caches using Eq.(14) 9: end for
+> 10: Af← { a∈ A : max ibKi,t (a)≤δ}
+> 11: if Af=∅then
+> 12: at←0
+> 13: else if 1∈ A fthen
+> 14: at←1
+> 15: for a∈ A fin fixed order do
+> 16: if bJt(a)<bJt(at)then
+> 17: at←a
+> 18: end if
+> 19: end for
+> 20: else
+> 21: at←arg min a∈A f
+> bJt(a)
+> 22: end if
+> 23: return θt+1 =θt+at∆t
+
+E.1 TRAJECTORY CACHE AND CANDIDATE SCORES 
+
+Every client begins a round from the same global student. Before local optimization, it randomly selects four training responses and at most 16 evenly spaced prediction positions per response. All candidates use the same selected prefixes. Reusing the training responses avoids additional trajectory generation; candidate evaluation requires forward passes but no optimizer steps. 
+
+A fixed vocabulary partition. At each selected prefix, let S be the union of the teacher’s and starting student’s top-16 token IDs. The cache stores their probabilities on S and a tail bucket containing the remaining probability mass. For any distribution p, this tail is 1 − P 
+
+> v∈S
+
+pv , where pv
+
+is the full-softmax probability; the retained tokens are not renormalized. The same partition is used for every candidate. Teacher agreement is measured by the teacher-to-candidate forward KL, averaged within each client and then combined using the aggregation weights. Predictive change is measured by the starting-student-to-candidate forward KL, with a separate constraint on each client’s cache mean. Both quantities refer to these compressed distributions. E.2 SELECTION RULE 
+
+The candidate set is {0.5, 1, 2, 3, 5, 10 }. If a = 1 is feasible, it is the incumbent and is replaced only by a feasible candidate with a strictly lower teacher score; equal scores therefore preserve FedAvg. If 22 Preprint. Under review. 
+
+a = 1 is infeasible, the server chooses the lowest-score feasible candidate. If no candidate is feasible, the server retains the round’s starting model. Score-comparison and feasibility tolerances are 10 −9
+
+and 10 −8, respectively; Algorithm 1 omits these tolerances for clarity. E.3 COORDINATE -L EVEL MEANING FOR LORA Aggregation and scaling operate on the uploaded LoRA factors, which share an initialization. We use rank 8, α = 16 , zero dropout, and all-linear target modules. If a layer has factors Bt, A t and increments ∆B, ∆A, then 
+
+(Bt + a∆B)( At + a∆A) − BtAt = a(∆ BA t + Bt∆A) + a2∆B∆A. (80) A scaled factor increment therefore need not equal a scaled merged dense update. The local-response analysis can be expressed in trainable coordinates, while the scalar construction abstracts away this factor-product geometry. FedTOPS uses no additional correction direction. We use PEFT’s default LoRA initialization (Kaiming-uniform A and zero-initialized B), shared across clients, and target all attention and MLP linear projections ( q_proj , k_proj , v_proj , o_proj , gate_proj ,
+
+up_proj , and down_proj ), excluding the language-model head. Aggregation and server scaling operate directly on the LoRA factors without canonicalization or re-factorization, and evaluation loads the resulting adapter through vLLM without merging it into the frozen base weights. E.4 EXECUTION AND DATA LOCALITY 
+
+Our experiments simulate logical clients on one GPU. In a distributed implementation, each client could evaluate candidates on its own cache and return scalar scores and trust statistics. We do not evaluate that deployment here. Each candidate forward pass processes the cached prefix, with the language-model head evaluated only at selected positions. Timing and forward-pass counts are given in Appendix G.3. 23 Preprint. Under review. 
+
+# F EXPERIMENTAL SETUP 
+
+This appendix specifies the data partition, training procedure, and evaluation protocol used in Section 4. F.1 MODELS AND CLIENT DATA 
+
+We distill Qwen3-8B into Qwen3-0.6B-Base and Qwen3-1.7B-Base, using the 0.6B model for the main study (Yang et al., 2025). Client prompts are drawn from MATH (Hendrycks et al., 2021), using three disjoint subject groups: C1 contains prealgebra and algebra; C2 contains number the-ory and counting and probability; C3 contains intermediate algebra and precalculus. Each client receives 570 prompts. The partition is fixed with seed 42 and shared across methods. Client weights are proportional to their prompt counts, giving wi = 1 /3. Although the prompts re-main fixed, students generate new responses during training. We use the official training split of 
+
+EleutherAI/hendrycks_math , partitioned into three subject-based clients, with 570 OPD prompts per client selected without replacement using proportional subject–difficulty stratification (seed 42), disjoint from the reserved warm-up and probe subsets. Preprocessing removes malformed examples, examples without an extractable and classifiable boxed answer, and duplicate questions across splits; during training, chat-formatted prompts exceeding 2,048 tokens are filtered rather than truncated, and each client draws batches of 32 prompts from a persistent shuffled data loader, generating one response per prompt with temperature 1, top-p = 1 , and a 4,096-token response limit. Details can be found in the anonymous codes. F.2 TRAINING AND BASELINES 
+
+Within each student size, all trained methods optimize rank-8 LoRA adapters from the same initializa-tion with AdamW (Table 5). We denote η = 3 × 10 −6 by 1 ×LR and 9 × 10 −6 by 3 ×LR. FedTOPS uses Algorithm 1, with trust budget 0.05 for all student models.                                
+
+> Table 5: Training configuration. The local learning rate ηcontrols client optimization; the server multiplier a
+> scales the aggregated increment.
+> Setting Value
+> Participation / rounds All 3 clients / 50 rounds Rollouts per round 32 per client, 1 response per prompt Mini-batch / micro-batch 8 / 4; one optimization epoch Local learning rate 0.6B: 3×10 −6or 9×10 −6; 1.7B: 3×10 −6
+> Optimizer AdamW, β= (0 .9,0.999) , weight decay 0.01, gradient clipping 1 Scheduler Cosine; no warmup LoRA Rank 8, α= 16 , dropout 0, all-linear target modules Aggregation Equal-weight averaging in shared LoRA factor coordinates Training decoding Non-thinking, temperature 1, top-p= 1
+> Training length limits Prompt 2,048 tokens; response 4,096 tokens Data / training seed 42 / 42
+
+Training budgets. Each Local model uses 1,600 rollouts and 200 AdamW mini-batch steps. FedAvg and FedTOPS use the same per-client budget: 4,800 rollouts and 600 client steps over 50 rounds system-wide. Centralized uses 4,800 rollouts and 600 consecutive steps on pooled prompts. These totals match across methods, while sequential update depth differs. Token counts and training time depend on response length (Appendix G.3). 
+
+Reference models. Local mean averages the three independently trained client-model scores. Base is an untrained, adapter-free Qwen3-0.6B-Base model, evaluated once and repeated in both learning-rate blocks. The 1.7B study compares Centralized, Local, FedAvg, and FedTOPS. F.3 EVALUATION 
+
+Benchmarks. We evaluate on six mathematical reasoning benchmarks, totaling 1,546 problems and 12,368 sampled responses per model (Table 6). Client-private test sets are excluded. All methods use the same evaluation prompt format, sampling protocol, and answer grader. 24 Preprint. Under review.                 
+
+> Table 6: Evaluation benchmarks. Each problem receives eight sampled responses.
+> Benchmark Problems Responses
+> MATH500 500 4,000 AMC23 40 320 Minerva 272 2,176 OlympiadBench 674 5,392 AIME24 30 240 AIME25 30 240 Total 1,546 12,368
+
+Evaluation prompt. Evaluation is zero-shot. Each problem is supplied as a single user message, with the following instruction appended:           
+
+> Please reason step by step, and put your final answer within \boxed{}.
+
+Chat template and sampling. No separate system message is supplied to the tokenizer. We render the message with its chat template using add_generation_prompt=True and 
+
+enable_thinking=False . Each problem receives eight responses sampled with temperature 1, top-p = 0 .8, top-k = −1, minimum probability 0, seed 0, and a maximum response length of 8,192 tokens. Answers are extracted with qwen_extraction_math_verify_0p8_latex_v2 and checked with math-verify 0.8.0. 
+
+Metrics. Let cbjm ∈ { 0, 1} indicate whether response m to problem j in benchmark b is correct. For a benchmark with nb problems, 
+
+Avg@8 b = 100 8nbnbX
+
+> j=1 8
+
+X
+
+> m=1
+
+cbjm , Pass@8 b = 100 
+
+nbnbX
+
+> j=1
+
+1
+
+( 8X
+
+> m=1
+
+cbjm > 0
+
+)
+
+. (81) Avg@8 measures average response correctness, whereas Pass@8 measures the fraction of problems solved at least once. Cap-hit rate is the percentage of responses reaching the generation length limit. Macro scores average the six benchmark scores with equal weights, including for cap-hit rate. Aggregation precedes rounding, and all reported scores are percentages. 
+
+Statistical units. Each configuration is trained once with seed 42. The eight responses per problem measure sampling variability within an evaluation, and Local mean averages client models rather than independent training repetitions. For the paired source intervention, bootstrap resampling uses the same question indices for all three evaluated models and retains all eight responses to each sampled question. These intervals describe evaluation uncertainty conditional on the trained models. F.4 RESOURCES AND SOFTWARE 
+
+Each experiment runs on one RTX PRO 6000 Blackwell Server GPU with 96 GB memory. The three clients are simulated on a single machine; additional GPUs are used for independent exper-iments. Table 7 identifies the model and training-data versions. The grading dependencies are 
+
+latex2sympy2_extended 1.10.2, sympy 1.14.0, and ANTLR runtime 4.9.3. Our implementa-tion builds on verl; the audited environment uses PyTorch 2.8.0 (CUDA 12.8), Transformers 4.57.1, PEFT 0.20.0, FlashAttention 2.8.3, and vLLM 0.11.0 for rollout generation and evaluation.       
+
+> Table 7: Model and data revisions for training. Exact identifiers pin the resources independently of later repository updates.
+> Resource Revision
+> Qwen3-0.6B-Base da87bfb608c14b7cf20ba1ce41287e8de496c0cd
+> Qwen3-1.7B-Base ea980cb0a6c2ae4b936e82123acc929f1cec04c1
+> Qwen3-8B b968826d9c46dd6066d109eabc6255188de91218
+> EleutherAI/hendrycks_math 7811dc4cf37bd3a0384adc84f33da0695629b4dc
+
+The Base reference uses the same sampling protocol and prompt template, with different engine batching. Its checkpoint revision was not recorded. Generation settings and available artifact identifiers are provided in the accompanying reproducibility materials. 25 Preprint. Under review. 
+
+# G ADDITIONAL EXPERIMENTAL ANALYSES 
+
+We examine the effect of aggregate scaling, the behavior of the selector, and the influence of rollout sources on subsequent learning. We then characterize computational cost and response length under the common evaluation protocol. G.1 SELECTION ACROSS COMMUNICATION ROUNDS 
+
+Table 8 complements the round-level traces in Figure 4. Candidate and cache settings are given in Table 5; Appendix E specifies scoring and tie handling.                                    
+
+> Table 8: Candidate selection over 50 rounds with the 0.6B student. The trust budget is fixed within each run.
+> Quantity 1×LR 3×LR
+> Trust budget δ0.05 0.05 Selected a= 0 .523Selected a= 1 39Selected a= 2 17Selected a= 3 38Selected a= 5 413 Selected a= 10 37 10 Infeasible candidates (of 300) 025 Rounds with infeasible candidates 018 Holds 00
+
+At 1 ×LR, all candidates are feasible throughout training, yet the selected multiplier changes across rounds. Thus teacher-score comparisons alone can favor different scales. At 3 ×LR, 25 of the 300 candidates are infeasible across 18 rounds, and a = 10 is selected less often. The traces characterize adaptation within each setting. Figure 4 displays each candidate’s teacher score relative to a = 1 in the same round. Both panels use a shared symmetric-logarithmic color scale, linear within ±0.002 nats, without clipping or smoothing. This makes the selected scales and feasibility boundaries comparable over training. G.2 ROLLOUT -S OURCE INTERVENTION 
+
+The intervention in Section 4.4 uses a common round-9 receiver checkpoint and frozen sources constructed from the same round-10 aggregate increment. We evaluate the receiving students on MATH500. Their cap-hit rates are 51.85% with source a = 3 and 53.30% with source a = 1 ,compared with 52.38% at the common start. 
+
+Paired evaluation. Table 9 reports Avg@8 differences and paired 95% bootstrap intervals. We resample the 500 questions 5,000 times, retaining each question’s eight responses together and using the same question indices for all three models. These intervals characterize evaluation uncertainty for the saved models, not variation across training seeds. Differences use unrounded statistics and may differ from subtraction of the displayed endpoint scores.                           
+
+> Table 9: Paired differences in receiver Avg@8 on MATH500 (pp).
+> Comparison Difference 95% paired interval
+> Source a= 3 receiver −common start 1.20 [0.27, 2.10] Source a= 1 receiver −common start 0.20 [−0.70, 1.07] Source a= 3 receiver −source a= 1 receiver 1.00 [0.18, 1.82]
+
+G.3 COMPUTATIONAL COST 
+
+The auxiliary forwards operate on at most 12 cached responses and 192 prediction positions per round. Table 10 reports caching and finalization time separately. 
+
+Forward computation. Cache construction adds 12 student and 12 teacher prefix forwards. Scoring a reference and six candidates adds 84 student forwards: 96 student and 12 teacher forwards in total per round. Teacher distributions are reused across candidates. Each pass processes the actual prefix, with only the LM head restricted to selected positions; cost therefore depends on prefix length. 26 Preprint. Under review. 
+
+Table 10: Auxiliary computation for FedTOPS. Cache construction and candidate scoring/saving are timed over the training loop. Share is their sum divided by the training-loop interval; initialization and evaluation are excluded. 
+
+Student / LR Cache (s) Score/save (s) Sum (s) Training (s) Share (%) 
+
+0.6B / 1 × 188.69 979.36 1168.05 13837 8.44 0.6B / 3 × 180.56 764.11 944.67 6227 15.17 1.7B / 1 × 171.22 754.80 926.03 7598 12.19 
+
+Measured time and training tokens. Finalization includes scoring and saving; timing shares use the training-progress interval, excluding initialization and evaluation. Equal rollout counts need not imply equal training time because response lengths vary. The response-mask token totals are 6,445,612 for 0.6B at 1 ×LR, 5,164,606 for 0.6B at 3 ×LR, and 3,748,317 for 1.7B. These counts cover all 150 client-round batches and exclude prompt tokens and auxiliary forwards. The single-machine experiments characterize computation; they do not measure network traffic or comparative peak memory. G.4 RESPONSE LENGTH AND GENERATION LIMITS 
+
+Table 11 summarizes generation length. FedTOPS reduces cap hits at the reference learning rate for both student sizes, while the 0.6B high-rate run has a similar macro cap-hit rate to FedAvg despite higher accuracy. Cap hits characterize output behavior, not supervision quality. 
+
+Table 11: Mean response tokens / cap-hit rate (%), equally averaged across benchmarks. The evaluation cap is 8,192 tokens. The 0.6B Base result is repeated for reference. 
+
+Method 0.6B, 1 ×LR 0.6B, 3 ×LR 1.7B, 1 ×LR 
+
+Base student 4366.95 / 50.27 4366.95 / 50.27 —Centralized 3675.20 / 38.18 4535.74 / 48.62 1537.92 / 8.98 Local mean 4807.97 / 54.58 4120.63 / 44.23 3664.13 / 38.94 FedAvg 4821.79 / 54.88 3164.08 / 31.16 3644.79 / 38.66 
+
+FedTOPS 3830.62 / 38.31 3334.40 / 31.23 1617.09 / 9.89 
+
+27 Preprint. Under review. 
+
+# H CLIENT -L EVEL ACCURACY AND GENERATION STATISTICS 
+
+The following tables complement the main accuracy comparisons with individual Local models and benchmark-level cap-hit rates. Local C1, C2, and C3 correspond to the subject partitions in Appendix F; Local mean averages their scores. Avg@8 and Pass@8 tables contain only these client results, while cap-hit tables compare all original training methods and the available Base reference. All scores are percentages; Macro weights benchmarks equally. Best and second-best values among the rows in each table are bold and underlined. MATH, AMC, and Olympiad denote MATH500, AMC23, and OlympiadBench. H.1 0.6B S TUDENT AT THE REFERENCE LEARNING RATE 
+
+Table 12: 0.6B student, 1 ×LR: individual Local models, Avg@8 ( ↑). 
+
+Method MATH AMC Minerva Olympiad AIME24 AIME25 Macro 
+
+Local C1 12.93 4.06 3.58 4.58 0.83 0.42 4.40 
+
+Local C2 11.47 4.69 3.68 4.08 0.42 0.00 4.06 Local C3 12.65 3.12 3.45 4.30 0.00 0.00 3.92 Local mean 12.35 3.96 3.57 4.32 0.42 0.14 4.13 Table 13: 0.6B student, 1 ×LR: individual Local models, Pass@8 ( ↑). 
+
+Method MATH AMC Minerva Olympiad AIME24 AIME25 Macro 
+
+Local C1 52.40 27.50 18.38 23.00 3.33 3.33 21.32 
+
+Local C2 50.40 25.00 19.49 22.11 3.33 0.00 20.05 Local C3 53.00 15.00 16.54 22.55 0.00 0.00 17.85 Local mean 51.93 22.50 18.14 22.55 2.22 1.11 19.74 Table 14: 0.6B student, 1 ×LR: cap-hit rate ( ↓). 
+
+Method MATH AMC Minerva Olympiad AIME24 AIME25 Macro 
+
+Base student 50.68 46.88 48.85 51.91 52.08 51.25 50.27 Centralized 30.12 35.31 41.13 37.11 42.50 42.92 38.18 
+
+Local C1 53.12 57.19 50.69 53.36 55.00 49.17 53.09 Local C2 55.85 55.31 52.53 56.31 59.17 53.75 55.49 Local C3 54.43 57.81 51.98 54.75 55.83 56.25 55.17 Local mean 54.47 56.77 51.73 54.80 56.67 53.06 54.58 FedAvg 54.27 55.62 51.79 54.27 58.33 55.00 54.88 
+
+FedTOPS 18.75 30.31 10.48 38.22 69.17 62.92 38.31 
+
+28 Preprint. Under review. H.2 0.6B S TUDENT AT THE LARGER LEARNING RATE 
+
+Table 15: 0.6B student, 3 ×LR: individual Local models, Avg@8 ( ↑). 
+
+Method MATH AMC Minerva Olympiad AIME24 AIME25 Macro 
+
+Local C1 33.70 16.56 8.32 10.65 0.83 0.42 11.75 
+
+Local C2 22.15 10.94 6.16 6.36 0.83 1.67 8.02 Local C3 24.45 11.88 6.76 7.10 1.67 0.00 8.64 Local mean 26.77 13.12 7.08 8.04 1.11 0.69 9.47 Table 16: 0.6B student, 3 ×LR: individual Local models, Pass@8 ( ↑). 
+
+Method MATH AMC Minerva Olympiad AIME24 AIME25 Macro 
+
+Local C1 69.20 47.50 26.47 35.01 6.67 3.33 31.36 
+
+Local C2 64.80 42.50 23.16 27.60 6.67 10.00 29.12 Local C3 67.00 45.00 25.00 28.64 10.00 0.00 29.27 Local mean 67.00 45.00 24.88 30.42 7.78 4.44 29.92 Table 17: 0.6B student, 3 ×LR: cap-hit rate ( ↓). 
+
+Method MATH AMC Minerva Olympiad AIME24 AIME25 Macro 
+
+Base student 50.68 46.88 48.85 51.91 52.08 51.25 50.27 Centralized 29.62 46.88 20.08 51.41 70.00 73.75 48.62 Local C1 25.00 29.06 35.80 33.10 40.83 38.33 33.69 Local C2 44.85 50.94 50.14 51.19 53.75 56.25 51.19 Local C3 40.88 43.44 48.39 49.59 53.33 51.25 47.81 Local mean 36.91 41.15 44.78 44.63 49.31 48.61 44.23 FedAvg 21.93 26.25 32.26 29.88 40.42 36.25 31.16 FedTOPS 13.68 28.44 7.90 29.47 53.75 54.17 31.23 
+
+29 Preprint. Under review. H.3 1.7B S TUDENT AT THE REFERENCE LEARNING RATE 
+
+Table 18: Qwen3-1.7B-Base student after distillation: individual Local models, Avg@8 ( ↑). 
+
+Method MATH AMC Minerva Olympiad AIME24 AIME25 Macro 
+
+Local C1 29.43 15.31 9.65 12.31 2.50 1.25 11.74 Local C2 30.03 17.19 10.62 12.18 3.33 0.83 12.36 
+
+Local C3 28.78 14.37 10.02 11.48 2.92 2.08 11.61 Local mean 29.41 15.62 10.09 11.99 2.92 1.39 11.90 Table 19: Qwen3-1.7B-Base student after distillation: individual Local models, Pass@8 ( ↑). 
+
+Method MATH AMC Minerva Olympiad AIME24 AIME25 Macro 
+
+Local C1 74.60 55.00 33.82 40.80 16.67 10.00 38.48 Local C2 76.40 65.00 35.66 40.06 13.33 6.67 39.52 
+
+Local C3 74.60 47.50 36.03 39.91 13.33 13.33 37.45 Local mean 75.20 55.83 35.17 40.26 14.44 10.00 38.48 Table 20: Qwen3-1.7B-Base student after distillation: cap-hit rate ( ↓). 
+
+Method MATH AMC Minerva Olympiad AIME24 AIME25 Macro 
+
+Centralized 4.17 6.25 2.90 8.46 20.42 11.67 8.98 
+
+Local C1 37.05 38.75 32.72 39.52 40.42 42.08 38.42 Local C2 37.77 39.69 32.31 39.47 39.58 43.75 38.76 Local C3 37.50 40.31 32.86 40.49 44.17 42.50 39.64 Local mean 37.44 39.58 32.63 39.82 41.39 42.78 38.94 FedAvg 38.15 38.44 33.13 40.13 40.42 41.67 38.66 
+
+FedTOPS 4.17 9.06 2.57 8.55 19.17 15.83 9.89 
+
+30
