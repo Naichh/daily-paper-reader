@@ -1,0 +1,1625 @@
+Title: CT-OPD: Counterfactual Trace On-Policy Distillation for Diffusion Vision-Language Models
+
+URL Source: https://arxiv.org/pdf/2609.32781v1
+
+Published Time: Tue, 29 Sep 2026 01:16:01 GMT
+
+Number of Pages: 31
+
+Markdown Content:
+# CT-OPD: C OUNTERFACTUAL TRACE 
+
+# ON-P OLICY DISTILLATION FOR 
+
+# DIFFUSION VISION -L ANGUAGE MODELS 
+
+Long Qian 1,2, Bingke Zhu 1,2∗
+
+, Jiaqi Wei 1,3†
+
+, Yu Li 1,4, Yingying Chen 1,2, Jinqiao Wang 1,2,51Foundation Model Research Center, Institute of Automation, Chinese Academy of Sciences 
+
+> 2
+
+School of Future Technology, University of Chinese Academy of Sciences 
+
+> 3
+
+School of Engineering, Cardiff University 
+
+> 4
+
+School of Advanced Interdisciplinary Sciences, University of Chinese Academy of Sciences 
+
+> 5
+
+Wuhan AI Research 
+
+{qianlong2024,liyu2025 }@ia.ac.cn, WeiJ16@cardiff.ac.uk, 
+
+{bingke.zhu,yingying.chen,jqwang }@nlpr.ia.ac.cn 
+
+ABSTRACT 
+
+Diffusion vision-language models generate answers by gradually resolving masked tokens, making accurate conditional prediction in partially resolved states central to post-training. Masking completed answers yields coherent contexts and targets, but prescribed masks do not reflect the model’s reveal decisions. Its trajectories capture these decisions, yet their provisional visible tokens can conflict with the target response. Outcome-based reinforcement learning follows these trajectories but provides only response-level feedback, which loses contrast when sampled rewards tie. To align coherent token-level supervision with the model’s reveal decisions, we introduce Counterfactual Trace On-Policy Distillation (CT-OPD), which combines completed teacher responses with trajectory masks from the current student. CT-OPD retokenizes each teacher response in the student’s vocabulary and extracts unresolved-position masks at successive stages of the student’s reverse process. For each mask, it discards provisional rollout values and reconstructs the partial state from the teacher endpoint, so the supervised positions follow the current trajectory while the visible context and targets remain consistent with the same response. The student is trained on these reconstructed states with its native categorical loss, and trajectories are refreshed as the model evolves. Across dense and sparse diffusion architectures, CT-OPD consistently enhances multimodal understanding and reasoning capabilities, with gains of up to 9.80 points on the nine-benchmark average. On the unified understanding-and-generation architecture, it also improves both visual understanding and image generation, showing that the same principle transfers across architectures and modalities. Ablations further attribute these gains to coherent reconstruction and current-model trajectory masks. 
+
+1 INTRODUCTION 
+
+Diffusion vision-language models (VLMs) generate responses by repeatedly predicting masked token positions. Beginning with a fully masked canvas, the reverse process gradually reveals an answer. At every stage, unresolved tokens are inferred from the image, the question, and the portion of the response already available (You et al., 2025; Li et al., 2025; Yang et al., 2025). Unlike left-to-right decoding, this process revisits the answer as its visible content changes, so each step presents a different conditional prediction problem. Effective post-training therefore requires accurate supervision across the partial states encountered throughout this reverse process. Existing post-training methods address different aspects of this requirement. As shown in Fig. 1, supervised fine-tuning or distillation starts from a high-quality completed response, masks some of its 
+
+> ∗
+
+Corresponding author. 
+
+> †
+
+Work done during internships at Institute of Automation, Chinese Academy of Sciences. 
+
+1arXiv:2609.32781v1 [cs.CV] 26 Sep 2026 One answer, many prediction problems                             
+
+> What are the colors of the bus?
+> s0 [M] [M] [M] [M] [M] [M] [M]
+> s1 The [M] is [M] and blue .
+> s2 The bus is [M] and blue .
+> s3 The bus is white and blue .
+> Each reveal changes
+> the next prediction problem.
+
+Correct endpoint       
+
+> The bus is white and red .
+> terminal response
+
+Where existing signals fall short                                           
+
+> Prescribed -mask SFT Terminal -outcome RL AR on -policy KD Raw trace + endpoint
+> QUERY
+> CONTEXT
+> CORRECTION
+> student -selected positions causal next -token position student -selected positions
+> [M] bus is white and [M] .The [M] is [M] and blue .The →bus →is →The [M] is [M] and blue .
+> The @1 red @6
+> 60.74% identical
+> correctness -reward groups
+> pₜ(· | prefix)
+> different vocabularies
+> bus @2 white @4
+> Student -independent masks No token -level targets Different query interface
+> The bus is white and blue .
+> Conflicting visible values
+
+A coherent partial -state query       
+
+> Endpoint content
+> The bus is white and red .
+> visible values + token targets
+
+## + Student -selected positions          
+
+> [M] [M]
+> visible position
+> keep positions · discard provisional values
+> One coherent query
+> The [M] is [M] and red .
+> bus white
+> same -endpoint context + targets
+> Trace selects positions; one endpoint supplies context and targets.
+
+(a) 
+
+(b) 
+
+(c)                                                                  
+
+> schedule 1234567
+> student 1234567≠123456712345671234567
+> ℓ₁ ℓ₆
+> rewards centered
+> 0000
+> 11110000causal prefix bidirectional query
+> 1234≠•M•M•••visible: blue ≠endpoint: red
+> white
+
+Figure 1: Motivation of CT-OPD. Completed responses provide coherent content but do not specify the student’s unresolved positions. Student trajectories reveal these positions, yet their provisional tokens may conflict with endpoint targets. CT-OPD combines trajectory-selected positions with context and targets from one endpoint. tokens, and trains the model to recover them. Because the visible tokens and prediction targets come from the same response, the resulting task is precise and internally consistent. However, its masks are chosen independently of the current model: a position that the model repeatedly leaves unresolved receives no special attention over one it already resolves reliably. Outcome-based reinforcement learning follows the model’s own completions, but a score assigned after the response is finished cannot identify which intermediate prediction caused an error or which token should replace it. This loss of detail is especially consequential for weak models. In our 512-prompt LLaDA-V probe as shown in Tab. 2, 60.74% of four-response groups receive identical correctness rewards, leaving centered group-relative objectives with no task advantage even though token-level corrections are available from a strong teacher. Autoregressive (AR) on-policy distillation offers another piece of the solution by querying a teacher on model-generated prefixes (Agarwal et al., 2024). Its causal query, however, is different from the bidirectional partial canvas native to diffusion decoding, and teacher logits do not align directly when the two models use different tokenizers. Together, these limitations reveal what a diffusion post-training state must contain: the positions to supervise should reflect the model’s current reverse trajectory, while the visible context and token targets should describe one coherent response. These ingredients come from different sources: a completed response provides the tokens to form consistent context and targets, whereas a rollout trace records the model’s reveal decisions through its mask pattern. Yet the trace carries provisional visible tokens, which serve as context for predicting the unresolved positions. Transferring the trace intact and replacing only its targets can therefore create a mismatch: whenever a visible trace token differs from the completed response, the model sees part of one response and is asked to complete another. Drawing a fresh mask from a prescribed schedule over the completed response removes this mismatch, but also discards the model-specific reveal pattern that makes the trace useful. We therefore retain only the unresolved-position pattern as a trajectory mask and place it over the completed response, or endpoint . Within that response, the mask identifies the positions left unresolved by the current trajectory, while the endpoint supplies both visible context and targets. The reconstructed partial state thus combines trajectory-aware supervision with one coherent conditional prediction problem. 2To address these challenges, we propose Counterfactual Trace On-Policy Distillation (CT-OPD) ,a post-training method that builds coherent partial-response tasks along the current model’s reverse trajectory. CT-OPD serializes a completed teacher response, retokenizes it with the student’s tokenizer, and adapts the result to the student’s endpoint convention. At the beginning of each training cycle, the current student completes a roolout on the same image-question prompt, yielding unresolved-position masks at the fully masked, early, middle, and late stages of decoding. CT-OPD discards the rollout’s provisional token values and overlays each mask on the retokenized endpoint: endpoint tokens fill the visible positions, while endpoint tokens under the mask provide the prediction targets. Each reconstructed state follows the student’s current reveal pattern while presenting a context and correction drawn from one response. The student optimizes these four states sequentially with its native categorical diffusion loss, then generates a fresh trajectory for the next cycle. Since the procedure transfers student-tokenized endpoints and trajectory masks instead of teacher logits, it applies across mismatched tokenizers, diffusion architectures, and both text and image token streams. Across dense and sparse diffusion architectures, CT-OPD strengthens multimodal understanding and reasoning, improving the nine-task average by up to 9.80 points over the baseline and consistently outperforming existing post-training methods. Comparisons with random-mask diffusion SFT separate the benefit of partial-state training from trajectory-based position selection, while controlled studies further establish the roles of coherent reconstruction and current, prompt-matched masks. To further evaluate the generality of CT-OPD beyond visual understanding, we apply it to unified MMaDA. The same construction improves both understanding and image generation, demonstrating that CT-OPD transfers across architectures and output modalities. Our contributions are: • We formulate diffusion-VLM post-training as the construction of coherent partial-response prediction tasks, separating response content from trajectory-dependent position selection and exposing the context-target mismatch introduced by retaining provisional rollout values. • We introduce CT-OPD, an on-policy distillation method that turns teacher responses and student trajectories into coherent token-level supervision, adapting training tasks to the evolving student across tokenizers, diffusion architectures, and output modalities. • We demonstrate consistent performance across dense, sparse, and unified diffusion VLMs. CT-OPD achieves the best nine-benchmark understanding average on every evaluated backbone, raises LLaDA-V by 9.80 points over the baseline, and improves all three image-generation metrics on MMaDA, while ablations verify each component of the design. 
+
+2 RELATED WORK 
+
+Diffusion vision-language models. Masked-diffusion language models predict unresolved tokens from bidirectional context (Nie et al., 2025), a formulation extended to multimodal understanding and generation by LLaDA-V, LaViDa, MMaDA, and later systems (You et al., 2025; Li et al., 2025; Yang et al., 2025; Zeng et al., 2026; Wu et al., 2026; Chen et al., 2026). Mixture-of-experts models scale capacity through conditional computation (Fedus et al., 2022), also used in AR VLMs and text diffusion (Lin et al., 2026; Zhu et al., 2025). In sparse D IMOE-VL, CT-OPD’s reconstructed partial state drives both expert selection and token prediction under one native loss. 
+
+Reinforcement learning for diffusion models. Diffusion post-training uses reward-weighted denoising, reverse-state policy gradients, intermediate branching, trajectory balance, and multimodal tree search (Zhu et al., 2026; He et al., 2025; Oba et al., 2026; Ahmadi et al., 2026; Li et al., 2026a). TraceRL, d3LLM, and MaskGRPO further exploit preferred trajectories, decoding orders, and grouped outcomes (Wang et al., 2025; Qian et al., 2026; Ma et al., 2025). CT-OPD uses the reverse process to select unresolved positions, then couples them to a verified endpoint for dense token supervision when group rewards coincide and centered task advantages vanish. 
+
+On-policy and cross-tokenizer distillation. AR on-policy distillation queries a teacher on student-generated prefixes (Agarwal et al., 2024), while sequence-level and cross-tokenizer methods transfer complete responses or align distributions across vocabularies (Kim & Rush, 2016; Boizard et al., 2025; Minixhofer et al., 2025; Zhang et al., 2025; Wang et al., 2026). For diffusion students, OPDLM derives causal prefixes from student endpoints, and TOPD matches masked-state distributions from a compatible teacher, and dOPSD constructs privileged targets from later trajectory states, and OPTD 3What color is 
+
+> the bus?
+
+Answer -verified response  Ȳᵀ      
+
+> Content to predict
+> The bus is yellow .<eos>
+> Positions to predict
+> Image v
+> Question x
+> masked
+> visible
+> Context
+> c = (v, x)
+> ⋮⋮
+> Image
+> Encoder
+> Tokenizer
+> ⋮
+> ⋮
+> yellow Answer a*
+> Reason: ...
+> Final answer: yellow
+
+Cross -tokenizer adaptation 
+
+> Detok_T
+> Tok_S
+> Adapt
+
+Teacher endpoint y ᵀ                   
+
+> [M] [M] [M] [M] [M] [M]
+> [M] [M] is [M] [M] [M]
+> is The bus [M] [M] [M]
+> The bus is .<eos >
+> S₀
+> S₁
+> S₂
+> S₃[M]
+
+Reverse rollout states 
+
+> Current
+> student
+
+Trajectory masks M ⱼ
+
+> ⋮
+> ⋮
+> ⋮
+
+Extract trajectory masks     
+
+> is The bus [M] [M] [M]
+> masked visible
+
+Stage 1
+
+> M0
+> M1
+> M2
+> M3
+
+Endpoint and mask collection 
+
+> Frozen
+> teacher
+
+Stage 2 Reconstruction and student updates 
+
+Reconstruction (j =  2) Counterfactual rule  Queries + supervision  Native prediction  Loss + update                                                                                               
+
+> yᵀThe bus is yellow .<eos>
+> M₂
+> s̃₂The bus is [M] [M] [M]
+> values from y ᵀsame mask
+> Active span shown
+> 𝑈 𝑗 = 𝐴(𝑦 𝑇 ) ∩ 𝑀 𝑗
+> s̃0[M] [M] [M] [M] [M] [M]
+> s̃1[M] [M] is [M] [M] [M]
+> s̃2The bus is [M] [M] [M]
+> s̃3The bus is [M] .<eos>
+> supervised positions
+> One trace · four sequential updates j = 0θ₀→θ₁j = 1θ₁→θ₂j = 2θ₂→θ₃j = 3θ₃→θ₄
+> Fresh rollout after the fourth update
+> 𝐶 𝑌 𝑇 , 𝑀 𝑗 𝑖 =
+> ൝𝑌 𝑖 𝑇 ,𝑖 ∈ 𝐴(𝑌 𝑇 ) ∖ 𝑀 𝑗
+> 𝑀 , otherwise
+> masked visible
+> The bus is [M] [M] [M]
+> j = 2
+> c = (v, x), t ₂
+> Diffusion denoiser
+> 𝑝 𝜃 ·∣ ƿ 𝑠 𝑗 , 𝑐, 𝑡 𝑗
+> pos 4
+> yellow
+> 0.76
+> pos 5
+> .
+> 𝑝 𝜃,5
+> (.)
+> pos 6
+> <eos >
+> 𝑝 𝜃,6
+> (<eos>)
+> Target likelihoods
+> Supervision on U ⱼ
+> ℓ𝑗,𝑖 = − log 𝑝 𝜃,𝑖 𝑦 𝑖 𝑇 ∣ 𝑋 𝑖
+> 123456
+> ℓ2,4 ℓ2,5 ℓ2,6
+> ℒ𝑗 =1
+> 𝑈 𝑗 ∨ 1 ෍𝑖∈𝑈 𝑗
+> ℓ𝑗,𝑖
+> Optimizer step 𝜃 𝑗 → 𝜃 𝑗+1
+> Discard provisional values
+
+Figure 2: Overview of CT-OPD. A completed teacher response is retokenized as the student endpoint, while a current-student rollout supplies trajectory masks at four denoising stages. CT-OPD overlays each mask on the endpoint to form coherent partial states and supervises unresolved endpoint tokens with the native categorical loss. The updated student generates a fresh trajectory for the next cycle. compresses future reverse transitions for few-step decoding (Su et al., 2026; Ren et al., 2026; Dat et al., 2026; Lu et al., 2026). CT-OPD instead retokenizes an answer-verified AR VLM response for visible context and targets, using student traces to select the masked positions. 
+
+3 METHOD 
+
+CT-OPD forms each training state from two pieces with different roles. A teacher endpoint determines the response to be learned, while a trajectory mask -the positions left unresolved at one stage of the current model’s reverse process-determines where that response is predicted. Expressing the endpoint in the student’s vocabulary and reconstructing a partial state with its tokens under this mask allows completed teacher answers to supervise the model’s own sequence of reveal stages. 3.1 TEACHER ENDPOINTS AND TRAJECTORY MASKS 
+
+A teacher answer needs adaptation when tokenization or termination conventions differ. Given image 
+
+v, question x, and training answer a∗, let c = ( v, x ). The AR VLM generates response ¯Y T with a rationale and verified final answer. We serialize and retokenize it, then apply the endpoint adapter 
+
+Adm a for student architecture a:
+
+Y T = Adm a
+
+Tok S
+
+ Detok T( ¯Y T) . (1) 
+
+Adm a fits the canvas by trimming the rationale as needed, retaining the verified answer suffix and appending the native end-of-turn token. Adapted endpoints have law πT(dy | c, a ∗) and define the active span scored through the student’s native head without teacher logits on masked states. With the endpoint in student tokens, we choose where to place its masks. A prescribed schedule does not reflect the student’s reveal decisions, so each cycle freezes the parameters as ¯θ and samples a reverse trace Z. The selector Gj extracts the unresolved positions at stage j:
+
+Z ∼ Prev ¯θ (· | c), Mj = Gj (Z), ρ¯θ,j (m | c) = Pr( Mj = m | c). (2) Each mask Mj lies on the common length-L canvas I = {1, . . . , L }. If native scoring requires metadata Hj that is not determined by Mj , we write Ξj = ( Mj , H j ) for the complete trajectory 4descriptor, and otherwise Ξj = Mj . Set operations below act only on Mj , and the rollout’s tentative response values are discarded. The trajectory mask depends on the question and current student, so it stays with its originating prompt. Given a training example, the teacher endpoint and raw trace are sampled independently and paired by that prompt, and the trace’s provisional response values play no role in their pairing. 3.2 CONSTRUCTING COHERENT PARTIAL STATES 
+
+A trajectory mask identifies missing positions, while the raw trace from which it was extracted may contain visible values that disagree with the teacher, and its canvas may also extend beyond the retokenized endpoint. Let A(y) ⊆ I contain the endpoint’s active coordinates, including its supervised terminal token. We project a raw mask m ⊆ I onto this span and fill every visible active coordinate from y:
+
+C(y, m )i =
+
+yi, i ∈ A(y) \ m, 
+
+[M], otherwise , U (y, m ) = A(y) ∩ m. (3) Thus U (y, m ) contains exactly the active positions to score, and coordinates outside A(y) remain masked and receive no loss. Replacing raw visible values does not change the positions selected by the trajectory mask within the endpoint span. It changes the question asked there: the student now completes the same response that supplies its targets. These requirements uniquely determine 
+
+C(y, m ) (Proposition 1), which the native adapter maps to a valid query for each architecture. At fixed context, answer, and stage, an endpoint and current-model trajectory mask are sampled independently. Reconstruction defines their joint law ed¯θ,j with the partial state: 
+
+ed¯θ,j (dy, dm, ds | c, a ∗) = πT(dy | c, a ∗) ρ¯θ,j (dm | c) δC(y,m )(ds ). (4) The product law keeps endpoint content and mask placement distinct, while s = C(y, m ) makes their output one prediction task. The mask determines target coordinates and which endpoint tokens are visible. Relative to prescribed time-t corruption νt(m | y, c ) in diffusion SFT, the queried positions follow the current student’s unresolved-set occupancy and all visible values follow the endpoint. The mask comes from an on-policy rollout, and its reconstructed canvas is counterfactual because provisional rollout values have been replaced by endpoint tokens from the same teacher response. 3.3 NATIVE DENOISING SUPERVISION 
+
+Reconstruction now defines the query and its target, and the remaining step is to score that query through the student’s own prediction interface. The native input adapter Input a maps a reconstruction to a canvas for bidirectional heads or to clean-prefix/current-block queries for block heads (Sec-tion C.3.1). Let p(a) 
+
+> θ,i
+
+(· | Xi) denote the categorical predictor using the information Xi available when querying position i. CT-OPD minimizes 
+
+LCT (θ; ¯θ) = E
+
+"
+
+− 1
+
+|U | ∨ 1
+
+X
+
+> i∈U
+
+log p(a) 
+
+> θ,i
+
+(Y T 
+
+> i
+
+| Xi)
+
+#
+
+, X = Input a(c, Y T, Ξj ). (5) With U = U (Y T, M j ), the expectation samples training contexts, endpoints, traces, and a uniform stage j ∈ { 0, 1, 2, 3}. Empty target sets contribute zero, and per-example token averaging prevents early states from receiving more weight solely because they contain more targets. The fixed trajectory-mask distribution determines which native queries receive weight, and the categorical score is strictly proper for their conditional targets. Its Bayes-optimal predictor is the teacher-token distribution induced by the reconstructed states and their per-example weights, and excess over that Bayes risk is a nonnegative weighted conditional KL (Proposition 2). Under the native reverse-event construction, the same categorical loss equals a reveal-normalized KL that distinguishes persistence from token prediction, and for mask-excluding heads this reduces to the absorbing reverse-token KL (Section D.1.2). Bidirectional canvases and clean-prefix/current-block heads can therefore learn through their own conditional factorization. Because each imperfect supervised token also has a nonzero logit-level correction when terminal rewards coincide, the objective retains a direct signal in the zero-contrast groups examined empirically in Section 4.3 (Proposition 3). 5How trajectory masks allocate supervision. Reconstruction makes each target meaningful in its visible context, and trajectory-mask selection determines which coherent conditional tasks the student practices. At a fixed endpoint, scorer, and active target count, a trajectory mask and an equal-count uniform mask can select different positions and leave different endpoint tokens visible around them. Their risk difference therefore contains both position-allocation and joint-context terms, separated exactly in Equation (38). With native metadata matched, a fully masked endpoint has a unique active mask, so position selection matters as the response becomes partially resolved, where the student’s reveal pattern determines which conditional queries receive supervision at that stage. To separate position selection from changes in visible context, we compare positions within a single reconstructed parent state. Let Uj be unresolved positions at that state and Kj ⊂ Uj the nonempty set still unresolved at the next stage, and write Rj = Uj \ Kj for the positions just revealed. For any fixed per-position score qi, write qB = |B|−1 P 
+
+> i∈B
+
+qi. A uniformly selected |Kj |-subset of Uj has expected mean qUj , and 
+
+qKj − qUj = |Rj ||Uj |
+
+ qKj − qRj
+
+. (6) The left side measures the retained-position excess over an equal-count uniform subset. We apply this identity to conditional prediction in Section 4.5. 3.4 ONLINE UPDATES ACROSS STAGES AND MODALITIES 
+
+CT-OPD refreshes trajectory masks at the start of each cycle to follow the evolving student. At cycle 
+
+k, one rollout supplies masks at the fully masked, early, middle, and late denoising stages: 
+
+¯θk = θk, 0, Zk ∼ Prev ¯θk (· | c), Mk,j = Gj (Zk),θk,j +1 = OptStep  θk,j , bLk,j 
+
+, j = 0 , . . . , 3. (7) All four masks stay fixed during the updates, and bLk,j averages stage-j CT losses over the minibatch at parameters θk,j . The stages train both initial response prediction and completion with progressively more endpoint context. Reusing one trace amortizes rollout cost over four updates, while refreshing it each cycle adapts supervision to the student’s changing reveal decisions. The same construction applies to text and image token streams through their native endpoint encodings and prediction heads. In sparse D IMOE-VL, the loss updates the decoder, router, and selected experts on each reconstructed state. For unified MMaDA, text and image trajectories supply masks for their respective endpoints, and the two branches alternate updates to one shared model. Sections A and C specify all adapters and optimization details. 
+
+4 EXPERIMENTS 
+
+We evaluate CT-OPD across dense, sparse, and unified diffusion VLMs and trace its gains to three design choices: learning from partial responses, making visible context agree with the teacher endpoint, and assigning each question the positions selected by its current student. 4.1 EXPERIMENTAL SETUP 
+
+Models and data. We study LLaDA-V (You et al., 2025), LaViDa-LLaDA (Li et al., 2025), and our sparse D IMOE-VL-B ASE . Qwen3-VL-32B-Instruct (Bai et al., 2025) supplies answer-anchored endpoints for Vision-SR1-47K (Li et al., 2026b), and each student retokenizes the resulting text under its own response convention. Vision encoders remain frozen. For unified MMaDA-8B-MixCoT (Yang et al., 2025), training alternates between Qwen3-VL understanding endpoints and Qwen-Image-2512 (Wu et al., 2025) images encoded by the frozen native MAGVITv2 tokenizer (Yu et al., 2024). Section A details data construction, endpoint adapters, training, and decoding. 
+
+Training protocol. On all three understanding backbones, CT-OPD uses a 128-token response canvas, 32 reverse steps, and {100 , 75 , 50 , 25 }% mask ratios. AdamW (Loshchilov & Hutter, 2019) uses global batch 16 and learning rate 3 × 10 −7, and each endpoint trace supplies four sequential updates. All comparison methods use matched training budgets and comparable optimization settings unless otherwise specified. 6Table 1: CT-OPD improves dense, sparse, and unified diffusion-VLMs. Parentheses give changes from Base (red: gain; blue: decrease); bold marks the best result per backbone. Endpoint-only uses full masks; Random matches mask counts and budget; OPDLM+BPM aligns teacher distributions. 
+
+Method Perception and knowledge Scientific reasoning Avg. 
+
+MMMU MMMU-Pro MMStar MMBench SEEDBench MathVerse MathVista GPQA GPQA-D 
+
+Dense diffusion VLMs 
+
+LLaDA-V 41.78 19.02 50.07 69.45 69.70 22.72 53.60 16.96 16.67 40.00 + MaskGRPO 42.33 (+0.55) 25.66 (+6.64) 52.20 (+2.13) 72.74 (+3.29) 69.79 (+0.09) 14.72 (−8.00) 44.40 (−9.20) 28.57 (+11.61) 29.29 (+12.62) 42.19 (+2.19) 
+
++ MDPO 41.56 (−0.22) 19.25 (+0.23) 49.27 (−0.80) 71.83 (+2.38) 69.87 (+0.17) 13.45 (−9.27) 40.70 (−12.90) 22.77 (+5.81) 24.24 (+7.57) 39.22 (−0.78) 
+
++ Endpoint-only 44.33 (+2.55) 23.87 (+4.85) 52.93 (+2.86) 75.87 (+6.42) 70.37 (+0.67) 19.54 (−3.18) 48.90 (−4.70) 25.45 (+8.49) 26.77 (+10.10) 43.12 (+3.12) 
+
++ Random 42.00 (+0.22) 28.55 (+9.54) 56.00 (+5.93) 74.91 (+5.46) 69.26 (−0.44) 23.10 (+0.38) 56.60 (+3.00) 28.35 (+11.38) 33.84 (+17.17) 45.85 (+5.85) 
+
++ OPDLM+BPM 44.00 (+2.22) 29.60 (+10.58) 54.40 (+4.33) 80.72 (+11.26) 70.78 (+1.08) 24.37 (+1.65) 60.10 (+6.50) 29.46 (+12.50) 30.81 (+14.14) 47.14 (+7.14) 
+
++ CT-OPD 46.22 (+4.44) 33.12 (+14.10) 55.87 (+5.80) 83.16 (+13.71) 74.26 (+4.56) 27.79 (+5.08) 61.30 (+7.70) 32.59 (+15.62) 33.84 (+17.17) 49.79 (+9.80) 
+
+LaViDa-LLaDA 42.00 28.79 46.27 70.50 65.98 17.51 33.00 30.13 27.78 40.22 + MaskGRPO 42.67 (+0.67) 24.10 (−4.69) 46.53 (+0.26) 71.40 (+0.90) 65.64 (−0.34) 16.12 (−1.39) 34.70 (+1.70) 29.91 (−0.22) 25.76 (−2.02) 39.65 (−0.57) 
+
++ MDPO 41.89 (−0.11) 24.34 (−4.45) 43.33 (−2.94) 70.94 (+0.44) 66.03 (+0.05) 17.77 (+0.26) 31.00 (−2.00) 33.04 (+2.91) 32.83 (+5.05) 40.13 (−0.09) 
+
++ Endpoint-only 42.67 (+0.67) 29.36 (+0.57) 45.60 (−0.67) 75.51 (+5.01) 66.34 (+0.36) 18.65 (+1.14) 28.30 (−4.70) 29.46 (−0.67) 26.77 (−1.01) 40.30 (+0.08) 
+
++ Random 42.11 (+0.11) 28.90 (+0.12) 46.33 (+0.07) 73.41 (+2.90) 66.06 (+0.08) 17.89 (+0.38) 45.70 (+12.70) 29.91 (−0.22) 26.26 (−1.52) 41.84 (+1.62) 
+
++ OPDLM+BPM 41.22 (−0.78) 29.36 (+0.58) 46.13 (−0.13) 74.57 (+4.07) 65.49 (−0.48) 17.51 43.80 (+10.80) 29.02 (−1.12) 24.24 (−3.54) 41.26 (+1.04) 
+
++ CT-OPD 43.67 (+1.67) 29.83 (+1.04) 47.00 (+0.73) 75.37 (+4.87) 66.53 (+0.55) 18.15 (+0.63) 47.60 (+14.60) 30.13 27.78 42.90 (+2.68) 
+
+Sparse diffusion VLM 
+
+DIMOE-VL-B ASE 32.67 21.85 40.00 71.30 61.34 18.65 34.60 25.45 25.25 36.79 + MaskGRPO 33.56 (+0.89) 20.75 (−1.10) 41.13 (+1.13) 72.17 (+0.87) 64.18 (+2.84) 17.89 (−0.76) 32.00 (−2.60) 23.44 (−2.01) 18.18 (−7.07) 35.92 (−0.87) 
+
++ MDPO 37.78 (+5.11) 21.62 (−0.23) 38.93 (−1.07) 76.60 (+5.30) 62.21 (+0.87) 14.97 (−3.68) 34.20 (−0.40) 26.79 (+1.34) 30.30 (+5.05) 38.16 (+1.37) 
+
++ Endpoint-only 35.33 (+2.66) 21.62 (−0.23) 38.07 (−1.93) 58.44 (−12.86) 55.99 (−5.35) 18.53 (−0.12) 39.30 (+4.70) 26.79 (+1.34) 26.77 (+1.52) 35.65 (−1.14) 
+
++ Random 40.89 (+8.22) 19.31 (−2.54) 38.07 (−1.93) 59.13 (−12.18) 58.80 (−2.54) 18.91 (+0.25) 44.50 (+9.90) 30.13 (+4.69) 30.30 (+5.05) 37.78 (+0.99) 
+
++ OPDLM+BPM 39.00 (+6.33) 20.92 (−0.92) 39.20 (−0.80) 69.09 (−2.22) 63.79 (+2.45) 20.18 (+1.52) 42.10 (+7.50) 28.57 (+3.12) 28.28 (+3.03) 39.01 (+2.22) 
+
++ CT-OPD 41.11 (+8.44) 21.39 (−0.46) 42.73 (+2.73) 75.85 (+4.55) 65.94 (+4.60) 20.69 (+2.03) 44.70 (+10.10) 30.13 (+4.69) 30.81 (+5.56) 41.48 (+4.69) 
+
+Unified understanding-and-generation diffusion VLM 
+
+Method Multimodal understanding Image generation 
+
+POPE MME GQA MMMU MMBench SEEDBench Avg. GenEval CLIP ImageReward MMaDA-8B-MixCoT 68.99 62.85 48.68 31.43 44.07 56.13 52.03 55.45 28.43 0.585 + UniGRPO 65.68 (−3.31) 64.81 (+1.96) 48.39 (−0.29) 30.33 (−1.10) 44.16 (+0.09) 56.55 (+0.42) 51.65 (−0.38) 59.90 (+4.44) 28.81 (+0.38) 0.752 (+0.167) 
+
++ Endpoint-only 78.71 (+9.72) 65.07 (+2.22) 48.73 (+0.05) 32.57 (+1.14) 53.94 (+9.87) 59.28 (+3.15) 56.38 (+4.35) 60.70 (+5.25) 28.99 (+0.56) 0.732 (+0.147) 
+
++ Random 79.50 (+10.51) 63.14 (+0.29) 55.11 (+6.43) 32.95 (+1.52) 59.30 (+15.22) 59.98 (+3.85) 58.33 (+6.31) 60.06 (+4.60) 29.01 (+0.58) 0.765 (+0.180) 
+
++ CT-OPD 79.72 (+10.73) 63.48 (+0.63) 56.38 (+7.70) 34.19 (+2.76) 62.14 (+18.07) 61.13 (+5.00) 59.51 (+7.48) 61.69 (+6.23) 29.16 (+0.73) 0.774 (+0.189) 
+
+Comparisons. Base is the initial checkpoint. Endpoint-only and Random share CT-OPD’s teacher endpoints, initialization, optimizer, and update budget. Endpoint-only trains on fully masked re-sponses, whereas Random masks uniformly selected positions in teacher responses while matching CT-OPD’s stagewise counts and nested reveal schedule. OPDLM+BPM combines OPDLM (Su et al., 2026) with BPM (Wang et al., 2026): the AR teacher scores causal prefixes of student completions, and BPM aligns its distributions across tokenizers for forward-KL supervision at masked trajectory po-sitions, retaining the student’s visible rollout tokens (Section A.2.1). Direct Trace-Target also retains these visible tokens but supervises masked positions with teacher-endpoint tokens. Trajectory-mask variants vary the trace source and prompt pairing to examine online refresh and prompt specificity. MDPO (He et al., 2025), MaskGRPO (Ma et al., 2025), and UniGRPO (Yang et al., 2025) are matched-compute diffusion-native RL baselines (Section A.2.4). We evaluate the three backbones on nine understanding benchmarks, and MMaDA on six understanding and three generation metrics. 4.2 RESULTS ACROSS ARCHITECTURES AND MODALITIES 
+
+Table 1 shows that CT-OPD achieves the highest nine-benchmark average on all three understanding backbones. It outperforms OPDLM+BPM on every benchmark, raising the averages by 2.66, 1.63, and 2.47 points on LLaDA-V, LaViDa-LLaDA, and sparse D IMOE-VL-B ASE , respectively. Random improves on Endpoint-only by learning to complete partially visible teacher responses. With teacher content and mask counts matched, CT-OPD surpasses Random by 3.95, 1.05, and 3.70 points on average, demonstrating the benefit of student-selected positions. Relative to Base, CT-OPD improves all nine LLaDA-V tasks, gaining 9.80 points on average, while LaViDa-LLaDA’s 14.60-point gain on MathVista highlights improved visual mathematical reasoning. 7Table 2: Learning under zero terminal reward contrast. Coverage spans four stages on 311 zero-contrast prompts; prediction uses their 292 all-wrong prompts. Parentheses give CT-OPD differences with paired 95% CIs below; NLL is in nats/token and accuracy in percentage points.                                                                                    
+
+> Terminal contrast and zero-contrast CT coverage
+> Frozen terminal groups Zero contrast: 60.74% With contrast: 39.26% CT coverage (zero contrast) Prompt: 100.00% State: 91.48% Token: 60.79%
+> Common-state learning on 292 all-wrong groups 876 states; 35,935 scored tokens Method NLL ↓Acc. ↑
+> Base (frozen) 4.6073 (−1.2412) 20.56 (+6.87) 95% CI [ −1.3331, −1.1545] 95% CI [6.11, 7.66]
+> Direct Trace-Target (raw) 4.1878 (−0.8217) 13.68 (+13.75) 95% CI [ −0.8775, −0.7658] 95% CI [12.55, 15.01]
+> Endpoint-only ( 4×100% )3.5736 (−0.2075) 24.15 (+3.28) 95% CI [ −0.2320, −0.1833] 95% CI [2.75, 3.84]
+> Random 3.5202 (−0.1541) 26.12 (+1.31) 95% CI [ −0.1802, −0.1290] 95% CI [0.91, 1.71]
+> CT-OPD (student trace) 3.3661 27.43
+> Partial-state learning across the reverse process 1,168 states; 60,864 scored tokens Mask End NLL ↓CT NLL ↓End acc. ↑CT acc. ↑
+> 100% 4.132 4.234 (+0.1016) 15.88 14.94 (−0.94) 95% CI [0.0869, 0.1167] 95% CI [ −1.26, −0.63]
+> 75% 3.959 3.819 (−0.1406) 17.52 19.26 (+1.75) 95% CI [ −0.1667, −0.1147] 95% CI [1.19, 2.33]
+> 50% 3.464 3.226 (−0.2386) 25.60 29.38 (+3.78) 95% CI [ −0.2759, −0.2018] 95% CI [2.79, 4.81]
+> 25% 2.531 2.169 (−0.3622) 42.95 50.27 (+7.31) 95% CI [ −0.4239, −0.3014] 95% CI [5.82, 8.93]
+
+On unified MMaDA, CT-OPD achieves the highest understanding average and the best results on all three generation metrics, improving over Base by 7.48 points in understanding and 6.23 on GenEval. It surpasses Random by 1.17 and 1.63 points, respectively, and reaches 29.16 CLIP and 0.774 ImageReward, compared with Random’s 29.01 and 0.765. UniGRPO improves generation but reduces understanding by 0.38 points, whereas CT-OPD benefits both modalities through the same reconstruction: trajectory masks specify unresolved positions, and teacher endpoints supply coherent context and targets in both text and image token spaces. Table 8 and Figure 3 give category-level results and matched generations across compositional image-generation settings. 4.3 LEARNING FROM PARTIAL RESPONSES 
+
+To understand these gains, we compare CT-OPD and Endpoint-only on the same reconstructed states, testing whether partial-state training improves the student’s use of progressively revealed context. We examine predictions across denoising stages and then focus on prompts with tied terminal rewards, where outcome feedback provides no contrast. The stagewise probe shows where the additional training tasks pay off. Endpoint-only predicts best from a full mask, where all mask choices collapse to the same prediction task, and CT-OPD is stronger at every measured partial state, with its NLL advantage growing from 0.14 at 75% mask to 0.36 at 25%. The normalized loss gives each remaining target greater weight as the active target set shrinks. Both checkpoints are evaluated on the same reconstructed states, so this progression reflects their learned ability to use the context progressively exposed by decoding in each partial-state query. Terminal group-relative updates lose contrast when completed rewards tie. Four frozen Base com-pletions split 512 prompts into all-wrong, all-correct, and mixed groups, and 60.74% have identical correctness rewards. Endpoint reconstruction supplies token targets for every zero-contrast prompt, covering 91.48% of their common evaluation states and 60.79% of endpoint-token positions across stages. On the 292 all-wrong prompts, CT-OPD achieves the lowest teacher-target NLL and highest token accuracy, with statistically significant paired improvements over Endpoint-only and Random (Table 2). These results demonstrate effective conditional learning on prompts where sampled terminal rewards provide no within-group contrast. 8Table 3: Online, prompt-matched trajectory masks give the strongest transfer. The controls vary mask source and prompt pairing; Random preserves mask counts while randomizing positions. The lower block measures positions retained by the trajectory on the same reconstructed parent.                                                                      
+
+> Mask setting MMMU MMMU-Pro MMStar MMBench SEEDBench MathVerse MathVista GPQA GPQA-D Avg.
+> Online matched (CT-OPD) 46.22 33.12 55.87 83.16 74.26 27.79 61.30 32.59 33.84 49.79
+> Online shuffled 44.00 31.97 53.93 79.69 72.11 25.89 58.90 31.03 29.29 47.42 Frozen-Base matched 45.33 32.60 55.27 82.82 73.57 26.02 59.20 31.70 30.81 48.59 Frozen-Base shuffled 42.67 31.79 53.40 76.90 71.24 24.75 58.40 29.91 29.80 46.54 Random 42.00 28.55 56.00 74.91 69.26 23.10 56.60 28.35 33.84 45.85
+> Position-allocation measurements on the frozen Base panel
+> Position-allocation margins T=1.1123 (95% CI [0.9325, 1.3053]) ;M(c) = 0.1050 (95% CI [0.0907, 0.1187]) Token-gradient margin is mean unnormalized categorical-logit ℓ1magnitude; paired-prompt 95% CIs.
+
+4.4 COHERENT TEACHER CONTEXT 
+
+Position transfer remains ambiguous if the raw trace retains the student’s provisional response. Direct Trace-Target shares CT-OPD’s endpoints, online trajectory-mask selection protocol, and exposure but scores teacher tokens beside the trace’s provisional visible values. When one differs from the endpoint, context and target describe different responses. CT-OPD instead fills visible positions from the same endpoint, lifting LLaDA-V’s nine-task average from 45.99 to 49.79. On common reconstructed states, CT-OPD has lower NLL and higher token accuracy, with an advantage over Direct Trace-Target that grows as more endpoint content becomes visible (Section B.2.1). The trace thus selects the queries, while the endpoint supplies targets together with the visible response context. 4.5 STUDENT -SELECTED , PROMPT -MATCHED TRAJECTORY MASKS 
+
+After coherent reconstruction, the remaining design choice is which positions should stay unresolved. Even at the same mask size, different position sets expose different targets and visible context. Each visible endpoint token supplies conditioning evidence for predicting the remaining teacher targets. We therefore vary the mask source (current student or frozen Base), prompt assignment (matched or cross-prompt), and position selection (trajectory-based or count-matched random), while holding endpoint content, stage exposure, initialization, and optimization fixed. CT-OPD achieves the highest nine-task average among the five mask settings (Table 3). Prompt matching improves the average by 2.37 points with online traces and 2.05 points with frozen traces, while online refresh adds 1.20 points under matched pairing and 0.88 points under shuffled pairing. Both gains persist under either setting of the other factor, supporting online refresh and prompt matching as complementary design choices. The online matched setting also leads all nine tasks among the four trace-source and pairing variants. Random trails it by 3.95 points despite identical active counts. This advantage over Random extends across backbones and modalities (Table 1). Because the teacher endpoint replaces the provisional context in which the student selected its unresolved positions, we test whether those positions remain difficult in the reconstructed states used for training. Before training, we fix the Base scorer and reconstructed parent state, then compare positions retained at the next stage with an equally sized uniform subset of the parent’s unresolved positions. Applying Equation (6) to teacher-target NLL isolates position selection within this shared context. Retained positions have 1.1123 higher teacher-target NLL (95% CI [0 .9325 , 1.3053] ) and a larger mean categorical-logit correction than count-matched random positions (Section D.2.3). Together with the controlled training comparisons, this result shows that trajectory-based position selection directs supervision toward harder conditional predictions, while online refresh and prompt matching preserve this advantage as the model evolves. 
+
+5 CONCLUSION 
+
+Diffusion VLMs generate through a sequence of partially resolved states, making intermediate-state supervision central to effective post-training. We introduced CT-OPD, which separates where supervision is applied from what response is learned. The current model’s trajectory determines the unresolved positions, while a teacher endpoint supplies both visible context and prediction 9targets. By discarding provisional rollout values and reconstructing each partial state from one coherent endpoint, CT-OPD provides native token-level supervision along the model’s evolving reverse process, including cases where terminal rewards provide no contrast. Across dense and sparse diffusion VLMs, CT-OPD consistently improves multimodal understanding and reasoning, while unified MMaDA shows that the same principle also transfers to image generation. Controlled studies further attribute these gains to partial-state training, endpoint-consistent reconstruction, and current, prompt-matched trajectory masks, with student-retained positions exhibiting higher teacher-target error than count-matched random positions after reconstruction. Together, these results support a simple principle for diffusion VLM post-training in which the model’s trajectory determines where to learn, while the teacher endpoint determines what to learn. 
+
+REFERENCES 
+
+Rishabh Agarwal, Nino Vieillard, Yongchao Zhou, Piotr Stanczyk, Sabela Ramos Garea, Matthieu Geist, and Olivier Bachem. On-policy distillation of language models: Learning from self-generated mistakes. In The Twelfth International Conference on Learning Representations, ICLR 2024, Vienna, Austria, May 7-11, 2024 . OpenReview.net, 2024. URL https://openreview. net/forum?id=3zKtaqxLhW .Saba Ahmadi, Prasanna Parthasarathi, and Yufei Cui. Beyond mode-seeking RL: trajectory-balance post-training for diffusion language models. CoRR , abs/2605.13935, 2026. doi: 10.48550/ARXIV. 2605.13935. URL https://doi.org/10.48550/arXiv.2605.13935 .Shuai Bai, Yuxuan Cai, Ruizhe Chen, Keqin Chen, Xionghui Chen, Zesen Cheng, Lianghao Deng, Wei Ding, Chang Gao, Chunjiang Ge, Wenbin Ge, Zhifang Guo, Qidong Huang, Jie Huang, Fei Huang, Binyuan Hui, Shutong Jiang, Zhaohai Li, Mingsheng Li, Mei Li, Kaixin Li, Zicheng Lin, Junyang Lin, Xuejing Liu, Jiawei Liu, Chenglong Liu, Yang Liu, Dayiheng Liu, Shixuan Liu, Dunjie Lu, Ruilin Luo, Chenxu Lv, Rui Men, Lingchen Meng, Xuancheng Ren, Xingzhang Ren, Sibo Song, Yuchong Sun, Jun Tang, Jianhong Tu, Jianqiang Wan, Peng Wang, Pengfei Wang, Qiuyue Wang, Yuxuan Wang, Tianbao Xie, Yiheng Xu, Haiyang Xu, Jin Xu, Zhibo Yang, Mingkun Yang, Jianxin Yang, An Yang, Bowen Yu, Fei Zhang, Hang Zhang, Xi Zhang, Bo Zheng, Humen Zhong, Jingren Zhou, Fan Zhou, Jing Zhou, Yuanzhi Zhu, and Ke Zhu. Qwen3-vl technical report, 2025. URL https://arxiv.org/abs/2511.21631 .Nicolas Boizard, Kevin El Haddad, C´ eline Hudelot, and Pierre Colombo. Towards cross-tokenizer distillation: the universal logit distillation loss for llms, 2025. URL https://arxiv.org/ abs/2402.12030 .Baoyou Chen, Hanchen Xia, Peng Tu, Haojun Shi, Liwei Zhang, Yuxuan Yao, Weihao Yuan, and Siyu Zhu. Bard: Bridging autoregressive and diffusion vision-language models via highly efficient progressive block merging and stage-wise distillation, 2026. URL https://arxiv.org/ abs/2604.16514 .Phuong Tuan Dat, Qi Li, and Xinchao Wang. dopsd: On-policy self-distillation for diffusion language models. CoRR , abs/2607.04428, 2026. doi: 10.48550/ARXIV.2607.04428. URL 
+
+https://doi.org/10.48550/arXiv.2607.04428 .William Fedus, Barret Zoph, and Noam Shazeer. Switch transformers: Scaling to trillion parameter models with simple and efficient sparsity. J. Mach. Learn. Res. , 23:120:1–120:39, 2022. URL 
+
+https://jmlr.org/papers/v23/21-0998.html .Haoyu He, Katrin Renz, Yong Cao, and Andreas Geiger. MDPO: overcoming the training-inference divide of masked diffusion language models. CoRR , abs/2508.13148, 2025. doi: 10.48550/ARXIV. 2508.13148. URL https://doi.org/10.48550/arXiv.2508.13148 .Yoon Kim and Alexander M. Rush. Sequence-level knowledge distillation, 2016. URL https: //arxiv.org/abs/1606.07947 .Shufan Li, Konstantinos Kallidromitis, Hritik Bansal, Akash Gokul, Yusuke Kato, Kazuki Kozuka, Ja-son Kuen, Zhe Lin, Kai-Wei Chang, and Aditya Grover. Lavida: A large diffusion language model for multimodal understanding. In Danielle Belgrave, Cheng Zhang, Laura N. Mon-toya, Hsuan-Tien Lin, Razvan Pascanu, Piotr Koniusz, Marzyeh Ghassemi, Nancy Chen, Iv´ an 10 Vladimir Meza Ru´ ız, and Arturo Loaiza-Bonilla (eds.), Advances in Neural Information Processing Systems 38: Annual Conference on Neural Information Processing Systems 2025, NeurIPS 2025, San Diego, CA, USA, December 2-7, 2025 / Mexico City, Mexico, November 30 - December 5, 2025 , 2025. URL http://papers.nips.cc/paper_files/paper/2025/hash/ 975affbe7b5f3b55fba62247b6877b1c-Abstract-Conference.html .Shufan Li, Yuchen Zhu, Jiuxiang Gu, Kangning Liu, Zhe Lin, Yongxin Chen, Molei Tao, Aditya Grover, and Jason Kuen. Lavida-r1: Advancing reasoning for unified multimodal diffusion language models. CoRR , abs/2602.14147, 2026a. doi: 10.48550/ARXIV.2602.14147. URL 
+
+https://doi.org/10.48550/arXiv.2602.14147 .Zongxia Li, Wenhao Yu, Chengsong Huang, Zhenwen Liang, Rui Liu, Fuxiao Liu, Jingxi Che, Dian Yu, Jordan Boyd-Graber, Haitao Mi, and Dong Yu. Self-rewarding vision-language model via reasoning decomposition, 2026b. URL https://arxiv.org/abs/2508.19652 .Bin Lin, Zhenyu Tang, Yang Ye, Jinfa Huang, Junwu Zhang, Yatian Pang, Peng Jin, Munan Ning, Jiebo Luo, and Li Yuan. Moe-llava: Mixture of experts for large vision-language models. IEEE Trans. Multim. , 28:4408–4419, 2026. doi: 10.1109/TMM.2026.3654458. URL https://doi. org/10.1109/TMM.2026.3654458 .Ilya Loshchilov and Frank Hutter. Decoupled weight decay regularization. In 7th International Conference on Learning Representations, ICLR 2019, New Orleans, LA, USA, May 6-9, 2019 .OpenReview.net, 2019. URL https://openreview.net/forum?id=Bkg6RiCqY7 .Xiaocheng Lu, Hualei Zhang, Shuhan Guo, Jie Zhang, Xiaoyi Pang, Jian Liu, Haoxi Li, Bohai Gu, Haoxuan Che, Jingcai Guo, and Song Guo. OPTD: on-policy transition distillation with consistency-guided adaptive compression for few-step diffusion language models. CoRR , abs/2608.02942, 2026. doi: 10.48550/ARXIV.2608.02942. URL https://doi.org/10.48550/arXiv. 2608.02942 .Tianren Ma, Mu Zhang, Yibing Wang, and Qixiang Ye. Consolidating reinforcement learning for multimodal discrete diffusion models. CoRR , abs/2510.02880, 2025. doi: 10.48550/ARXIV.2510. 02880. URL https://doi.org/10.48550/arXiv.2510.02880 .Benjamin Minixhofer, Ivan Vuli´ c, and Edoardo Maria Ponti. Universal cross-tokenizer distillation via approximate likelihood matching. In D. Belgrave, C. Zhang, H. Lin, R. Pascanu, P. Koniusz, M. Ghassemi, and N. Chen (eds.), Advances in Neural Information Processing Systems , vol-ume 38, Main Conference, pp. 79297–79326. Curran Associates, Inc., 2025. doi: 10.52202/ 085713-2653. URL https://proceedings.neurips.cc/paper_files/paper/ 2025/file/720f9f5dc751eb56952ae4fee2398f73-Paper-Conference.pdf .Shen Nie, Fengqi Zhu, Zebin You, Xiaolu Zhang, Jingyang Ou, Jun Hu, Jun Zhou, Yankai Lin, Ji-Rong Wen, and Chongxuan Li. Large language diffusion models. CoRR , abs/2502.09992, 2025. doi: 10.48550/ARXIV.2502.09992. URL https://doi.org/10.48550/arXiv.2502. 09992 .Daisuke Oba, Hiroki Furuta, and Naoaki Okazaki. Diffusion-state policy optimization for masked diffusion language models. CoRR , abs/2602.06462, 2026. doi: 10.48550/ARXIV.2602.06462. URL https://doi.org/10.48550/arXiv.2602.06462 .Yu-Yang Qian, Junda Su, Lanxiang Hu, Peiyuan Zhang, Zhijie Deng, Peng Zhao, and Hao Zhang. d3llm: Ultra-fast diffusion LLM using pseudo-trajectory distillation. CoRR , abs/2601.07568, 2026. doi: 10.48550/ARXIV.2601.07568. URL https://doi.org/10.48550/arXiv.2601. 07568 .Haolin Ren, Ziyang Huang, Chenhao Yuan, Jun Zhao, and Kang Liu. Trace-based on-policy distillation for masked diffusion language models. CoRR , abs/2607.16872, 2026. doi: 10.48550/ ARXIV.2607.16872. URL https://doi.org/10.48550/arXiv.2607.16872 .Xingyu Su, Jacob Helwig, Shubham Parashar, Atharv Chagi, Lakshmi Jotsna, Degui Zhi, James Caverlee, Dileep Kalathil, and Shuiwang Ji. Data-efficient autoregressive-to-diffusion language models via on-policy distillation. CoRR , abs/2606.06712, 2026. doi: 10.48550/ARXIV.2606.06712. URL https://doi.org/10.48550/arXiv.2606.06712 .11 Hao Wang, Kun Yuan, Wenlin Zhong, Minglei Zhang, Han Xiao, Ming Sun, and Honggang Qi. Cross-tokenizer on-policy distillation via byte-prefix marginalization. CoRR , abs/2607.22334, 2026. doi: 10.48550/ARXIV.2607.22334. URL https://doi.org/10.48550/arXiv. 2607.22334 .Yinjie Wang, Ling Yang, Bowen Li, Ye Tian, Ke Shen, and Mengdi Wang. Revolutionizing rein-forcement learning framework for diffusion large language models. CoRR , abs/2509.06949, 2025. doi: 10.48550/ARXIV.2509.06949. URL https://doi.org/10.48550/arXiv.2509. 06949 .Chenfei Wu, Jiahao Li, Jingren Zhou, Junyang Lin, Kaiyuan Gao, Kun Yan, Shengming Yin, Shuai Bai, Xiao Xu, Yilei Chen, Yuxiang Chen, Zecheng Tang, Zekai Zhang, Zhengyi Wang, An Yang, Bowen Yu, Chen Cheng, Dayiheng Liu, Deqing Li, Hang Zhang, Hao Meng, Hu Wei, Jingyuan Ni, Kai Chen, Kuan Cao, Liang Peng, Lin Qu, Minggang Wu, Peng Wang, Shuting Yu, Tingkun Wen, Wensen Feng, Xiaoxiao Xu, Yi Wang, Yichang Zhang, Yongqiang Zhu, Yujia Wu, Yuxuan Cai, and Zenan Liu. Qwen-image technical report. CoRR , abs/2508.02324, 2025. doi: 10.48550/ ARXIV.2508.02324. URL https://doi.org/10.48550/arXiv.2508.02324 .Chengyue Wu, Shiyi Lan, Yonggan Fu, Sensen Gao, Jin Wang, Jincheng Yu, Jose M. Alvarez, Pavlo Molchanov, Ping Luo, Song Han, Ligeng Zhu, and Enze Xie. Fast-dvlm: Efficient block-diffusion vlm via direct conversion from autoregressive vlm, 2026. URL https://arxiv.org/abs/ 2604.06832 .Ling Yang, Ye Tian, Bowen Li, Xinchen Zhang, Ke Shen, Yunhai Tong, and Mengdi Wang. Mmada: Multimodal large diffusion language models. In Danielle Belgrave, Cheng Zhang, Laura N. Montoya, Hsuan-Tien Lin, Razvan Pascanu, Piotr Koniusz, Marzyeh Ghassemi, Nancy Chen, Iv´ an Vladimir Meza Ru´ ız, and Arturo Loaiza-Bonilla (eds.), Advances in Neural Information Processing Systems 38: Annual Conference on Neural Information Processing Systems 2025, NeurIPS 2025, San Diego, CA, USA, December 2-7, 2025 / Mexico City, Mexico, November 30 - December 5, 2025 , 2025. URL http://papers.nips.cc/paper_files/paper/2025/hash/ caa934a507a952698d54efb24845fc4b-Abstract-Conference.html .Zebin You, Shen Nie, Xiaolu Zhang, Jun Hu, Jun Zhou, Zhiwu Lu, Ji-Rong Wen, and Chongxuan Li. Llada-v: Large language diffusion models with visual instruction tuning. CoRR , abs/2505.16933, 2025. doi: 10.48550/ARXIV.2505.16933. URL https://doi.org/10.48550/arXiv. 2505.16933 .Lijun Yu, Jos´ e Lezama, Nitesh Bharadwaj Gundavarapu, Luca Versari, Kihyuk Sohn, David Minnen, Yong Cheng, Agrim Gupta, Xiuye Gu, Alexander G. Hauptmann, Boqing Gong, Ming-Hsuan Yang, Irfan Essa, David A. Ross, and Lu Jiang. Language model beats diffusion - tokenizer is key to visual generation. In The Twelfth International Conference on Learning Representations, ICLR 2024, Vienna, Austria, May 7-11, 2024 . OpenReview.net, 2024. URL https://openreview. net/forum?id=gzqrANCF4g .Lunbin Zeng, Jingfeng Yao, Bencheng Liao, Hongyuan Tao, Wenyu Liu, and Xinggang Wang. Diffusionvl: Translating any autoregressive models into diffusion vision language models. In Paolo Favaro, Zuzana Kukelova, Atsuto Maki, Anna Rohrbach, Konrad Schindler, and Federico Tombari (eds.), Computer Vision – ECCV 2026 , pp. 331–348, Cham, 2026. Springer Nature Switzerland. ISBN 978-3-032-37369-4. Xue Zhang, Songming Zhang, Yunlong Liang, Fandong Meng, Yufeng Chen, Jinan Xu, and Jie Zhou. A dual-space framework for general knowledge distillation of large language models, 2025. URL 
+
+https://arxiv.org/abs/2504.11426 .Fengqi Zhu, Zebin You, Yipeng Xing, Zenan Huang, Lin Liu, Yihong Zhuang, Guoshan Lu, Kangyu Wang, Xudong Wang, Lanning Wei, Hongrui Guo, Jiaqi Hu, Wentao Ye, Tieyuan Chen, Chenchen Li, Chengfu Tang, Haibo Feng, Jun Hu, Jun Zhou, Xiaolu Zhang, Zhenzhong Lan, Junbo Zhao, Da Zheng, Chongxuan Li, Jianguo Li, and Ji-Rong Wen. Llada-moe: A sparse moe diffusion language model. CoRR , abs/2509.24389, 2025. doi: 10.48550/ARXIV.2509.24389. URL https: //doi.org/10.48550/arXiv.2509.24389 .12 Yuchen Zhu, Wei Guo, Jaemoo Choi, Petr Molodyk, Bo Yuan, Molei Tao, and Yongxin Chen. Enhancing reasoning for diffusion llms via distribution matching policy optimization, 2026. URL 
+
+https://arxiv.org/abs/2510.08233 .13 APPENDIX 
+
+A EXPERIMENTAL SETTINGS AND REPRODUCIBILITY 
+
+A.1 DATA , ENDPOINTS , AND BENCHMARK SEPARATION 
+
+A.1.1 ENDPOINT CONSTRUCTION AND BENCHMARK SEPARATION 
+
+Reference set and matching rules. To keep endpoint training separate from evaluation, we compare all 47,628 Vision-SR1 source rows with 22,849 reference rows from MMMU validation, MMMU-Pro Standard-10, MMStar, MMBench DEV-EN v1.1, POPE, MME, GQA, SEEDBench, MathVerse mini-vision, MathVista testmini, GPQA main and diamond, and the validation and test splits of M3CoT and ScienceQA. Exact matching uses source and content identifiers, normalized question/options and prompt/options, canonical decoded RGB image hashes, and image-question pairs. Text normalization removes output-format suffixes, applies Unicode NFKC and lowercasing, and retains Unicode word tokens with normalized option labels. Image hashes include image dimensions and decoded RGB pixels. Near matching uses equal normalized core text, word 3-gram Jaccard similarity at least 0.90 with two boundary tokens on each side, or a 64-bit DCT perceptual hash with Hamming distance at most four. Exact and near matches are excluded before endpoint construction. Exact rules identify 1,203 rows, and near rules remove another 1,878, for 3,081 exclusions and 44,547 remaining training examples. The final endpoint manifest contains these 44,547 examples. The overlap-check bundle records reference split counts, row-level exclusion reasons, source positions, and SHA-256 hashes in 
+
+AUDIT_REPORT.json and EXCLUDED_ROWS.jsonl .
+
+Endpoint identity and adaptation. Every endpoint contains one final-answer marker, preserves the verified answer, fits the corresponding student canvas, and excludes chat special tokens and empty rationales. The cross-backbone manifests share source examples, prompts, images, teacher responses, verified answers, membership, and ordering. Student-specific tokenization and deterministic canvas fitting determine the token sequences while retaining each final-answer suffix. A.1.2 CROSS -TOKENIZER ENDPOINT ADAPTATION 
+
+We remove model-specific wrappers from each teacher response and serialize the result as Reason: 
+
+followed by Final answer: . The extracted final answer must match the released training answer. When it does, we retain the rationale under the canonical serialization; otherwise, one answer-conditioned regeneration supplies a deterministic task-aware rationale while preserving the verified answer. The resulting endpoint text is frozen and shared across student architectures. Each student then tokenizes that text with its own tokenizer. Let LS be the response-canvas capacity including one terminal EOS, BS = LS − 1, and f the student-token suffix beginning at the final 
+
+Final answer: marker after trailing EOS tokens are removed. For DiMoE-VL, the capacity adapter verifies that f is an exact suffix of z and |f | ≤ BS, then applies 
+
+CBS (z; f ) = 
+
+z, |z| ≤ BS,z1: BS−| f |∥f, |z| > B S, Y T = CBS (z; f )∥[EOS] S. (8) The adapter leaves a fitting DiMoE-VL retokenization unchanged. If the sequence is too long, it preserves the verified final-answer suffix and truncates only the preceding rationale. LLaDA-V and LaViDa-LLaDA use 128-token canonical response canvases, shortening only the reason field when needed and preserving the terminal answer. MMaDA retokenizes the shared text onto its 512-token understanding canvas; its image adapter uses frozen MAGVITv2 (Sections A.2.3 and C.2.1). Each text endpoint appends exactly one architecture-native terminal token and excludes mask tokens and other forbidden special tokens. 14 A.2 MODELS , TRAINING , AND EVALUATION PROTOCOLS 
+
+A.2.1 CROSS -BACKBONE CT-OPD CONFIGURATION 
+
+To complete the final global batch, we repeat the first 13 endpoints in the fixed training order, each contributing all four state exposures. Table 4: Shared CT-OPD configuration across diffusion-VLM backbones. Setting LLaDA-V LaViDa-LLaDA DIMOE-VL Training data Vision-SR1-47K Vision-SR1-47K Vision-SR1-47K Trajectory-mask ratios 1, . 75 , . 5, . 25 1, . 75 , . 5, . 25 1, . 75 , . 5, . 25 
+
+Endpoint-only mask slots 1, 1, 1, 1 1, 1, 1, 1 1, 1, 1, 1
+
+Global batch 16 16 16 Learning rate 3 × 10 −7 3 × 10 −7 3 × 10 −7
+
+Response canvas 128 128 128 Native reverse domain full-canvas masked full-canvas masked full-canvas masked Reverse steps per active domain 32 32 32 Native block/commit width 4 tokens 4 tokens 4 tokens Supervision all unresolved all unresolved all unresolved Seed 3407 3407 3407 Precision BF16 BF16 BF16 
+
+Random-mask supervision. Random uses the same teacher endpoints, initialization, optimizer, and update schedule as CT-OPD. For each example and training cycle, the native rollout provides the number of supervised positions at each stage. A seeded random permutation of endpoint-valid positions defines nested masks of those sizes; visible positions and targets are then populated from the same endpoint. LLaDA-V, LaViDa-LLaDA, and D IMOE-VL-B ASE randomize within the response canvas. MMaDA randomizes within the active decision block for understanding and across the image-token canvas for generation, preserving the native state outside that support. Each mask tuple supplies four stage-specific updates under the backbone’s native schedule. Thus, Random retains partial-state training and coherent endpoint supervision while replacing the student’s choice of unresolved positions. 
+
+OPDLM+BPM distribution distillation. We combine OPDLM (Su et al., 2026) with Byte-Prefix Marginalization (Wang et al., 2026) for visual understanding with different teacher and student tokenizers. The diffusion student generates its own reverse trajectory on an image-question prompt. The frozen Qwen3-VL-32B-Instruct teacher reads the same image and question and scores causal prefixes of the student’s completed response. BPM maps these predictions to student response positions and vocabulary entries through their byte representations, accounting for unequal token boundaries and retaining unmatched probability in a residual category. The student minimizes forward KL at unresolved response positions in sampled intermediate states, retaining the visible tokens from its own rollout. This gives OPDLM’s causal-prefix supervision a cross-tokenizer interface, whereas CT-OPD reconstructs both visible context and targets from a completed teacher response. Table 1 reports OPDLM+BPM on LLaDA-V, LaViDa-LLaDA, and D IMOE-VL-B ASE under the same nine-benchmark evaluation. 
+
+Trajectory-mask source and pairing. The LLaDA-V intervention crosses trajectory-mask source (current-student traces refreshed once per four-update cycle, or one initial-Base four-stage mask tuple collected per prompt before training and reused) with prompt pairing (the originating prompt, or a deterministic cross-prompt derangement). All four cells use the same 44,547 teacher endpoints, seeded endpoint order, {100 , 75 , 50 , 25 }% stages, 178,240 state exposures, 11,140 optimizer steps, global batch 16, and learning rate 3 × 10 −7. Derangement is performed within endpoint active length and transports the donor reveal order to the recipient’s stage cardinality; it preserves stage labels, nested mask structure, and every recipient mask count. Only the four-stage boolean mask tuple is transferred, never donor token values. Thus the two factors directly test whether mask placement must adapt online and remain prompt specific under identical endpoint supervision and optimization. 15 Table 6: Three-stage training recipe for D IMOE-VL. Stage II produces D IMOE-VL-B ASE ;Stage III applies CT-OPD to the resulting native masked-diffusion policy. A dash marks a component unused in that stage. 
+
+Configuration Stage I Stage II Stage III 
+
+Training objective Vision-language alignment Full multimodal SFT Counterfactual trace on-policy distillation Optimization target Multimodal projector Projector and LLaDA-MoE decoder Endpoint-token likelihood on masks from student traces Trainable modules Projector only Projector and LLaDA-MoE decoder LLaDA-MoE decoder, sparse routers/experts, and LM head Training data LLaVA-Pretrain MAmmoTH-VL SI-10M + OV-2M Vision-SR1-47K endpoints Endpoint teacher - - Qwen3-VL-32B-Instruct Vision encoder SigLIP2-Giant-Patch16-384 (frozen) Language backbone LLaDA-MoE-7B-A1B-Instruct Projector MLP-2 ×-GELU multimodal projector Training extent One alignment pass One multimodal SFT pass One endpoint pass over four trajectory-mask ratios Learning rate 1 × 10 −3 1 × 10 −5 3 × 10 −7
+
+LR schedule cosine cosine cosine Warmup ratio 3% 3% 3% 
+
+Per-device batch size 16 1 1Sequence layout 8,192 tokens 8,192-16,384 tokens native prompt + 128-token response canvas Reverse-state construction - native SFT corruption 32-step student trace; 4-token commits Trajectory-mask ratios - - {100 , 75 , 50 , 25 }%
+
+Distributed optimization ZeRO-2 ZeRO-3 ZeRO-3 Precision BF16 
+
+Direct Trace-Target reconstruction control. On LLaDA-V, Direct Trace-Target uses the same 44,547 teacher endpoints, seeded endpoint order, 32-step current-student rollout, {100 , 75 , 50 , 25 }%
+
+trajectory-mask ratios, 178,240 scheduled state exposures, 11,140 optimizer steps, global batch 16, and learning rate 3 × 10 −7 as CT-OPD. It leaves each collected raw state unchanged and applies the same endpoint-token cross-entropy at target-valid raw masked positions. CT-OPD instead replaces raw visible values with their teacher-endpoint values and clears coordinates outside the endpoint span. The comparison holds the endpoint and training schedule fixed and uses the same online mask-selection protocol; each arm’s traces evolve with its own current checkpoint. A.2.2 SPARSE DIMOE-VL ARCHITECTURE AND TRAINING 
+
+Table 5: D IMOE-VL parameter accounting. Active parameters include always-active modules, the runtime visual tower, and the top-8 experts in each routed layer. Component Total Active Language model 7.357B 1.720B Projector and image newline 0.007B 0.007B Routing auxiliaries 0.000173B 0.000173B SigLIP2 visual tower 1.107B 1.107B 
+
+DiMoE-VL 8.471B 2.834B 
+
+Stage I trains only the multimodal projector. Stage II jointly tunes the projector and LLaDA-MoE decoder, producing D IMOE-VL-B ASE at update 80,000. Stage III freezes the visual encoder, 16 projector, and input embeddings. One current-student trajectory supplies four masks at the prescribed ratios, each applied to the corresponding endpoint. Mean endpoint-token negative log-likelihood over all unresolved positions updates the decoder, sparse routers and experts, and LM head. Stage III optimizes this endpoint-token objective directly. A.2.3 MM ADA TRAINING PROTOCOL 
+
+Prompt source and teacher images. Image-training prompts come from MaskGRPO’s released GenEval training metadata (Ma et al., 2025), stored in dataset/GenEval/train_metadata_ filtered.jsonl . The source contains 17,690 entries and 12,158 distinct prompt texts after stripping surrounding whitespace. A deterministic SHA-256 ordering with seed 3408 selects 8,000 entries, covering 5,629 distinct prompt texts. With seed 3407, the understanding branch selects 8,000 answer-anchored examples from the overlap-filtered Vision-SR1 pool. Each selected image prompt receives a Qwen-Image-2512 endpoint at 512 × 512 resolution, using 50 inference steps, true CFG 4.0, and a sample-specific seed derived from base seed 3407 and its sample ID. Frozen MAGVITv2 maps each endpoint to 1,024 image tokens from an 8,192-entry codebook. 
+
+Joint update schedule. The CT-OPD run performs 8,000 updates with one shared AdamW opti-mizer. It alternates understanding and generation in a fixed 1:1 ratio, beginning with understanding, so each branch receives 4,000 updates. Eight ranks process one example each per update. Every selected endpoint appears at four trajectory-mask ratios, yielding 32,000 example-state exposures per branch. We use learning rate 3 × 10 −7, zero weight decay, 3% warmup, cosine decay, and gradient clipping at 1.0. Within each branch, Endpoint-only uses the same endpoint IDs and four-slot exposure schedule, with a fully masked ( 100% ) canvas in every slot. Random follows the same joint schedule and matches the supervised-position count at each stage in both branches. The training manifests record endpoint membership and schedule hashes. 
+
+Generation evaluation. The evaluation metadata contain 553 prompts, with four samples per prompt (2,212 images), 50 reverse steps, and guidance scale 3.5. Stripped prompt texts in the selected training and evaluation sets are disjoint under exact text matching. GenEval overall is the arithmetic mean of its six category scores; CLIP and ImageReward average over the same 2,212 generated images. A.2.4 RL-SPECIFIC CONFIGURATIONS 
+
+Within each backbone, MDPO and MaskGRPO start from the same pretrained checkpoint, train the same modules as CT-OPD, and retain the native multimodal prompt, prediction vocabulary, and response canvas. Run length is set per method so aggregate student compute matches CT-OPD within each backbone; Table 7 lists its algorithm-specific settings. 17 Table 7: RL-specific training settings. MDPO and MaskGRPO use 128-token understanding canvases. UniGRPO jointly trains MMaDA understanding and image generation; paired entries denote text and image settings.                                                        
+
+> Setting MDPO MaskGRPO UniGRPO Optimizer AdamW AdamW AdamW Learning rate 3×10 −73×10 −73×10 −7
+> Weight decay 000LR schedule constant constant cosine Gradient clipping 1.0 1.0 1.0 Candidates per prompt 444Reverse steps 32 32 256 / 16 Response tokens 128 128 512 / 1,024 Sampling temperature 0.1 0.9 0.9 / 1.0 Surrogate clipping ϵ0.2 0.2 0.2 KL coefficient β000.01 Training-state selection 4 advantage-selected states 12 mask levels 4 mask levels Minimum replay mask rate -0.5 0.5 Seed 3407 3407 3407 Precision BF16 BF16 BF16
+
+MDPO. Four candidate trajectories provide intermediate full-sequence predictions. Each prediction is scored against the verified final answer; reward differences and future reward averages then define the intermediate advantages. After per-prompt, per-step group normalization, MDPO selects four states by absolute advantage mass and applies its confidence-weighted clipped objective. Its rollout reveals high-confidence tokens first, leaving lower-confidence positions unresolved. 
+
+MaskGRPO. Four completed responses receive terminal answer-correctness rewards followed by per-prompt group normalization. The released uni schedule cycles through 12 replay mask rates from 0.5 + 0 .5/12 to 0.999 , with random remasking constructing the state for the tokenwise clipped objective. 
+
+UniGRPO. Understanding and generation alternate through one shared model with 3% warmup and cosine learning-rate decay. Text responses receive answer-correctness rewards, while image candidates receive an equal-weight combination of group-standardized CLIP and ImageReward scores. Each four-candidate group is reused over four branch updates with replay mask rates 0.625 ,
+
+0.75 , 0.875 , and 0.999 . The clipped surrogate includes a β = 0 .01 K3 penalty to the policy frozen at group collection. Image rollouts use classifier-free guidance 3.0. 
+
+Answer scoring and implementation. Understanding prompts request a boxed final answer. The reward parser also accepts a concise option letter or numerical answer and compares the extracted answer with the verified target. Our implementation follows the MDPO and MaskGRPO releases pinned at commits e6ae439 and bc09711 for candidate-state reward alignment, direct-answer extraction, group normalization, and remasking; tensor-level comparisons reproduce their losses and gradients. Each dense and sparse campaign predesignates one final checkpoint, which supplies all scores within its model row. 18 B SUPPLEMENTAL RESULTS AND VISUALIZATIONS 
+
+B.1 UNIFIED -MODEL GENERATION RESULTS AND MATCHED VISUALIZATIONS 
+
+Table 8: CT-OPD improves every reported image-generation metric over the frozen MMaDA-8B base. GenEval reports the overall score and its six compositional categories. Parenthesized values are absolute changes over MMaDA-8B-MixCoT. Bold marks the best result for each metric.                                                       
+
+> Method GenEval CLIP score ImageReward
+> Overall Single Two Count Colors Position Color attr. MMaDA-8B-MixCoT 55.45 91.56 67.68 42.19 80.05 19.25 32.00 28.43 0.585 + Endpoint-only Distillation 60.70 (+5.25) 96.25 (+4.69) 74.49 (+6.81) 42.81 (+0.62) 81.65 (+1.60) 23.50 (+4.25) 45.50 (+13.50) 28.99 (+0.56) 0.732 (+0.147) + UniGRPO 59.90 (+4.44) 95.31 (+3.75) 76.77 (+9.09) 43.44 (+1.25) 80.85 (+0.80) 24.50 (+5.25) 38.50 (+6.50) 28.81 (+0.38) 0.752 (+0.167) + Random 60.06 (+4.60) 95.00 (+3.44) 76.01 (+8.33) 40.00 ( −2.19) 80.59 (+0.53) 22.75 (+3.50) 46.00 (+14.00) 29.01 (+0.58) 0.765 (+0.180)
+> + CT-OPD 61.69 (+6.23) 96.88 (+5.31) 77.53 (+9.85) 42.81 (+0.63) 81.65 (+1.60) 24.25 (+5.00) 47.00 (+15.00) 29.16 (+0.73) 0.774 (+0.189)
+
+The matched examples in Figure 3 illustrate the composition categories summarized in Table 8. With the prompt, sample index, and sampling seed fixed, they compare entity separation, attribute binding, cardinality, and spatial relations across the four methods. 
+
+Figure 3: Matched qualitative comparison on compositional image generation. Each column uses the same GenEval prompt, sample index, and sampling seed for MMaDA-8B-MixCoT, UniGRPO, Endpoint-only Distillation, and CT-OPD. The examples display differences in attribute binding, object separation, cardinality, and relative placement. 19 B.2 ADDITIONAL PREDICTION , ROUTING , AND COMPARISON DIAGNOSTICS 
+
+B.2.1 CONDITIONAL PREDICTION WITH ZERO TERMINAL CONTRAST 
+
+Zero-terminal-contrast panel. When group-relative terminal reward has no centered task contrast, this panel measures conditional token learning across the final LLaDA-V checkpoints on 512 frozen Vision-SR1 training prompts. Four Base screening completions per prompt, sampled with seed 3407, define 292 all-wrong, 201 mixed-correctness, and 19 all-correct groups. These fixed memberships define a common comparison of Base, Endpoint-only, Random, Direct Trace-Target, and CT-OPD on common conditional predictions. Token evaluation uses the 292 all-wrong prompts. Endpoint-only is the exposure-matched checkpoint trained with four 100% -mask updates per cycle. 
+
+Paired common-state evaluation. A frozen Base trace, generated by deterministic low-confidence decoding at temperature zero, supplies trajectory masks at ratios {1.0, 0.75 , 0.5, 0.25 }. Teacher reconstruction gives every evaluated model the same 2,048 state identities and target positions, isolating checkpoint prediction on common inputs. ?? measures supervision coverage on these states for all 512 prompts and the 311 zero-contrast prompts (292 all-wrong and 19 all-correct). The latter group contains 1,138 nonempty states out of 1,244 and 63,087 supervised endpoint-token positions out of 103,780 across the four stages. Token metrics aggregate the partial ratios {0.75 , 0.5, 0.25 }:876 states from the all-wrong prompts, of which 784 have nonempty supervision, comprising 35,935 supervised tokens. We weight NLL and token accuracy by supervised token count. For each paired percentile 95% interval, we resample prompt identities 10,000 times with bootstrap seed 3407 and retain each prompt’s partial states jointly across models. Every replicate recomputes token-weighted NLL and accuracy. We apply the same paired estimator separately at each mask ratio in the lower block of Table 2. On the all-wrong common-state probe, CT-OPD has lower NLL and higher token accuracy than each of the four comparators (Table 2). Its NLL is 3.3661, compared with 3.5736 for Endpoint-only and 3.5202 for Random; its token accuracy is 27.43%, compared with 24.15% and 26.12%, respectively. The prompt-paired intervals quantify these differences on identical teacher-reconstructed partial states. At 75%, 50%, and 25% masking, the NLL and accuracy intervals favor CT-OPD; all six exclude zero. 
+
+Canonical reconstruction versus raw-state targeting. The Direct/CT pair shares teacher end-points, the online mask-selection protocol, optimizer, update count, and state exposure; canonical reconstruction is the controlled difference. Each arm refreshes traces from its own current check-point. Direct Trace-Target retains the student’s visible values, whereas CT-OPD replaces them with the corresponding endpoint values. We score both final checkpoints on the same frozen teacher-reconstructed panel. Across all 512 prompts and the three partial ratios, NLL is 4.1664 for Direct Trace-Target and 3.3392 for CT-OPD, while token accuracy is 13.59% and 27.65%. The paired CT-minus-Direct differences are −0.8272 nats/token (95% CI [−0.8717 , −0.7847] ) and +14 .06 
+
+points (95% CI [13 .13 , 15 .07] ). Table 9: Canonical reconstruction and partial-state prediction. Direct Trace-Target preserves raw student-visible values while matching CT-OPD’s endpoints, online mask-selection protocol, optimizer, and exposure. Entries report CT-OPD minus Direct Trace-Target with prompt-paired 95% CIs.                         
+
+> Mask ∆NLL (nats/token) ↓∆accuracy (pp) ↑
+> 100% +0 .0384 [0 .0299 ,0.0469] −0.24 [ −0.44 ,−0.03]
+> 75% −0.5086 [ −0.5531 ,−0.4657] +7 .78 [6 .90 ,8.72]
+> 50% −0.9615 [ −1.0334 ,−0.8925] +16 .41 [14 .81 ,18 .14]
+> 25% −1.6434 [ −1.7449 ,−1.5460] +30 .79 [28 .31 ,33 .35]
+> Partial aggregate −0.8272 [ −0.8717 ,−0.7847] +14 .06 [13 .13 ,15 .07]
+
+The paired difference first favors CT-OPD when visible response context appears and grows as the state becomes more resolved. On the separate nine-benchmark evaluation, Direct Trace-Target has average 45.99 and CT-OPD has 49.79. Together, the common-state probe and benchmark average 20 show the benefit of pairing the student’s mask geometry with endpoint-consistent visible values before applying endpoint targets. 
+
+C METHOD AND NATIVE -O BJECTIVE DETAILS 
+
+C.1 CANONICAL RECONSTRUCTION AND EXACT UPDATES 
+
+C.1.1 COMPLETE UPDATE CYCLE 
+
+Each cycle begins by adapting one AR VLM response into the student endpoint Y T. CT-OPD runs the current diffusion student once, records its raw reverse trace, and applies four architecture-native ordinal selectors. At stratum j, it constructs ξ(a) 
+
+> j
+
+= P (a) 
+
+> j
+
+(Y T, G (a) 
+
+> j
+
+(ZS), c ) and the corresponding state F (a)(Y T, ξ (a) 
+
+> j
+
+, c ). Four sequential updates apply the native denoising log score to unresolved active targets, after which the next cycle refreshes the rollout policy. Trajectory-variable extraction is performed under stop-gradient; each update differentiates only the native loss evaluated on the reconstructed input. C.1.2 EXACT EMPIRICAL UPDATE OPERATOR 
+
+We materialize the endpoint set once from Vision-SR1-47K as E = {(ce, y e, L e)}|E| 
+
+> e=1
+
+. A rationale is retained when its final answer is verified; otherwise, one answer-anchored regeneration constructs a coherent endpoint around the verified answer. Examples follow a deterministic seeded order, and each trace supplies the four ordered trajectory-derived strata used by the objective. At cycle k, set ¯θk = θk, 0 and generate one deterministic, stop-gradient raw trace Ze,k per endpoint. For j = 0 , . . . , 3, each rank computes a per-example mean over that example’s unresolved endpoint tokens; the distributed scalar is the mean of the 16 per-example losses, 
+
+bL(a) 
+
+> k,j
+
+(θ; ¯θk) = 116 
+
+X
+
+> e∈B k
+
+1{| U (a) 
+
+> e,k,j
+
+| > 0} 1
+
+|U (a) 
+
+> e,k,j
+
+| ∨ 1
+
+X 
+
+> u∈U(a)
+> e,k,j
+
+− log p(a)
+
+> θ,u
+
+(ye,u | X(a) 
+
+> e,k,j
+
+). (9) An example with an empty supervised set contributes a graph-connected zero and retains its batch slot. The four optimizer calls occur sequentially at θk, 0, . . . , θ k, 3 while sharing Ze,k , so each stratum is evaluated with the latest parameters. AdamW uses learning rate 3 × 10 −7, zero weight decay, 3% warmup, cosine decay, and global gradient norm 1.0. For the exposure-matched Endpoint-only control, the same endpoint minibatch receives the same four sequential optimizer calls with 
+
+U (a) 
+
+> e,k,j
+
+= A(ye) for every j ∈ { 0, 1, 2, 3}. Its four mask slots are therefore {100 , 100 , 100 , 100 }%.C.2 BACKBONE INTERFACES AND NATIVE OBJECTIVES 
+
+C.2.1 BACKBONE INTERFACES 
+
+CT-OPD maps each teacher endpoint into the student’s prediction space and reconstructs intermediate states under its native decoding structure. Text endpoints are retokenized for LLaDA-V, LaViDa-LLaDA, D IMOE-VL, and MMaDA, while image endpoints are encoded into MMaDA’s discrete image-token space. Table 10 connects these adapters to their prediction supports, training traces, and downstream results. Each branch minimizes mean cross-entropy over unresolved endpoint-valid positions. 
+
+Categorical prediction supports. The training probabilities are normalized over the following alphabets: 
+
+VL = {0, . . . , 126348 } \ { 126080 , 126081 , 126336 , 126346 , 126347 }, (10) 
+
+VD = {0, . . . , 157152 } \ { 156891 , 156893 , 156895 }, (11) 
+
+VM = {0, . . . , 134655 }. (12) LLaDA-V and LaViDa-LLaDA use VL, and D IMOE-VL uses VD. Both MMaDA branches apply cross-entropy over the complete output vocabulary VM . Image targets are the 8,192 MAGVITv2 21 codebook entries mapped to their model token IDs; generation sampling selects among those image entries. The prediction support of each training objective stays fixed across denoising stages. Table 10: Backbone interfaces and native training traces. Prediction supports specify the normalization domain of the training loss; trace settings describe the student rollouts used to select intermediate states.                      
+
+> Backbone / branch Endpoint adapter Training trace Support Results LLaDA-V Native text tokenizer 128-token canvas; 32 steps VLTable 1 LaViDa-LLaDA Native text tokenizer 128-token canvas; 32 steps VLTable 1 DIMOE-VL Native text tokenizer; answer-preserving fitting 128-token canvas; 32 steps VDTable 1 MMaDA / understanding Native text tokenizer 512-token canvas; 128-token blocks; 256 steps
+> VMTable 1 MMaDA / generation Frozen MAGVITv2 1,024-token image canvas; 16 steps
+> VMTable 8
+
+For MMaDA understanding, masks are selected within the first active response block. For generation, they span the image-token canvas. The two branches share the joint update schedule in Section A.2.3; generation evaluation uses 50 reverse steps and guidance scale 3.5. C.3 STRUCTURAL DIFFUSION SPECIALIZATIONS 
+
+C.3.1 BLOCK -DIFFUSION FORMULATION 
+
+For block-diffusion decoders, CT-OPD reconstructs each active block from the teacher endpoint while preserving the decoder’s block-causal conditioning. The endpoint-level objective aggregates supervision over unresolved positions in all endpoint-overlapping blocks. For the BD3 factorization, let P be the response offset, B the block width, Ib the coordinates in block b, and 
+
+B(Y, c ) = 
+
+ PB
+
+
+
+, . . . , 
+
+ P + |A(Y )| − 1
+
+B
+
+ 
+
+. (13) For stratum j, the block-local trajectory descriptor is ΞBD3  
+
+> j
+
+= ( gb,j , r act  
+
+> b,j
+
+)b. Each component comes from a visited block-local trace under the frozen fixed-canvas, no-early-EOS trajectory-recording policy. One BD3 forward evaluates the resulting factorized bundle. Block b contributes trajectory mask gb,j and Ub,j = A(Y ) ∩ Ib ∩ { i : gb,j,i = 1 }. Let Cb(Y, g b,j ) denote the block-local analogue of Equation (3): teacher tokens occupy resolved coordinates of Ib, while unresolved coordinates are masked. With Nj (Y ) = P 
+
+> b∈B (Y,c )
+
+|Ub,j |, the endpoint-wide score is 
+
+LBD3  
+
+> j
+
+= E
+
+1{Nj (Y ) > 0}
+
+P
+
+> b∈B (Y,c )
+
+P 
+
+> i∈Ub,j
+
+− log pBD3 
+
+> θ,i
+
+
+
+Y T 
+
+> i
+
+| c, Y T 
+
+> I<b
+
+, Cb(Y T, g b,j )
+
+
+
+Nj (Y ) ∨ 1
+
+ . (14) Here pBD3  
+
+> θ,i
+
+is the full-vocabulary softmax of the block decoder. The objective scores every endpoint-overlapping block in the released offset-block-causal domain; an empty effective stratum contributes a graph-connected zero. CT-OPD retains the released conditional factorization and uses the endpoint-token mean score in Equation (14) instead of BD3 pretraining’s 1/t b weighting. C.3.2 GENERAL DIFFUSION SPECIALIZATIONS 
+
+Table 11 instantiates the endpoint adapter AT→S, corruption map Ft, native target map τt, and discrepancy Dt for four diffusion families. In each case, CT-OPD fixes a current-student raw trace, extracts an endpoint-valid architecture-specific trajectory variable, reconstructs the state-target pair at the teacher endpoint, and evaluates the generator’s native per-state loss. For an endpoint-universal corruption map, the selected trajectory variable itself remains fixed. Each row assumes a specified common-noise realization and an extractor that reconstructs the source state. 22 Table 11: CT-OPD specializations under the unified corruption map. Family Endpoint adapter Trajectory variable ξt Transported state Conditional score Absorbing masked Detokenize-retokenize Unresolved-position mask gt C(Y T, g t) Unresolved-token NLL Categorical Domain-specific endpoint map Base noise and scheduler randomness Ft(Y T, ξ t) Denoising cross-entropy Gaussian/latent Frozen endpoint encoder Trace residual ϵS             
+
+> tαtYT+σtϵS
+> tx0,ϵ, or vregression Block diffusion Domain-specific endpoint map Block/reveal/remasking variables Ft(YT, ξ t)Active-block NLL
+
+For Gaussian diffusion with σt > 0, the trajectory residual may be stored during sampling or reconstructed relative to the student’s current clean estimate: 
+
+ϵS 
+
+> t
+
+= SS 
+
+> t
+
+− αt ˆY S
+
+> t
+
+σt
+
+, eSt = αtY T + σtϵS 
+
+> t
+
+. (15) Together with ˆY S 
+
+> t
+
+, this endpoint-relative residual exactly reconstructs the observed student state. CT-OPD preserves the residual coordinate while replacing the endpoint component of the transported state; the reverse-process occupancy induces the residual distribution. Under the common variance-preserving parameterization, the corresponding native targets are 
+
+τx0 = Y T, τϵ = ϵS 
+
+> t
+
+, τv = αtϵS 
+
+> t
+
+− σtY T. (16) When the transported target has finite second moment, CT-OPD supports native x0-, noise-, or velocity-prediction through a counterfactual state-target coupling. The categorical specialization requires a measurable abduction kernel or right-inverse supported on Ft( ˆY S 
+
+> t
+
+, ·, c )−1{SS 
+
+> t
+
+}. All base transition noise, position choices, scheduler variables, remasking decisions, and latent transition variables needed by this representation jointly form ξS 
+
+> t
+
+, yielding the exact replay Ft(Y T, ξ S 
+
+> t
+
+). In masked diffusion, this trajectory variable reduces to the unresolved-coordinate indicator. C.3.3 INTERFACES TO ON -POLICY DIFFUSION DISTILLATION 
+
+On-policy distillation methods are defined by the teacher object they transfer. TOPD matches the token distribution of a frozen diffusion teacher evaluated on the student’s masked state by reverse KL (Ren et al., 2026). dOPSD averages stop-gradient predictions from later masked states of the same trajectory (Dat et al., 2026). OPDLM builds causal supervision from student endpoints in an aligned AR-diffusion model pair (Su et al., 2026). OPTD rolls a frozen diffusion teacher forward from a student state and compresses outcome-preserving future transitions for lower-NFE decoding (Lu et al., 2026). Our OPDLM+BPM baseline combines causal-prefix supervision with byte-space distribution alignment across tokenizers (Section A.2.1). CT-OPD supplies a cross-tokenizer VLM interface: an AR VLM provides an answer-verified text endpoint, while the diffusion VLM supplies a native trajectory variable from its reverse process. Canonical reconstruction combines them in one student-vocabulary denoising problem. The interface therefore connects an AR VLM endpoint teacher to a diffusion VLM with a different tokenizer, while the trajectory variable and denoising objective remain native to the student. The controls hold endpoint information, native CE, and update exposure fixed while varying full masking, mask placement, or state reconstruction. Together, they separate the effects of partial states, student-selected positions, and canonical reconstruction under a common teacher-information budget. 
+
+D THEORY AND PROOFS 
+
+D.1 OBJECTIVE VALIDITY AND LEARNING SIGNAL 
+
+D.1.1 EXACT PROJECTED OCCUPANCY LAW AND NATIVE SUPPORT 
+
+Fix the cycle-start policy ¯θ. The response canvas and each native prediction alphabet are finite. Contexts and scorer inputs take values in standard Borel spaces, ensuring the existence of the conditional laws used below. Endpoint adaptation is a measurable function of the teacher response and training example. Trace collection uses the original context and random bits independent of endpoint generation. Consequently, conditional on (c, a ∗) and a selected stage j, the adapted endpoint 
+
+Y and raw trace Z are independent. Materialized endpoints and deterministic samplers correspond to point-mass laws. 23 The raw trajectory mask is defined on the full canvas before restricting it to the endpoint’s active span. If native metadata Hj are not determined by the unresolved set Mj , we regard (Mj , H j ) as an augmented mask record and use its joint law; reconstruction acts on the mask component. Any subsequent endpoint-dependent selection belongs to the deterministic architecture adapter. Thus independent raw sources can produce a coupled active target set U = A(Y ) ∩ Mj and coupled scoring input. For a bounded measurable test function f , the product law gives 
+
+E[f (Y, M j , C(Y, M j )) | c, a ∗, j ]=
+
+Z Z 
+
+f (y, m, C(y, m )) πT(dy | c, a ∗)ρ¯θ,j (dm | c). (17) This proves the exact pushforward law for endpoints and trajectory masks in Equation (4). The same identity holds with the augmented mask record and the architecture adapter inserted into f .Deterministic projection turns the independent source draws into CT-OPD’s coupled reconstructed inputs. 
+
+Proposition 1 (Canonical reconstruction from a trajectory mask) . Fix a legal endpoint y and trajectory mask m ⊆ I . The state C(y, m ) is the unique canvas with unresolved active set m ∩ A(y),visible values equal to y, and masked inactive positions. It lies in the support of any absorbing corruption law that assigns this active mask pattern positive probability at the chosen denoising stage. Proof. Let y be a legal endpoint, so its active tokens differ from [M], and let m ⊆ I . The sets 
+
+m ∩ A(y), A(y) \ m, and I \ A(y) form a partition of I. The required value on the first set is [M], on the second it is yi, and on the third it is [M] by the inactive-canvas convention. These requirements determine every entry and agree with Equation (3), proving existence and uniqueness. Put U = m ∩ A(y). An absorbing corruption of y produces exactly this canvas whenever its masked active set is U . Therefore any subset law assigning positive probability to U assigns positive probability to C(y, m ). In particular, independent active-coordinate corruption at 0 < α t < 1
+
+gives probability (1 − αt)|U |α|A(y)|−| U | 
+
+> t
+
+> 0. Inactive positions are deterministic and introduce no additional event. For A(y) = ∅, the empty-product probability is one. At αt = 0 , the support contains only the fully masked active span; at αt = 1 , it contains only the fully visible active span. The proposition’s positive-probability condition includes both boundaries. 
+
+Native block support. For a block decoder, fix y, the prompt offset, and a response block b. The native conditioning variables are the prompt, earlier clean response blocks yI<b , and the partially resolved current block Cb(y, g b,j ). Prompt coordinates within a boundary block are held fixed. Ap-plying the coordinate argument to A(y) ∩ Ib proves uniqueness and support whenever the block corruption assigns positive probability to Ub,j . A product reference law of these block-local corrup-tions gives the entire bundle positive mass when every component has positive mass. Each factor in Equation (14) therefore has valid native conditioning. Earlier blocks supply clean endpoint context for a later block, while retaining their own corrupted queries elsewhere in the bundle. The recorded block-local queries and endpoint prefixes instantiate this conditional factorization. D.1.2 REVERSE -EVENT EQUIVALENCE FOR NATIVE CATEGORICAL HEADS 
+
+Absorbing posterior. Let Vt be one coordinate of an absorbing forward process with clean token 
+
+Y = y̸ = [ M]. Survival at time t has probability αt. For s < t with 0 ≤ αt < α s ≤ 1, absorption implies {Vt = y} ⊆ { Vs = y}. Hence 
+
+Pr( Vs = y, V t = [ M] | Y = y) = αs − αt, (18) 
+
+Pr( Vs = y | Vt = [ M], Y = y) = αs − αt
+
+1 − αt
+
+= γ. (19) The conditional mass 1 − γ corresponds to persistence of the mask. The absorbing property supplies the nested survival events used in this posterior calculation. 24 One event space for restricted and full heads. Let V be the native scoring alphabet, containing every admissible target. Introduce a distinct symbol ⊥ /∈ V to tag the persistence event. On {⊥} ⊔ V ,the two distributions in the native event space are 
+
+Qy = (1 − γ)δ⊥ + γδ y , Pθ = (1 − γ)δ⊥ + γp θ (· | X). (20) They are normalized, and 
+
+DKL (Qy ∥P ) = (1 − γ) log 1 − γ
+
+1 − γ + γ log γγp (y) = −γ log p(y). (21) Consequently, 
+
+γ−1DKL (Qy ∥Pθ ) = − log pθ (y | X). (22) At γ = 1 , the zero-mass persistence term is defined as zero. If p(y) = 0 , both sides are infinite. If the scoring head excludes [M], mapping ⊥ to [M] is one-to-one on the event space and yields the ordinary absorbing reverse-token kernel. If the head contains [M], the event space retains the distinction between persistence and a mask-category prediction. Thus Equation (22) holds for the native categorical score of either head. CT-OPD couples this exact score with the student’s confidence-based reveal process, which determines the trajectory-mask law. The full-head state marginal follows by merging ⊥ and the mask category into the same observed mask state. Write bQy , bP for the resulting distributions. For 0 < γ < 1 and p(y) > 0,
+
+DKL ( bQy ∥ bP ) = −γ log p(y) + (1 − γ) log 1 − γ
+
+1 − γ + γp ([ M]) , (23) 
+
+DKL (Qy ∥P ) − DKL ( bQy ∥ bP ) = (1 − γ) log 
+
+
+
+1 + γp ([ M]) 1 − γ
+
+
+
+≥ 0. (24) This is the exact information lost by merging the two events. The gap is zero for a mask-excluding head and tends to zero as γ ↑ 1. For the same full head, let r = 1 − p([ M]) > 0 and ep(v) = p(v)/r 
+
+for non-mask categories. Its training score obeys 
+
+− log p(y) = − log r − log ep(y). (25) The loss therefore trains the normalized token-value prediction and penalizes probability assigned to the mask category. When r = 0 , every admissible non-mask target has infinite log loss. At 
+
+γ = 0 , both event laws place all mass on persistence and the normalization by γ is undefined; the reverse-normalized identity is stated for γ > 0.D.1.3 CONDITIONAL PROPERNESS AND QUANTITATIVE CALIBRATION 
+
+The information available to each native query. Write Xi for the information the architecture permits prediction i to use, including context, the relevant reconstructed tokens, and native attention or stage metadata. For a bidirectional head, this can be the complete scoring input. For query i
+
+in causal block b, it comprises the prompt, clean earlier blocks, the reconstructed current block, and permitted metadata, as specified in Equation (14). A native predictor is a measurable function 
+
+pi(· | Xi). This choice makes Qi the exact Bayes target under the architecture’s native information set. 
+
+Proposition 2 (Conditional properness and calibration) . Fix the trajectory-mask law at cycle start and a finite prediction alphabet containing the targets. Let Xi be the information available to native prediction i, set wi = 1{i ∈ U }/(|U | ∨ 1) and ¯wi(Xi) = E[wi | Xi], and define 
+
+Qi(v | Xi) = E[wi1{Y T 
+
+> i
+
+= v} | Xi]¯wi(Xi) (26) 
+
+where ¯wi(Xi) > 0. For finite risk, the excess over all predictors permitted by the same native conditioning information is 
+
+LCT (pθ ) − L ∗ 
+
+> CT
+
+= E X
+
+> i
+
+¯wi(Xi)DKL (Qi(· | Xi)∥pθ,i (· | Xi)) . (27) 
+
+Thus Qi is the unique optimum wherever ¯wi(Xi) > 0, up to null sets, and excess CT risk controls weighted conditional-distribution error and excess Bayes token-decision risk. 
+
+25 Proof. Set 
+
+wi = 1{i ∈ U }|U | ∨ 1 , ¯wi(Xi) = E[wi | Xi]. (28) These weights are nonnegative, bounded by one, and satisfy P 
+
+> i
+
+wi = 1{| U | > 0}. Extend Yi
+
+outside the active span by any fixed vocabulary symbol; those extensions receive zero weight. For 
+
+¯wi(Xi) > 0, define 
+
+Qi(v | Xi) = E[wi1{Yi = v} | Xi]¯wi(Xi) . (29) Summing its numerator over the finite scoring alphabet gives ¯wi(Xi), so Qi is a probability distribu-tion. On { ¯wi = 0 }, choose any fixed categorical distribution. Nonnegativity implies wi = 0 almost surely on this event, which contributes zero loss. Conditioning each summand on its own Xi and interchanging finite sums and nonnegative expecta-tions gives 
+
+LCT (p) = E X
+
+> i
+
+¯wi(Xi) X
+
+> v
+
+Qi(v | Xi)( − log pi(v | Xi)) (30) 
+
+= E X
+
+> i
+
+¯wi(Xi) [ H(Qi(· | Xi)) + DKL (Qi(· | Xi)∥pi(· | Xi))] . (31) For a vocabulary of size V , the entropy term is bounded by log V E P 
+
+> i
+
+¯wi ≤ log V . The measurable choice pi = Qi attains this term for all queries simultaneously in the class of native-context categorical predictors. Subtracting that Bayes risk proves Equation (27). For finite distributions, KL is nonnegative, and it is zero exactly when the distributions coincide. A nonnegative random variable has zero expectation only if it is zero almost surely. Therefore a minimizing predictor equals Qi almost surely wherever ¯wi > 0. Conversely, those equalities imply optimal risk. Uniqueness is distributional: it identifies the Bayes-optimal conditional prediction Qi
+
+wherever ¯wi > 0, with equivalent parameterizations representing the same optimum. Using natural logarithms, Pinsker’s inequality gives TV( Qi, p i)2 ≤ 12 DKL (Qi∥pi). Multiplication by ¯wi, summation, and expectation give the quantitative calibration bound 
+
+E X
+
+> i
+
+¯wi(Xi) TV 2(Qi, p i) ≤ 12
+
+ LCT (p) − L ∗
+
+> CT
+
+. (32) Zero predicted mass on a target with positive conditional mass gives infinite risk. The finite-risk hypothesis makes the excess-risk identity well defined, and the result follows directly from the conditional KL decomposition. The weighting remains necessary even if an active endpoint length is hidden from a particular query. For example, consider two equally likely examples that produce the same Xi, with i supervised in both and unresolved counts one and two. If their targets at i are distinct, their weights are 1 and 
+
+1/2, so the conditional target assigns probabilities 2/3 and 1/3. When wi is determined by Xi,Equation (29) reduces to the ordinary conditional endpoint-token law on the supervised queries. The result holds under arbitrary dependence among Xi, Yi, and wi.
+
+Calibration of token decisions. Put κ = Pr( |U | > 0) = E P 
+
+> i
+
+¯wi and ∆ = LCT (p) − L ∗
+
+> CT
+
+. Let 
+
+bvi maximize pi(· | Xi), with a fixed rule to break ties, and let v∗ 
+
+> i
+
+maximize Qi(· | Xi). For the weighted token misclassification risk R01 (bv) = E P 
+
+> i
+
+wi1{bvi̸ = Yi}, the excess over its Bayes value satisfies 
+
+R01 (bv) − R ∗ 
+
+> 01
+
+≤ √2κ∆. (33) To prove this, use pi(bvi) ≥ pi(v∗ 
+
+> i
+
+) to obtain 
+
+Qi(v∗ 
+
+> i
+
+) − Qi(bvi) ≤ | Qi(v∗ 
+
+> i
+
+) − pi(v∗ 
+
+> i
+
+)| + |Qi(bvi) − pi(bvi)| (34) 
+
+≤ 2 TV( Qi, p i). (35) If the two maximizing categories coincide, the left side is zero; otherwise the two absolute differ-ences are part of the total ℓ1 difference. After weighting and averaging, Cauchy-Schwarz gives 
+
+E P 
+
+> i
+
+¯wi TV( Qi, p i) ≤ [κE P 
+
+> i
+
+¯wi TV 2(Qi, p i)] 1/2. Combining this with Equation (32) proves the claim. If κ = 0 , every weighted risk is zero. If κ > 0, dividing by κ yields the normalized bounds on the supervised-token population, including κ−1E P 
+
+> i
+
+¯wi TV( Qi, p i) ≤ p∆/(2 κ).26 D.1.4 TOKEN GRADIENTS WITH EQUAL TERMINAL REWARDS 
+
+Proposition 3 (Token signal with equal terminal rewards) . If r1 = · · · = rG, every centered advantage Ak = ( rk − ¯r)/(σr + ϵ), ϵ > 0, vanishes. For a CT-OPD state with N = |U | > 0 and native logits zi,v ,
+
+∂ℓ CT 
+
+∂z i,v 
+
+= pθ,i (v | Xi) − 1{v = Y T 
+
+> i
+
+}
+
+N , ∥∇ zi ℓCT ∥1 = 2(1 − pθ,i (Y T 
+
+> i
+
+| Xi)) 
+
+N . (36) 
+
+Every supervised token with pθ,i (Y T 
+
+> i
+
+| Xi) < 1 therefore has a nonzero gradient with respect to its native logits when all sampled terminal rewards agree. Proof of Proposition 3. If all rewards equal r, their mean is r, their standard deviation is zero, and each centered advantage is 0/(0 + ϵ) = 0 . Every task-gradient term multiplied by that advantage is therefore zero, including a clipped importance-ratio term. Auxiliary regularizers remain separate from this task signal. For a fixed CT example with N = |U | > 0, use finite logits over the native scoring alphabet and write the contribution of supervised token i as ℓi = N −1[−zi,Y i + log P 
+
+> v
+
+exp zi,v ]. Differentiating gives the first identity in Equation (36). Its target component has magnitude (1 − pi(Yi)) /N ; its non-target components are nonnegative and sum to the same quantity. Adding these magnitudes proves the second identity. It is strictly positive when pi(Yi) < 1, regardless of terminal rewards. An empty target set contributes zero, and a one-category head is already exact. D.2 TRAJECTORY -MASK ALLOCATION AND RECONSTRUCTED CONTEXT 
+
+D.2.1 TRACE ALLOCATION AT MATCHED CARDINALITY 
+
+Fix the context, endpoint y, scorer, and count 1 ≤ n ≤ Ly = |A(y)|, with positive probability for the trace count being analyzed. All expectations below condition on these objects. Let πtr  
+
+> i
+
+be the trace inclusion probability and dtr  
+
+> i
+
+the expected token loss conditional on inclusion. If πtr  
+
+> i
+
+= 0 , choose any finite value for dtr  
+
+> i
+
+, whose coefficient is zero. Assume the conditional losses are integrable. Uniform size-n active masking includes each position with probability  Ly −1
+
+> n−1
+
+/ Ly
+
+> n
+
+ = n/L y , giving 
+
+R(n)tr = 1
+
+n
+
+X
+
+> i
+
+πtr  
+
+> i
+
+dtr  
+
+> i
+
+, R(n)rand = 1
+
+Ly
+
+X
+
+> i
+
+drand  
+
+> i
+
+. (37) Their difference has the exact decomposition 
+
+R(n)tr − R(n)rand = Ly
+
+n Cov i(πtr  
+
+> i
+
+, d rand  
+
+> i
+
+) + 1
+
+n
+
+X
+
+> i
+
+πtr  
+
+> i
+
+(dtr  
+
+> i
+
+− drand  
+
+> i
+
+). (38) Since each trace set has size n, summing its inclusion indicators before expectation gives P 
+
+> i
+
+πtr  
+
+> i
+
+= n.Add and subtract n−1 P 
+
+> i
+
+πtr  
+
+> i
+
+drand  
+
+> i
+
+. With covariance taken over a uniformly selected active position, 
+
+1
+
+n
+
+X
+
+> i
+
+πtr  
+
+> i
+
+drand  
+
+> i
+
+− 1
+
+Ly
+
+X
+
+> i
+
+drand  
+
+> i
+
+= Ly
+
+n
+
+"
+
+1
+
+Ly
+
+X
+
+> i
+
+πtr  
+
+> i
+
+drand  
+
+> i
+
+− nLy
+
+1
+
+Ly
+
+X
+
+> i
+
+drand 
+
+> i
+
+#
+
+(39) 
+
+= Ly
+
+n Cov i(πtr  
+
+> i
+
+, d rand  
+
+> i
+
+). (40) The remaining term is n−1 P 
+
+> i
+
+πtr  
+
+> i
+
+(dtr  
+
+> i
+
+− drand  
+
+> i
+
+), which proves Equation (38). The second term retains context changes induced by the joint mask law even if the two laws have identical marginal inclusion probabilities. At n = Ly , the active subset is unique. Matching native metadata across the two arms makes their reconstructed contexts identical and every inclusion probability equal to one, so both terms vanish exactly. Full masking is therefore the zero-allocation boundary; at partial mask levels, the mask-allocation and joint-context terms in Equation (38) may be nonzero. 27 For variable counts, set R(0) = 0 . Given trace and random count laws qtr and qrand , their risks satisfy 
+
+Rtr − Rrand = X
+
+> n
+
+qtr (n)( R(n)tr − R(n)rand )+ X
+
+> n
+
+(qtr (n) − qrand (n)) R(n)rand . (41) Terms with qtr (n) = 0 have zero contribution in the first sum. The second sum vanishes under a common count law. The Random baseline preserves each collected trace’s active count when randomizing positions. The identity decomposes the collection-scorer risk gap into mask-allocation and joint-context terms; the final benchmark comparison measures the trained checkpoints. D.2.2 FINITE -FAMILY VALUE OF RECONSTRUCTED CONTEXT 
+
+The allocation identity compares a trajectory-mask law with a reference mask law at a fixed scorer. We next separate the Bayes information in reconstructed context from the ability of a fixed predictor family to use that context. Assume κ = Pr( |U | > 0) > 0 and define the supervised-token probability measure 
+
+E†[h(I, X I , T )] = 1
+
+κ E X
+
+> i
+
+wih(i, X i, Y i) (42) for bounded measurable h. This first conditions on a nonempty example and then samples one unresolved active coordinate uniformly. Let F = ( I, X I ) be the full native query information and let B = b(F) retain the prompt, query coordinate, and common architecture metadata while omitting the reconstructed visible response tokens. For predictor families HF and HB, denote their optimal unnormalized weighted log losses by 
+
+L∗HF and L∗HB . Define their normalized approximation gaps above the corresponding Bayes risks by 
+
+aF = κ−1L∗HF − H†(T | F),aB = κ−1L∗HB − H†(T | B). (43) Properness gives aF, a B ≥ 0. Direct subtraction yields the exact finite-family decomposition 
+
+L∗HB − L ∗HF = κ[I†(T ; F | B) + aB − aF] . (44) The first term is the additional Bayes information in the native query; the second is the additional approximation advantage available to the chosen finite predictor family. In the deterministic-endpoint regime, I†(T ; F | B) = 0 and Equation (44) reduces exactly to κ(aB − aF); reconstructed visible tokens improve attainable loss whenever aF < a B. Equation (38) separates the fixed-scorer mask comparison into position allocation and the contexts induced by the two mask laws. Equation (44) separately characterizes what reconstructed visible response context contributes to the best predictor in a chosen family: Bayes information and finite-family approximation advantage. For κ = 0 , the unnormalized risks are all zero and no normalized token measure is required. D.2.3 TRANSPORTING NATIVE DIFFICULTY TO TEACHER RECONSTRUCTION 
+
+Adjacent nested masks: identity and component bound. The projected unresolved-coordinate sets from adjacent states in one monotone rollout satisfy Kj := Uj+1 ⊂ Uj ⊆ A(y). Write 
+
+mj = |Uj |, nj = |Kj |, Rj = Uj \Kj , and rj = |Rj |, with 0 < n j < m j . For qB = |B|−1 P 
+
+> i∈B
+
+qi,define 
+
+Mj (q) = qKj − qUj . (45) Let Sj be the raw parent state and let Xj = C(y, U j ) be the endpoint-reconstructed parent state induced by its projected trajectory mask. At the fixed collection scorer, put 
+
+hj,i = − log max  
+
+> v
+
+pθ,i (v | Sj ), aj,i = log max v pθ,i (v | Sj )
+
+pθ,i (yi | Sj ) ,dj,i = − log pθ,i (yi | Xj ), δj,i = dj,i − hj,i − aj,i . (46) Set 
+
+(Hj , Aj , Ej , Tj ) = ( Mj (hj ), Mj (aj ), Mj (δj ), Mj (dj )) . (47) Restricting the raw masks to the teacher endpoint’s active coordinates preserves nesting. The nontrivial retained-versus-revealed domain is exactly 0 < n j < m j .28 Proposition 4 (Observable transfer across adjacent masks) . If Vj is a uniformly random nj -subset of 
+
+Uj , independent of the fixed score vector q, then 
+
+Mj (q) = EVj [qKj − qVj ] = rj
+
+mj
+
+(qKj − qRj ). (48) 
+
+Moreover, 
+
+Tj = EVj [dKj − dVj ] = Hj + Aj + Ej . (49) 
+
+Thus Tj > 0 means exactly that reconstructed teacher-target loss is higher on the student-retained coordinates than on the expected count-matched random subset at the same parent query. 
+
+For the same comparison, define the correction budget 
+
+Bj := X
+
+> i∈Uj
+
+1{i ∈ Kj }
+
+nj
+
+− 1
+
+mj
+
+|δj,i |
+
+= rj
+
+mj
+
+ 1
+
+nj
+
+X
+
+> i∈Kj
+
+|δj,i | + 1
+
+rj
+
+X
+
+> i∈Rj
+
+|δj,i |
+
+ . (50) 
+
+Proof. For every i ∈ Uj , uniform sampling without replacement gives Pr( i ∈ Vj ) = nj /m j .Therefore 
+
+EVj
+
+ 1
+
+nj
+
+X
+
+> i∈Vj
+
+qi
+
+ = 1
+
+nj
+
+X
+
+> i∈Uj
+
+nj
+
+mj
+
+qi = 1
+
+mj
+
+X
+
+> i∈Uj
+
+qi. (51) This proves the first equality in Equation (48). Since Uj = Uj+1 ˙∪ Rj ,
+
+Mj (q) = qUj+1 − nj qUj+1 + |Rj |qRj
+
+mj
+
+= |Rj |
+
+mj
+
+
+
+qUj+1 − qRj
+
+
+
+, (52) which proves the second equality. The softmax definitions in Equation (46) give, coordinate by coordinate, 
+
+− log pθ,i (yi | Sj ) = hj,i + aj,i , dj,i = hj,i + aj,i + δj,i . (53) The functional Mj is linear, so applying it to the second identity proves the equality in Equation (49). Put bj,i = 1{i ∈ Kj }/n j − 1/m j . Then Ej = P 
+
+> i∈Uj
+
+bj,i δj,i , and the triangle inequality gives 
+
+Ej ≥ − X
+
+> i∈Uj
+
+|bj,i | | δj,i | = −B j . (54) Evaluating the two constant absolute weights on Kj and Rj gives Equation (50); combining Ej ≥−B j with Equation (49) yields the corresponding componentwise lower bound. Here Tj is the signed transport statistic. On the frozen panel, the positive reconstruction term E
+
+accounts for nearly all of the pooled margin, and reconstructed teacher-target loss is higher on retained positions than under the count-matched expectation. Because E is signed, this contribution is absent from the componentwise absolute envelope Hj + Aj − B j .The same proof applies to any finite coordinate score. In particular, cj,i = 2(1 − pθ,i (yi | Xj )) is the per-coordinate contribution to the stacked ℓ1 logit-gradient magnitude before normalization by the number of supervised positions. Thus Mj (cj ) is exactly its student-retained mean minus the expected mean of a count-matched random subset scored on the same reconstructed parent. This identity measures allocation on a common reconstructed parent, while the Random reconstruction provides the accompanying context comparison in the full-risk evaluation. 29 General fixed-count mask laws. Reconstruction combines trace-derived mask allocation with visible teacher values. The following comparison relates the raw confidence profile to teacher-target difficulty after reconstruction. The first comparison holds a context c, endpoint y, collection scorer 
+
+θ = ¯θ, and count 1 ≤ n ≤ Ly fixed, with positive trace probability for that count. For a native prediction domain D, use the local active set AD (y) = A(y) ∩ D and let Ly = |AD (y)| throughout this section. For block models, we condition on the block and required metadata and form the reference masks over its active coordinates. Explicit mixture weights in Equation (41) aggregate the resulting domain- and count-specific comparisons. For each active coordinate i, specify a raw proposal query Si drawn from the recorded student trace at a decision where i is unresolved. We use the last native proposal for i at or before the selected trace stage, so every compared coordinate has a recorded masked proposal. An already revealed coordinate is probed at its recorded earlier proposal, when its own value was still masked. Final inclusion probabilities πtr  
+
+> i
+
+and modal uncertainty hi are evaluated separately, allowing arbitrary history-dependent selection rules. The same scorer is used throughout the comparison. Re-evaluating stored queries at θ̸ = ¯θ gives the corresponding bound for the later model’s uncertainty profile. Couple Si to a reconstructed query Xrand  
+
+> i
+
+whose marginal law is uniform size-n active masking conditional on including i, with the same endpoint and native reference metadata used to define drand 
+
+> i
+
+in Section D.2.1. Any fixed coupling with these marginals is admissible. With finite logits, define 
+
+hi = E[− log max  
+
+> v
+
+pθ,i (v | Si)] ,ai = E log max v pθ,i (v | Si)
+
+pθ,i (yi | Si) ,ηi = E osc v [zi,v (Xrand  
+
+> i
+
+) − zi,v (Si)] . (55) In particular, 
+
+E[− log pθ,i (yi | Si)] = hi + ai, ai ≥ 0. (56) The target-gap term ai records student-teacher disagreement separately from modal uncertainty, while ηi measures the query shift induced by reconstruction. All logits are finite, and all displayed expectations are assumed finite. These expectations define the prediction-difficulty profile for the fixed collection law and chosen reference coupling. 
+
+Proposition 5 (General fixed-count difficulty transport) . For any common offset a0, set ϵi = |ai −
+
+a0| + ηi. Then 
+
+Ly
+
+n Cov i(πtr  
+
+> i
+
+, d rand  
+
+> i
+
+) ≥ Ly
+
+n Cov i(πtr  
+
+> i
+
+, h i) − 1
+
+n
+
+X
+
+> i
+
+πtr  
+
+> i
+
+− nLy
+
+ϵi. (57) 
+
+Proof of Proposition 5. For a paired query, write rv = zi,v (Xrand  
+
+> i
+
+)−zi,v (Si). The softmax definition gives 
+
+log pθ,i (yi | Xrand  
+
+> i
+
+)
+
+pθ,i (yi | Si) = ryi − log X
+
+> v
+
+pθ,i (v | Si)erv . (58) The sum is a convex combination of erv , so its logarithm lies between min v rv and max v rv . There-fore the absolute log-probability change is at most osc v rv . Taking expectations and using Equa-tion (56) yields 
+
+|drand  
+
+> i
+
+− hi − ai| ≤ ηi, |drand  
+
+> i
+
+− hi − a0| ≤ | ai − a0| + ηi = ϵi. (59) Define bi = ( πtr  
+
+> i
+
+− n/L y )/n . Since each active mask has size n, P 
+
+> i
+
+πtr  
+
+> i
+
+= n and P 
+
+> i
+
+bi = 0 . With uniform coordinate covariance, write 
+
+AS = Ly
+
+n Cov i(πtr  
+
+> i
+
+, h i), AT = Ly
+
+n Cov i(πtr  
+
+> i
+
+, d rand  
+
+> i
+
+),AT − AS = X
+
+> i
+
+bi(drand  
+
+> i
+
+− hi − a0) ≥ − X
+
+> i
+
+|bi|ϵi. (60) This is Equation (57). A common target gap cancels; only its variation across positions enters the allocation correction. 30 Margin and uniform guarantees. Equation (59) also gives the pairwise implication 
+
+hi − hk > ϵ i + ϵk =⇒ drand  
+
+> i
+
+> d rand  
+
+> k
+
+. (61) Thus every raw uncertainty ranking separated by the explicit perturbation margin transfers through reconstruction. If all ϵi ≤ ϵ, then 
+
+AT ≥ AS − 2(1 − n/L y )ϵ. (62) Indeed, put q = n/L y . For 0 ≤ x ≤ 1, convexity gives |x − q| ≤ (1 − x)q + x(1 − q). Summing with x = πtr  
+
+> i
+
+gives P 
+
+> i
+
+|πtr  
+
+> i
+
+− q| ≤ 2n(1 − q). Full masking has n = Ly and πtr  
+
+> i
+
+= 1 , so both allocation terms are zero. Uniform size-n masking likewise has πtr  
+
+> i
+
+= n/L y and zero marginal allocation. The conditional comparison covers n ≥ 1, while empty masks contribute zero to the original objective. Reference scores and centered coefficients remain well defined at coordinates with zero trace inclusion. 
+
+Separating value replacement from the reference mask law. When the native adapter supports it, introduce Xswap  
+
+> i
+
+by reconstructing the teacher endpoint at the raw proposal’s own mask. Keep the query coordinate unresolved and use the architecture’s prescribed endpoint prefix and inactive-position convention. On the same joint coupling define 
+
+ηvalue  
+
+> i
+
+= E osc v [zi,v (Xswap  
+
+> i
+
+) − zi,v (Si)] ,ηreference  
+
+> i
+
+= E osc v [zi,v (Xrand  
+
+> i
+
+) − zi,v (Xswap  
+
+> i
+
+)] , ηi ≤ ηvalue  
+
+> i
+
++ ηreference  
+
+> i
+
+. (63) The inequality follows from subadditivity of maximum-minus-minimum. The first term includes replacement of visible values and any required endpoint-domain or prefix adaptation. The second measures the move to the reference mask context, including differences in count or decision stage. Thus the total ηi covers both value replacement and reference-query changes. Every admissible coupling obeys the paired bound, and an adapter-compatible intermediate query yields the displayed value/reference decomposition. 
+
+Sufficient condition for difficulty allocation. The sufficient condition AS > n −1 P 
+
+> i
+
+|πtr  
+
+> i
+
+−
+
+n/L y |ϵi implies that, after reconstruction, the trace-derived mask law assigns more supervision to positions with higher teacher-target loss than uniform size-n masking. Its three terms are measur-able under the collection and evaluation laws: native allocation, target disagreement, and query perturbation. The matched-count risk difference in Equation (38) adds the joint-context term 
+
+n−1 P 
+
+> i
+
+πtr  
+
+> i
+
+(dtr  
+
+> i
+
+−drand  
+
+> i
+
+), while Equation (57) bounds the allocation component. Together, these terms describe the matched-count mask comparison evaluated by the controlled training interventions. 31
