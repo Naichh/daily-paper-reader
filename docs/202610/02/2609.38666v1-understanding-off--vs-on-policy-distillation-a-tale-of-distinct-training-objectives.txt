@@ -1,0 +1,6952 @@
+Title: Understanding Off- vs On-Policy Distillation: A Tale of Distinct Training Objectives
+
+URL Source: https://arxiv.org/pdf/2609.38666v1
+
+Published Time: Thu, 01 Oct 2026 00:33:05 GMT
+
+Number of Pages: 68
+
+Markdown Content:
+# Understanding Off- vs On-Policy Distillation: A Tale of Distinct Training Objectives 
+
+Qiwei Di ∗ Xuheng Li † Kaixuan Ji ‡ Chenggong Zhang §
+
+Heyang Zhao ¶ Quanquan Gu ‖
+
+Abstract 
+
+On-policy distillation (OPD) learns from teacher feedback on student-generated responses and has shown promise in reducing forgetting relative to supervised fine-tuning (SFT). However, its benefits and fragility remain incompletely understood. We study sequential distillation from multiple teachers, where the student minimizes its average divergence from the teachers. Forward Kullback–Leibler (KL) divergence yields a weighted arithmetic mixture, while reverse KL yields a normalized weighted geometric aggregate. We develop algorithms that learn these targets under off-policy and on-policy feedback, respectively, establishing logarithmic regret bounds in the tabular setting and extending the analysis to function approximation. By analyzing these aggregation targets, we identify mechanisms that help explain both the benefits and fragility of OPD. Relative to forward KL, reverse KL can better retain a confident expert’s preferences under uninformative feedback, but is more sensitive to teachers that assign very low probabilities to correct responses. Its token-level conditionals also reveal a dependence on continuation distributions that can favor incorrect prefixes over long horizons. 
+
+# 1 Introduction 
+
+Knowledge distillation transfers capabilities from teacher models to a student language model. A conventional approach is supervised fine-tuning (SFT) on teacher-generated responses, where the student learns to predict tokens along trajectories supplied by the teacher. On-policy distillation (OPD) (Agarwal et al., 2024; Lu and Lab, 2025) instead samples responses from the current student and obtains teacher logits along the resulting trajectories. This allows the student to learn from teacher feedback on its own behavior, an approach that has been adopted in the post-training of large language models (Yang et al., 2025; Xiao et al., 2026; Zeng et al., 2026). Related studies show 
+
+> ∗
+
+Department of Computer Science, University of California, Los Angeles, CA 90095, USA; e-mail: 
+
+qiwei2000@cs.ucla.edu 
+
+> †
+
+Department of Computer Science, University of California, Los Angeles, CA 90095, USA; e-mail: 
+
+xuheng.li@cs.ucla.edu 
+
+> ‡
+
+Department of Computer Science, University of California, Los Angeles, CA 90095, USA; e-mail: 
+
+kaixuanji@cs.ucla.edu 
+
+> §
+
+Department of Computer Science, University of California, Los Angeles, CA 90095, USA; e-mail: 
+
+chenggong61@g.ucla.edu 
+
+> ¶
+
+Department of Computer Science, University of California, Los Angeles, CA 90095, USA; e-mail: 
+
+hyzhao@cs.ucla.edu 
+
+> ‖
+
+Department of Computer Science, University of California, Los Angeles, CA 90095, USA; e-mail: qgu@cs.ucla.edu 
+
+1arXiv:2609.38666v1 [cs.LG] 29 Sep 2026 that on-policy reinforcement learning can reduce forgetting relative to SFT (Shenfeld et al., 2026b; Chen et al., 2025) and, in some settings, recover capabilities lost during SFT (Jin et al., 2025). Despite these advantages, OPD can also be fragile. It may fail under teacher–student mismatch and suffer from training instability over long generation horizons (Li et al., 2026). However, a theoretical understanding of when OPD offers advantages over off-policy methods such as SFT and what limits those advantages remains to be established. Recent work has begun to clarify the conditions under which these advantages arise. For example, Sriraman et al. (2026) show that in a noisy-expert model, matching the clean expert’s return can require exponentially many offline samples in the horizon, whereas an on-policy algorithm achieves polynomial dependence when the corruption is known. Viano et al. (2026) show that on-policy value-based imitation can efficiently match the expert’s return under realizability of its action-value function, without requiring policy realizability. Together, these works establish conditions under which on-policy interaction offers advantages over offline learning. However, they do not directly explain the fragility observed in practical OPD, leaving a gap in our understanding of when and why it succeeds or fails. This naturally raises a question: What are the pros and cons caused by the distinction between off-policy and on-policy feedback in knowledge distillation? 
+
+As a first step toward answering this question, we consider the setting where the student distills sequential data from multiple teachers, and the goal of the student is to minimize its average divergence from all teachers. Within this framework, we connect off- and on-policy distillation to forward- and reverse-Kullback–Leibler (KL) objectives, respectively. We then derive closed-form solutions for both objectives, offering a new perspective on the differences between SFT and OPD through the aggregation targets they induce. Our main contributions are listed as follows: 
+
+• We propose a sequential distillation framework in which the student minimizes its average divergence from all teachers, and characterize the resulting aggregation targets under forward and reverse KL divergence. Specifically, forward KL yields a weighted arithmetic mixture of the teacher distributions, while reverse KL yields a normalized weighted geometric mean. We also derive the token-level conditionals of both targets for autoregressive generation. 
+
+• We develop algorithms that learn the forward-KL target from off-policy data collection and the reverse-KL target from teacher logits on student-generated responses. In the tabular setting, we establish eO(log T ) regret bounds for both protocols, with regret defined as the cumulative divergence between the student’s policy at each round and the corresponding aggregation target. We further extend the logarithmic regret to the setting with general function approximation. As a result, these guarantees connect off-policy distillation to the forward-KL aggregation objective and on-policy distillation to the reverse-KL aggregation objective. 
+
+• We compare the two targets to examine the benefits and fragility of reverse-KL aggregation relative to forward-KL aggregation. First, we consider a setting with one confident expert teacher and several uninformative teachers and show that reverse-KL aggregation can retain a higher probability of the correct response than forward-KL aggregation. We also show that a misleading teacher can suppress correct responses under reverse KL, whereas forward KL preserves the expert’s weighted contribution. Finally, by examining the token-level conditionals, we show that over long horizons, reverse-KL aggregation can favor an incorrect prefix even while preserving the expert’s ranking of complete responses. These results offer possible explanations for the benefits and fragility of OPD observed in practice. 2Notation. For a positive integer n, let [ n] := {1, . . . , n }. For a finite set S, let ∆( S) denote the set of probability distributions on S. We write 1(E) for the indicator of an event E, and use E, P,and Var for expectation, probability, and variance, respectively. For distributions p, q ∈ ∆( S), the Kullback–Leibler divergence is KL( p∥q) := P 
+
+> z∈S
+
+p(z) log[ p(z)/q (z)], where terms with p(z) = 0 are zero, and KL( p∥q) = + ∞ if p(z) > 0 = q(z) for some z. We use O(·) for asymptotic upper bounds and eO(·) to hide logarithmic factors except log T . The notation a ≲ b means a ≤ Cb for a universal constant C > 0. 
+
+# 2 Related Work 
+
+Variants of on-policy distillation. On-policy distillation trains a language model by having it generate responses and using a teacher’s next-token distributions to supervise those responses (Agarwal et al., 2024; Gu et al., 2024). Following the empirical success of OPD, subsequent work has explored improvements to its training objectives, the use of teacher feedback, and the construction of teachers. To improve the training objective, existing methods introduce skew KL or contrastive losses (Ko et al., 2024, 2025), combine forward and reverse KL using hybrid objectives or teacher– student agreement (Zhu et al., 2026; Jin et al., 2026; Xing et al., 2026), or construct intermediate distributions between the teacher and student as training targets (Jang et al., 2026; Xie et al., 2026). To make better use of teacher feedback, other methods use response outcomes to weight or calibrate supervision (Zheng et al., 2026; Hou et al., 2026), reduce variance or reshape distillation rewards (Oh et al., 2026; Zhao et al., 2026a), and stabilize training through policy constraints and mixed rollout sources (Luo et al., 2026). Data collection is also adapted through selective teacher intervention during student generation (Xu et al., 2025) and early termination of student rollouts to reduce generation costs and avoid unreliable teacher feedback (Ziheng et al., 2026; Xin et al., 2026; Zhang et al., 2026). Beyond these changes to objectives and training, the source of supervision has expanded from a separate teacher model to self-teachers conditioned on reasoning traces, demonstrations, additional context, or environmental feedback (Zhao et al., 2026e; Shenfeld et al., 2026a; Ye et al., 2026; H¨ ubotter et al., 2026; Liu et al., 2026). Multiple teachers can also supervise a shared student, whether they are independently trained domain experts (Ma et al., 2026a) or constructed through task-specific soft prompts (Ma et al., 2026b). These extensions motivate studying how distillation combines knowledge from different teachers. We refer readers to Song and Zheng (2026) for a comprehensive survey of OPD methods. 
+
+Understanding on-policy distillation. Recent studies examine both the advantages and the failure modes of on-policy distillation. For capability retention during RL fine-tuning, Shenfeld et al. (2026b) relate reduced forgetting to an implicit bias toward solutions close to the initial policy in KL divergence, while Chen et al. (2025) emphasize on-policy data and mode-seeking behavior. Empirical studies also show that stronger teachers and denser supervision do not necessarily yield better distillation. Li et al. (2026) find that OPD gains depend on compatible reasoning patterns and the teacher offering capabilities beyond those already acquired by the student. They further observe that teacher guidance becomes less effective on longer student-generated prefixes, with training instability emerging at later tokens and spreading to earlier positions. Wang et al. (2026) identify settings where teacher–student mismatch causes incorrect responses to receive higher average token-level rewards than correct ones. Fu et al. (2026) identify three sources of instability in sampled-token OPD: predominantly negative token-level rewards that make learning sensitive to a small set of 3positively rewarded tokens; unreliable teacher feedback that can reinforce repetitive or meaningless continuations on student-generated prefixes; and tokenizer or special-token mismatches that penalize semantically valid outputs. The theoretical understanding of OPD is relatively limited. Sriraman et al. (2026) establish an exponential separation in horizon dependence between offline learning and an on-policy algorithm with known expert corruption, and Viano et al. (2026) obtain efficient imitation under expert action-value realizability without policy realizability. Our contribution is to characterize their distinct optimal targets when aggregating multiple teachers and connect those targets to learning guarantees. We then analyze how teacher confidence, misleading feedback, and autoregressive continuations affect the expert’s preferences at these targets, providing possible mechanisms for both capability retention and fragility. 
+
+Relevant RL theory. To turn our perspective on distinct aggregation objectives into formal learning guarantees, we rely on the established RL theory, including supervised learning, KL-regularized bandits, and reinforcement learning with function approximation. Our analysis of the off-policy distillation protocol builds on the classical theory of behavior cloning, which aims to learn a policy from expert demonstrations. Classical analyses characterize how prediction errors compound under distribution shift (Syed and Schapire, 2010; Ross and Bagnell, 2010). DAgger addresses this issue by collecting expert feedback on learner-visited states, reducing imitation learning to no-regret online learning (Ross et al., 2011). Subsequent work further characterizes the statistical limits of imitation learning and the benefits of interaction (Rajaraman et al., 2020, 2021). More recently, Foster et al. (2024) establish guarantees for behavior cloning with logarithmic loss under realizability, highlighting the importance of the loss function and policy-class complexity. Our forward-KL guarantees draw on log-loss prediction methods, combining smoothed probability estimation in the tabular setting and exponentially weighted policy aggregation under function approximation with a new one-sided bounded martingale concentration inequality. For on-policy distillation, our analysis draws on prior work establishing logarithmic regret for KL-regularized bandits and reinforcement learning. Zhao et al. (2026b) establish O(1 /ϵ ) sample complexity in a sufficiently small-error regime under reference-policy coverage, and later Zhao et al. (2025) extend the results to obtain logarithmic regret in online contextual bandits and RL. For multi-armed bandits, Ji et al. (2026b) sharpen the dependence on the number of arms and regularization strength through nearly matching regret upper and lower bounds. Similar fast-rate guarantees have also been established in the offline setting for multi-armed bandits (Ji et al., 2026a), or with sufficient coverage conditions under KL and more general divergences (Zhao et al., 2026d,c). This line of work has since been extended to multiple reference models (Aminian et al., 2026), general preference models (Wu et al., 2026), game-theoretic settings (Nayak et al., 2025), differential privacy (Wu et al., 2025), and misspecified models (Hong et al., 2026). We adapt these techniques to sequential distillation by treating teacher log-probability ratios as rewards and accounting for dependence among rollouts from the same sampled teacher. This yields logarithmic regret guarantees for learning the reverse-KL aggregation target from on-policy teacher feedback. While we have established the connection between off- and on-policy distillation and their respective aggregation targets in the tabular setting, we seek to extend this connection to more general settings, drawing inspiration from prior work on general function approximation. In contextual bandits, Russo and Van Roy (2013) introduce eluder dimension to quantify how past observations constrain predictions at unobserved actions. Subsequent work extends eluder-based analyses to model estimation through value-targeted regression (Ayoub et al., 2020) and general 4value-function approximation (Wang et al., 2020). We use a generalized notion of eluder dimension developed in later work (Agarwal et al., 2023; Zhao et al., 2024; Di et al., 2024) and adapt it to the autoregressive setting. 
+
+# 3 Preliminaries 
+
+We study sequential distillation, in which a single student learns from multiple teachers over successive training rounds with the goal of aggregating their knowledge. Let X be a finite context space of size S := |X | , A a finite token space of size A := |A| , and H the generation horizon. We write Y := AH for the response space. Each response y = ( a1, . . . , a H ) ∈ Y 
+
+is generated autoregressively, and we denote its length-( h − 1) prefix by y<h := ( a1, . . . , a h−1). We consider a sequential distillation setting with a finite collection of teacher models indexed by I, where 
+
+|I| = I. For each i ∈ I , let ρi ∈ ∆( X ) be its context distribution and let pi be an autoregressive teacher policy such that for any h ∈ [H], the token conditionals are written as 
+
+pi(· | x, y <h ) ∈ ∆( A).
+
+The induced sequence-level policy is 
+
+pi(y | x) = 
+
+> H
+
+Y
+
+> h=1
+
+pi(ah | x, y <h ).
+
+At round t, the student policy πt is determined by the observations from previous rounds. A latent teacher index it is then drawn uniformly from I, independently of previous rounds. Conditional on it, we draw m contexts independently from ρit . The entire batch shares this teacher: teacher responses and feedback are generated according to pit . We consider two distillation protocols: 
+
+• (Off-policy Distillation) We sample m contexts {xt,j } ∼ ρit and full teacher rollouts yt,j ∼ pit (·| xt,j ). If we further have access to the teacher logits, at each teacher-generated prefix yt,j,<h , we additionally observe the full logit vector Zt,j,h ∈ RA. The corresponding token log-probabilities are obtained by applying log-softmax: log pit (a | xt,j , y t,j,<h ) = Zt,j,h (a) − log X
+
+> b∈A
+
+eZt,j,h (b), a ∈ A .
+
+• (On-policy Distillation) We sample m contexts {xt,j } ∼ ρit , use the current student policy πt to roll out with yt,j ∼ πt(·| xt,j ) token by token, and receive the per-token teacher log-probabilities 
+
+lt,j,h = log pit (at,j,h | xt,j , y t,j,<h ), h ∈ [H].
+
+Rather than matching any single teacher selected in the current round, our goal is to learn a single autoregressive student policy that aggregates the behavior of all teacher models. This objective is designed to avoid catastrophic forgetting: sequentially adapting the student to the current teacher may reduce its loss on the corresponding task while degrading its performance on teachers encountered previously. To formalize the desired aggregate policy, let 
+
+D : ∆( Y) × ∆( Y) → R≥0 ∪ { +∞} 
+
+5be a divergence between distributions. Given the collection of teacher models {(ρi, p i)}i∈I , we define the target policy by 
+
+π∗ ∈ argmin 
+
+> π:X → ∆( Y)
+
+X
+
+> i∈I
+
+Ex∼ρi
+
+D π(· | x) pi(· | x) . (3.1) Here, π(· | x) and pi(· | x) denote the induced distributions over complete responses in Y = AH .
+
+Remark 3.1. The initial student policy can also serve as a reference during training. In reinforce-ment learning from human feedback (RLHF), for example, the updated policy is often regularized toward its initial policy to limit how far it departs from that reference. To capture this role in our framework, we regard the reference policy as an additional teacher and include it in the teacher set as a modeling simplification. Under this interpretation, even distillation from a single external teacher can be viewed as learning from both that teacher and the initial student. Specifically, when D is the reverse KL or forward KL divergence, the objective can be decomposed into a sum of token-level divergences using the chain rule. In this work, we will mainly focus on the cases of forward KL ( D(p∥q) = KL( q∥p)) and reverse KL ( D(p∥q) = KL( p∥q)). 
+
+Regret. Since teacher indices are sampled uniformly, the marginal context distribution is the uniform mixture of the teacher context distributions: ¯ρ(x) := 1
+
+I
+
+X
+
+> i∈I
+
+ρi(x).
+
+For each choice of D, let π∗ denote the corresponding minimizer of (3.1). We define regret as the cumulative divergence of the student policies {πt}Tt=1 from this target, averaged over the marginal context distribution: Regret( T ) := 
+
+> T
+
+X
+
+> t=1
+
+Ex∼¯ρ
+
+D πt(· | x) π∗(· | x) . (3.2) SFT has a well-known forward-KL interpretation, while reverse KL is commonly used in OPD. Motivated by these connections, we take D(p∥q) = KL( q∥p) for off-policy distillation and D(p∥q) = KL( p∥q) for on-policy distillation. 
+
+# 4 Off-policy Distillation & Forward KL 
+
+In this section, we study how off-policy feedback can be used to learn the forward-KL aggregate. We first characterize this target, then construct a tabular algorithm using teacher-generated responses, with or without full teacher logits, and establish logarithmic regret bounds. As the first step, the following theorem gives the target distribution and its token conditionals. 
+
+Theorem 4.1 (Forward KL) . If D(p∥q) = KL( q∥p), a minimizer of (3.1) is given at the sequence level, for each x with ¯ ρ(x) > 0, by 
+
+π∗
+
+> F
+
+(y|x) = X
+
+> i∈I
+
+wi(x)pi(y|x), (4.1) 6where wi(x) = ρi(x)/[P 
+
+> j∈I
+
+ρj (x)]. Moreover, for any h ∈ [H], supposing P 
+
+> j∈I
+
+ρj (x)pj (y<h | x) > 0, the token-level distributions are given by 
+
+π∗
+
+> F
+
+(a|x, y <h ) = X
+
+> i∈I
+
+wi(x, y <h ) pi(a|x, y <h ), wi(x, y <h ) := ρi(x) pi(y<h |x)
+
+P 
+
+> j∈I
+
+ρj (x) pj (y<h |x) . (4.2) 
+
+Remark 4.2. The prefix-dependent weights admit a Bayesian interpretation. Under the off-policy sampling protocol, the teacher index is first sampled uniformly, the context is drawn from ρit , and the response is generated by pit . Therefore, for every prefix satisfying P 
+
+> j∈I
+
+ρj (x)pj (y<h | x) > 0, Bayes’ rule gives 
+
+wi(x, y <h ) = P it = i xt,j = x, y t,j,<h = y<h 
+
+.
+
+Thus, wi(x, y <h ) is the posterior probability that teacher i generated the observed context and prefix. Consequently, teachers that better explain the observed prefix receive greater weight in the target policy’s next-token distribution. 
+
+4.1 Algorithm Design 
+
+The posterior weights above also determine the next-token distribution in teacher-generated data. For a teacher-generated rollout ( xt,j , y t,j ), let u ∈ A h−1 denote a prefix. Conditioning on ( xt,j , y t,j,<h ) = (x, u ) gives teacher weights wi(x, u ). Hence, the next-token distribution is 
+
+P at,j,h = a | xt,j = x, y t,j,<h = u = X
+
+> i∈I
+
+wi(x, u )pi(a|x, u ) = π∗
+
+> F
+
+(a|x, u ).
+
+Thus, at every visited prefix, the observed next token is a sample from the corresponding token conditional of the forward-KL target, which suggests estimating each target conditional from the token frequencies observed at the corresponding context–prefix pair. When full logits are available, each sampled token can instead be replaced by the teacher’s conditional probability vector. To express both updates in a common form, define 
+
+qt,j,h (a) := 
+
+(1(at,j,h = a) w/o logit ,  
+
+> exp( Zt,j,h (a)) P
+> b∈A exp( Zt,j,h (b))
+
+, w/ logit .
+
+We then define the per-round normalized counts as 
+
+ct(x, u, a ) := 1
+
+m
+
+> m
+
+X
+
+> j=1
+
+1(xt,j = x, y t,j,<h = u) qt,j,h (a). (4.3) Here, the token position h = |u| + 1 is determined by the prefix u and is hidden from the notation 
+
+ct(x, u, a ). The algorithm accumulates these counts after each round according to 
+
+Wt(x, u, a ) := 
+
+> t
+
+X
+
+> s=1
+
+cs(x, u, a ), W t(x, u ) := X
+
+> a∈A
+
+Wt(x, u, a ),
+
+and outputs the conditional policy 
+
+bπt+1 (a|x, u ) := Wt(x, u, a ) + 1 /2
+
+Wt(x, u ) + A/ 2 . (4.4) 7Here we add a (1 /2)-smoothing to each accumulated weight, following the spirit of the classical Krichevsky–Trofimov estimator (Krichevsky and Trofimov, 1981), which prevents zero predicted probabilities and assigns the uniform distribution to unvisited states. 
+
+Algorithm 1 Per-Prefix Forward KL  
+
+> 1:
+
+Input: Context set X , token set A, horizon H. 
+
+> 2:
+
+Initialize W0(x, u, a ) = 0; equivalently, bπ1(a|x, u ) = 1 /A at every active prefix.  
+
+> 3:
+
+for t = 1 , . . . , T do  
+
+> 4:
+
+Observe the batch of teacher rollouts {(xt,j , y t,j )}mj=1 and, when available, the teacher logits 
+
+{Zt,j,h }j,h . 
+
+> 5:
+
+For every level-h state ( x, u ) and token a, set ct(x, u, a ) as in (4.3).  
+
+> 6:
+
+Update the weight Wt(x, u, a ) = Wt−1(x, u, a ) + ct(x, u, a ) and Wt(x, u ) = P 
+
+> a
+
+Wt(x, u, a ).  
+
+> 7:
+
+Let bπt+1 (a|x, u ) be as defined in (4.4).  
+
+> 8:
+
+end for  
+
+> 9:
+
+Output {bπt}Tt=1 .
+
+4.2 Theoretical Guarantees 
+
+We now bound the cumulative forward-KL divergence from the target π∗ 
+
+> F
+
+to the policies produced by Algorithm 1. The following theorem gives logarithmic regret bounds under both feedback protocols, with expectation and probability taken over the teachers and rollouts sampled during training. 
+
+Theorem 4.3. Let T ≥ 2, and define the regret in (3.2) with D(p∥q) = KL( q∥p). Under the off-policy distillation protocol, both with and without access to full teacher logits, Algorithm 1 satisfies 
+
+E Regret( T ) ≤ 4SA H log T. 
+
+Moreover, for any δ ∈ (0 , 1), with probability at least 1 − δ, Algorithm 1 satisfies Regret( T ) ≤ 8SA H log T + 4 H 1 + log(2 T + A) log 1
+
+δ .
+
+For fixed S, A, and H, Theorem 4.3 implies that the forward-KL divergence from π∗ 
+
+> F
+
+to bπt,averaged over contexts and training rounds, decays as O(log T /T ) in expectation and with high probability. Thus, off-policy feedback allows the student to learn the forward-KL aggregate in this average-divergence sense. The factor SA H reflects the size of the effective state–action space: at step h, each context–prefix pair ( x, u ) ∈ X × A h−1 acts as a distinct state, yielding SA h state–action pairs. The exponential dependence on H comes from the growth of the effective state space itself and the bound scales linearly with the total number of state–action pairs across all steps. 
+
+# 5 On-policy Distillation & Reverse KL 
+
+In this section, we study how on-policy feedback can be used to learn the reverse-KL aggregate. With the same structure as the last section, we first characterize this target, then construct a tabular algorithm using teacher log-probabilities evaluated along student-generated responses. The following theorem gives the target distribution and its token conditionals. 8Theorem 5.1 (Reverse KL) . Let wi(x) = ρi(x)/[P 
+
+> j∈I
+
+ρj (x)]. Define the unnormalized token-level geometric mean 
+
+gh(a|x, y <h ) := Y
+
+> i∈I
+
+pi(a|x, y <h )wi(x).
+
+We define the value function iteratively backward as follows: for any x ∈ X , y ∈ A H ,
+
+VH+1 (x, y ) := 1 , Vh(x, y <h ) := X
+
+> a∈A
+
+gh(a|x, y <h ) Vh+1 
+
+ x, (y<h , a ), h = H, . . . , 1.
+
+Then the sequence-level reverse-KL minimizer is unique and is given by 
+
+π∗
+
+> R
+
+(y|x) = Y
+
+> i∈I
+
+pi(y|x)wi(x)/V 1(x). (5.1) Moreover, we assume that at every prefix y<h , Vh(x, y <h ) > 0. Then, the token-level distribution is unique, i.e., 
+
+π∗
+
+> R
+
+(a|x, y <h ) = gh(a|x, y <h ) · Vh+1 
+
+ x, (y<h , a )/V h(x, y <h ). (5.2) 
+
+Remark 5.2. In contrast with the last section, the teacher weights wi(x) depend only on the context. However, the token conditional is not obtained by normalizing gh alone: each token score is also multiplied by Vh+1 , which sums the products of subsequent scores over all possible continuations. To summarize, the target accounts for both the current token and the continuations that follow it. 
+
+5.1 Algorithm Design 
+
+To control the estimation error of teacher feedback, we assume that teacher token log-probabilities differ from those of a fixed reference policy by a bounded amount. 
+
+Assumption 5.3. Let B > 0. There exists a fixed full-support reference policy πref such that, for every i ∈ I , h ∈ [H], and ( x, u, a ) ∈ X × A h−1 × A ,
+
+log[ pi(a|x, u )/π ref (a|x, u )] ≤ B. 
+
+No such assumption is required for our forward-KL analysis, since the feedback consists of token indicators or teacher probabilities, both bounded in [0 , 1]. Here, we instead estimate teacher log-probabilities, which can be unbounded below. Assumption 5.3 imposes a two-sided bound on the token-level probability ratios between each teacher and the reference policy. Let Ft denote the observations available before round t, so that πt is Ft-measurable. For a student-generated rollout ( xt,j , y t,j ), let u ∈ A h−1 denote a prefix. At any visited context–prefix–token triple (x, u, a ), Bayes’ rule gives 
+
+P it = i | F t, x t,j = x, y t,j,<h = u, a t,j,h = a = ρi(x)πt(u|x)πt(a|x, u )
+
+P 
+
+> k∈I
+
+ρk(x)πt(u|x)πt(a|x, u ) = wi(x).
+
+Given the context and past observations, the prefix and token are generated by the student policy, which is shared across teacher indices. Their probabilities therefore cancel, leaving the teacher 9weights unchanged. Recall that the observed feedback is lt,j,h = log pit (a|x, u ). Its conditional mean satisfies 
+
+Elt,j,h Ft, x t,j = x, y t,j,<h = u, a t,j,h = a = X
+
+> i∈I
+
+wi(x) log pi(a|x, u ) = log gh(a|x, u ).
+
+Visits to ( x, u, a ) thus provide unbiased observations of the log-geometric score log gh(a|x, u ). Motivated by this, we estimate this score by averaging the feedback collected at the same triple. Define the cumulative visit count Nt, the cumulative feedback St, and the empirical mean ¯lt as 
+
+Nt(x, u, a ) := 
+
+> t
+
+X
+
+> s=1
+> m
+
+X
+
+> j=1
+
+1 xs,j = x, y s,j,<h = u, a s,j,h = a,St(x, u, a ) := 
+
+> t
+
+X
+
+> s=1
+> m
+
+X
+
+> j=1
+
+ls,j,h 1 xs,j = x, y s,j,<h = u, a s,j,h = a,
+
+¯lt(x, u, a ) := St(x, u, a )/ Nt(x, u, a ) ∨ 1. (5.3) To account for uncertainty in these empirical means, we construct optimistic estimates of the log-geometric scores. The following lemma bounds the estimation error at visited triples. 
+
+Lemma 5.4. Under Assumption 5.3, fix any δ ∈ (0 , 1). With probability at least 1 − 2δ, the following inequality holds for every t ∈ [T ] and every ( x, u, a ) with Nt(x, u, a ) ≥ 1 simultaneously, 
+
+¯lt(x, u, a ) − log gh(a|x, u ) ≤ βt(x, u, a ),
+
+where βt(x, u, a ) := eO BpmH/ (Nt(x, u, a ) ∨ 1) + BmH/ (Nt(x, u, a ) ∨ 1) .As a result, we can define the optimistic estimate 
+
+blt(x, u, a ) := 
+
+(¯lt(x, u, a ) + min βt(x, u, a ), 2B Nt(x, u, a ) ≥ 1,
+
+log πref (a|x, u ) + B Nt(x, u, a ) = 0 . (5.4) At visited triples, Lemma 5.4 ensures that blt(x, u, a ) ≥ log gh(a|x, u ) on the confidence event. At unvisited triples, this inequality follows directly from Assumption 5.3. We then substitute these optimistic scores into the backward recursion defining the reverse-KL target in (5.2): 
+
+bgt,h (a|x, u ) := exp  blt(x, u, a ), bVt,H +1 (x, y ) := 1 ,
+
+bVt,h (x, u ) := X
+
+> a∈A
+
+bgt,h (a|x, u ) bVt,h +1 
+
+ x, (u, a ), h = H, . . . , 1.
+
+Therefore, for any h, any context x and prefix y<h = u, the output policy for the next token is defined as 
+
+bπt+1 (a|x, u ) := bgt,h (a|x, u ) bVt,h +1 
+
+ x, (u, a )/ bVt,h (x, u ). (5.5) The algorithm is outlined in Algorithm 2. 10 Algorithm 2 Per-Prefix Reverse KL  
+
+> 1:
+
+Input: Context set X , token set A, H, B, δ, and T . 
+
+> 2:
+
+Initialize bπ1(a|x, u ) = 1 /A for any ( x, u, a ).  
+
+> 3:
+
+for t = 1 , . . . , T do  
+
+> 4:
+
+Observe the contexts {xt,j }mj=1 generated from ρit . 
+
+> 5:
+
+For each j, generate yt,j ∼ bπt(·| xt,j ) and observe {lt,j,h }Hh=1 . 
+
+> 6:
+
+For each triple ( x, u, a ), update Nt(x, u, a ), St(x, u, a ), and ¯lt(x, u, a ) as in (5.3).  
+
+> 7:
+
+Construct the optimistic estimate blt according to (5.4).  
+
+> 8:
+
+Define bπt+1 according to (5.5).  
+
+> 9:
+
+end for  
+
+> 10:
+
+Output {bπt}Tt=1 .
+
+5.2 Theoretical Guarantees 
+
+We now bound the regret induced by Algorithm 2. 
+
+Theorem 5.5. Let T ≥ 2, and define the regret in (3.2) with D(p∥q) = KL( p∥q). Under the on-policy distillation protocol and Assumption 5.3, for any δ ∈ (0 , 1/3), with probability at least 1 − 3δ, Algorithm 2 satisfies Regret( T ) ≤ eO B2H2SA H log T .
+
+For fixed S, A, H, B, and δ, Theorem 5.5 implies that the reverse-KL divergence from bπt to 
+
+π∗
+
+> R
+
+, averaged over contexts and training rounds, decays as eO(log T /T ) with high probability. Thus, on-policy feedback allows the student to learn the reverse-KL aggregate in this average-divergence sense. As in the off-policy setting, the factor SA H reflects the size of the effective state–action space. For the detailed proof, see Appendix C. 
+
+# 6 Comparison of Distinct Aggregation Objectives 
+
+The preceding sections establish learning guarantees that connect off-policy distillation to forward-KL aggregation and on-policy distillation to reverse-KL aggregation. We now examine the differences between these two forms of aggregation and their implications for combining the capabilities of multiple teachers in a single policy. 
+
+6.1 Uninformative Teachers 
+
+Consider a context x that falls within teacher k’s area of expertise but is unfamiliar to the remaining teachers. We represent this difference in coverage by assuming that ρk(x) is large relative to P 
+
+> i̸=k
+
+ρi(x). The expert therefore receives a large aggregation weight α := wk(x) ∈ (0 , 1). Write p(·| x) := pk(·| x) and N := |Y| ≥ 2, and let q := p(y⋆|x) denote the expert’s probability of a desirable response y⋆. A value of q close to one means that the expert already produces the correct response with high probability. We ask whether the aggregate can maintain this high probability when the other teachers are uninformative. To represent the remaining teachers’ lack of information at x, we model their response distributions as uniform: pi(y|x) = 1 /N for every i̸ = k and y ∈ Y .11 These teachers have total weight 1 − α and are equivalent, under either objective, to a single uniform teacher with this weight. The two aggregation targets are therefore 
+
+π∗
+
+> F
+
+(y|x) = αp (y|x) + 1 − αN , π∗
+
+> R
+
+(y|x) = p(y|x)α
+
+P 
+
+> z∈Y
+
+p(z|x)α .
+
+For a concrete comparison, suppose y⋆ is the only correct response and q ∈ (1 /N, 1), with the expert assigning uniform probability to each incorrect response. The following proposition shows that, for fixed teacher weights and response space, the comparison is determined by a confidence threshold. 
+
+Proposition 6.1. Fix N ≥ 2 and α ∈ (0 , 1), and consider the teacher distributions above. If N ≥ 3, there exists a unique qc = qc(N, α ) ∈ (1 /N, 1) such that, for every q ∈ (1 /N, 1), 
+
+π∗
+
+> R
+
+(y⋆|x) > π ∗
+
+> F
+
+(y⋆|x) ⇐⇒ q > q c.
+
+The proof is given in Appendix E. Figure 1(a) plots the two correct-response probabilities for 
+
+q > 0.5, with N = 10 and α = 0 .9 fixed. 0.5 0.6 0.7 0.8 0.9 1.0             
+
+> Expert confidence q
+> 0.5 0.6 0.7 0.8 0.9 1.0
+> Correct-response probability
+> (a) Uninformative teachers
+> 10 −12 10 −8 10 −4 10 −1
+> Correct-response probability ε
+> 0.80 0.85 0.90 0.95 1.00
+> Correct-response probability
+> (b) Misleading teachers
+> 110 20 30 40
+> Horizon H
+> 0.80 0.85 0.90 0.95 1.00
+> Correct first-token probability
+> (c) Long horizons Expert Forward KL Reverse KL
+
+Figure 1: Forward- and reverse-KL aggregation with expert weight α = 0 .9. Panels (a,b) use 
+
+N = 10 responses, with each teacher distributing its remaining probability uniformly over incorrect responses. (a) The other teachers are uniform, and expert confidence q varies above 0 .5; the targets cross at qc ≈ 0.7617. (b) The expert’s probability is fixed at q = 0 .99, while the other teacher’s correct-response probability ε varies on a logarithmic axis. (c) For binary responses, the horizon 
+
+H varies while all token probabilities remain fixed. The expert chooses the correct first token a
+
+with probability 0 .99; subsequent tokens have probabilities (0 .99 , 0.01) after a and (1 /2, 1/2) after b.The other teacher is uniform at every prefix. 
+
+Remark 6.2. This setting illustrates how forgetting can arise when a student, after acquiring an expert teacher’s capability, continues learning from other teachers that are uninformative on the same context. Proposition 6.1 identifies when this reduction is smaller under reverse aggregation than under forward aggregation, offering a possible explanation for empirical findings that OPD is less susceptible to forgetting than SFT. For example, Shenfeld et al. (2026a) show in both single-task and sequential continual-learning experiments that OPD preserves general and previously acquired capabilities while learning new tasks, whereas SFT leads to substantial performance regression. Similar observations are reported by H¨ ubotter et al. (2026) and Ma et al. (2026b), and have also been made in the field of vision language action model (Zhong et al., 2026). 12 6.2 Misleading Teachers 
+
+The preceding examples model teachers that are unfamiliar with a context as uniform. In this section, we consider another scenario where teachers may be misleading. As the small aggregation weights of some teachers reflect their limited coverage of the context, their predictions on such unfamiliar contexts may be highly inaccurate. Thus, they may assign extremely low probability to the correct response. We show that forward aggregation preserves a high probability of the correct response when the expert is highly confident and receives most of the weight. Under reverse aggregation, however, even a teacher with a small weight can drive this probability arbitrarily close to zero by assigning sufficiently low probability to the correct response. Figure 1(b) illustrates this effect by varying only the misleading teacher’s correct-response probability ε, while fixing the expert’s probability at q = 0 .99 and the teacher weights at 0 .9 and 0.1. As ε decreases toward zero, the reverse target approaches zero, whereas the forward target remains bounded below by the expert’s weighted contribution. The following proposition extends this comparison to a set of correct responses. 
+
+Proposition 6.3. Let ∅̸ = E ⊊ Y be a set of correct responses. For any teacher k, the forward target satisfies 
+
+π∗
+
+> F
+
+(E|x) ≥ wkpk(E|x).
+
+In contrast, for any α, q, η ∈ (0 , 1), there exist two teachers with weights w1 = α and w2 = 1 − α,each assigning positive probability to every response, such that 
+
+p1(E|x) = q, π∗
+
+> R
+
+(E|x) < η. 
+
+Intuitively, forward aggregation is a weighted sum of nonnegative probabilities, so other teachers cannot cancel the expert’s contribution to correct responses. Reverse aggregation instead averages log-probabilities, which can be arbitrarily negative. Consequently, a teacher that assigns sufficiently low probability to correct responses relative to incorrect ones can override the expert’s preference, even with a small aggregation weight. 
+
+Remark 6.4. The sensitivity identified by Proposition 6.3 offers a possible explanation for some empirical failures of OPD under teacher–student mismatch. Such failures can occur even with a stronger teacher: Ma et al. (2026a) find that a stronger but distributionally different teacher produces predominantly negative feedback on student rollouts and degrades student performance. Related empirical remedies address either extreme feedback or the initial mismatch. Wang et al. (2026) show that clipping or compressing extreme token-level log-ratios can improve training stability, while Li et al. (2026) find that an SFT cold start on teacher-generated responses reduces the initial pattern mismatch and improves subsequent OPD. 
+
+6.3 Long Horizons 
+
+The preceding comparisons focus on the probabilities of complete responses. During autoregressive generation, however, reverse aggregation can favor a prefix that the expert considers less likely, even while preserving the expert’s ranking of complete responses. This can steer generation toward an incorrect trajectory. Consider an expert teacher p1 with weight α ∈ (0 , 1) and a uniform teacher p2 with weight 
+
+β = 1 − α. Since p2(y|x) = A−H is the same for every complete response, its contribution to the 13 geometric aggregate cancels upon normalization, leaving 
+
+π∗
+
+> R
+
+(y|x) = p1(y|x)α/P  
+
+> z∈Y
+
+p1(z|x)α.
+
+Raising probabilities to the power α < 1 preserves the ranking of complete responses while increasing the relative weight of less likely responses. Token-level probabilities, however, also depend on a sum over possible continuations, as shown by (5.2). For a prefix u of length h − 1 and a candidate token 
+
+c,
+
+π∗
+
+> R
+
+(c|x, u ) ∝ p1(c|x, u )α X
+
+> v∈A H−h
+
+p1(v|x, u, c )α.
+
+Since α < 1, spreading probability mass more evenly across continuations increases this sum. The continuation factor can therefore favor tokens with more diffuse continuations over those whose continuations are concentrated on a few responses. To further illustrate this effect, consider responses of length H over A = {a, b }, where a is the correct first token. The expert p1 has weight α = 0 .9 and selects a at the first step with probability 
+
+r = 0 .99. The other teacher p2 has weight β = 0 .1 and assigns probability 1 /2 to each token at every prefix. At each of the remaining H − 1 positions, the expert’s token distribution depends only on the first token. After an initial a, it assigns probability 0 .99 to a and 0 .01 to b, regardless of the intervening tokens. After an initial b, it assigns probability 1 /2 to each token. Thus, the expert’s continuations are concentrated after a and uniform after b, while all token probabilities remain strictly positive. Under forward aggregation, the probability of choosing a at the first step is the weighted average of the teachers’ corresponding probabilities and is therefore independent of the continuation distributions and the horizon. Figure 1(c) plots the probability of choosing the correct first token a as H varies from 1 to 40, keeping the teacher weights and token-level probabilities fixed. More generally, the following proposition shows that this reversal can occur even when the uniform teacher receives an arbitrarily small weight. 
+
+Proposition 6.5. Fix β ∈ (0 , 1/2) and r ∈ (1 /2, 1). For every sufficiently large horizon H, there exist two teacher policies p1 and p2 on Y = {a, b }H , each assigning positive probability to every response, such that p1(a|x) = r and p2 is uniform at every prefix. With aggregation weights 
+
+w1(x) = 1 − β and w2(x) = β, their forward and reverse targets satisfy 
+
+π∗
+
+> F
+
+(a|x) > π ∗
+
+> F
+
+(b|x), π∗
+
+> R
+
+(a|x) < π ∗
+
+> R
+
+(b|x).
+
+Remark 6.6. The reversal in Proposition 6.5 illustrates a potential difficulty for OPD on long responses: increasing the horizon can change the reverse aggregation target’s preferred prefix while the expert’s preference remains fixed. Empirically, Li et al. (2026) find that longer rollouts can exhibit late-stage collapse, with instability emerging at later tokens and spreading toward earlier positions. Ziheng et al. (2026) find that teachers are less able to recover correct answers from longer student-generated prefixes and that stopping rollouts early can improve training stability. 
+
+# 7 Conclusion 
+
+We studied off- and on-policy distillation in a sequential multi-teacher framework. By characterizing the forward- and reverse-KL targets and establishing learning guarantees, we connected the two 14 feedback protocols to distinct aggregation objectives. Our comparisons show that reverse-KL aggregation can better preserve a confident expert’s preference in the presence of uniform teachers, but can suppress correct responses under misleading feedback or favor incorrect prefixes over long horizons. These results offer possible explanations for the benefits and fragility of OPD relative to SFT, and provide a perspective on the difference between SFT and OPD through the lens of distinct aggregation objectives. 
+
+AI use statement 
+
+This work builds on the authors’ research intuition and ideas. We used AI models, including GPT 5.6 Sol, GPT 6 Astra, Claude Fable 5, and Grok 4.6, to help articulate and summarize these ideas and to draft and polish the manuscript. These models also assisted in proving several key technical lemmas and developing proof strategies. The authors verified the proofs and reviewed the AI-assisted writing, and take full responsibility for the correctness and final content of the paper. 
+
+# A Proof of the KL Aggregation Theorems 
+
+In this section, we prove Theorems 4.1 and 5.1. We first reduce the objective to a separate optimization problem at each context. Recall that ¯ρ(x) := 1
+
+I
+
+X
+
+> i∈I
+
+ρi(x), wi(x) := ρi(x)
+
+P 
+
+> j∈I
+
+ρj (x)for every x with ¯ ρ(x) > 0. Define 
+
+I+ 
+
+> x
+
+:= {i ∈ I : wi(x) > 0}, L D,x (π) := X
+
+> i∈I +
+> x
+
+wi(x)D π(· | x) pi(· | x).
+
+Using ρi(x) = I ¯ρ(x)wi(x), we obtain 
+
+X
+
+> i∈I
+
+Ex∼ρi
+
+D π(· | x) pi(· | x) = I X
+
+> x:¯ ρ(x)>0
+
+¯ρ(x)LD,x (π). (A.1) The optimization domain in (3.1) allows a separate distribution in ∆( Y) at every context. Therefore, it suffices to minimize LD,x at each context with ¯ ρ(x) > 0. Contexts with ¯ ρ(x) = 0 do not affect the objective, and their policies may be chosen arbitrarily. Throughout the proofs, zero-weight teachers are omitted from geometric products. We use the conventions 0 log(0 /q ) = 0 for q ≥ 0 and 
+
+p log( p/ 0) = + ∞ for p > 0. 
+
+A.1 Proof of Theorem 4.1 
+
+Proof of Theorem 4.1. Fix a context x with ¯ ρ(x) > 0. For forward KL, the contextwise objective in (A.1) is 
+
+LF,x (π) := X
+
+> i∈I +
+> x
+
+wi(x)KL  pi(· | x) π(· | x).
+
+15 We first identify its minimizing sequence distribution, and then derive the corresponding token conditionals. 
+
+Sequence-level minimizer. Define the candidate distribution 
+
+qF(y | x) := X
+
+> i∈I +
+> x
+
+wi(x)pi(y | x), y ∈ Y .
+
+Since the weights are nonnegative and sum to one, qF(· | x) ∈ ∆( Y). Let 
+
+SF(x) := {y ∈ Y : qF(y | x) > 0},CF(x) := X
+
+> i∈I +
+> x
+
+wi(x)KL  pi(· | x) qF(· | x).
+
+For every i ∈ I + 
+
+> x
+
+, we have qF(y | x) ≥ wi(x)pi(y | x). Consequently, CF(x) is finite and does not depend on π. For a policy that is positive on SF(x), expanding the KL divergences gives 
+
+LF,x (π) − CF(x) = X
+
+> i∈I +
+> x
+
+wi(x) X
+
+> y∈S F(x)
+
+pi(y | x) log qF(y | x)
+
+π(y | x)= X
+
+> y∈S F(x)
+
+qF(y | x) log qF(y | x)
+
+π(y | x)= KL  qF(· | x) π(· | x), (A.2) where the second equality uses the definition of qF. If π assigns zero probability to some y ∈ S F(x), at least one positive-weight teacher assigns positive probability to that response. In that case, both sides of (A.2) are + ∞, so the identity remains valid in the extended-real sense. By nonnegativity of KL divergence, the right-hand side of (A.2) is minimized at zero, with equality if and only if π(· | x) = qF(· | x). Thus, the minimizing sequence distribution is unique at this context and satisfies 
+
+π∗
+
+> F
+
+(y | x) = qF(y | x) = X
+
+> i∈I
+
+wi(x)pi(y | x),
+
+which proves (4.1). 
+
+Token-level conditionals. Fix h ∈ [H] and u ∈ A h−1. Marginalizing the sequence distribution over all continuations gives 
+
+π∗
+
+> F
+
+(u | x) = X
+
+> i∈I
+
+wi(x)pi(u | x),π∗
+
+> F
+
+(( u, a ) | x) = X
+
+> i∈I
+
+wi(x)pi(u | x)pi(a | x, u ). (A.3) The first equality follows from linearity of marginalization; the second additionally uses the autore-gressive factorization of each teacher. Suppose that P 
+
+> i
+
+ρi(x)pi(u | x) > 0. Then π∗
+
+> F
+
+(u | x) > 0, and 16 taking the ratio of the two prefix probabilities yields 
+
+π∗
+
+> F
+
+(a | x, u ) = π∗
+
+> F
+
+(( u, a ) | x)
+
+π∗
+
+> F
+
+(u | x)=
+
+P 
+
+> i∈I
+
+wi(x)pi(u | x)pi(a | x, u )
+
+P 
+
+> j∈I
+
+wj (x)pj (u | x)= X
+
+> i∈I
+
+ρi(x)pi(u | x)
+
+P 
+
+> j∈I
+
+ρj (x)pj (u | x) pi(a | x, u ), (A.4) where the last equality substitutes the definition of wi(x) and cancels its common normalization factor. This is exactly (4.2). At a prefix with π∗
+
+> F
+
+(u | x) = 0, the conditional may be chosen arbitrarily without changing the sequence distribution. Since x was arbitrary, combining the contextwise minimizers using (A.1) completes the proof. 
+
+A.2 Proof of Theorem 5.1 
+
+Proof of Theorem 5.1. Fix a context x with ¯ ρ(x) > 0. The contextwise reverse-KL objective is 
+
+LR,x (π) := X
+
+> i∈I +
+> x
+
+wi(x)KL  π(· | x) pi(· | x).
+
+Define the unnormalized sequence score and its total mass by 
+
+Gx(y) := Y
+
+> i∈I +
+> x
+
+pi(y | x)wi(x), Zx := X
+
+> y∈Y
+
+Gx(y).
+
+We first show that Zx = V1(x), then identify the minimizing sequence distribution and its token conditionals. 
+
+Backward recursion and normalization. By the autoregressive factorization of the teachers, 
+
+Gx(y) = Y
+
+> i∈I +
+> x
+> H
+
+Y
+
+> h=1
+
+pi(ah | x, y <h )
+
+!wi(x)
+
+=
+
+> H
+
+Y
+
+> h=1
+
+Y
+
+> i∈I +
+> x
+
+pi(ah | x, y <h )wi(x)
+
+=
+
+> H
+
+Y
+
+> h=1
+
+gh(ah | x, y <h ). (A.5) For every h ∈ [H + 1] and u ∈ A h−1, we claim that 
+
+Vh(x, u ) = X 
+
+> ah,...,a H∈A
+> H
+
+Y
+
+> k=h
+
+gk(ak | x, y <k ), y = ( u, a h, . . . , a H ). (A.6) At h = H + 1, the sum contains one empty continuation and its empty product is one, so the identity agrees with VH+1 (x, y ) = 1. Suppose that it holds at level h + 1. Using the defining recursion for 17 Vh, we obtain 
+
+Vh(x, u ) = X
+
+> ah∈A
+
+gh(ah | x, u )Vh+1 (x, (u, a h)) = X
+
+> ah∈A
+
+gh(ah | x, u ) X 
+
+> ah+1 ,...,a H∈A
+> H
+
+Y
+
+> k=h+1
+
+gk(ak | x, y <k )= X 
+
+> ah,...,a H∈A
+> H
+
+Y
+
+> k=h
+
+gk(ak | x, y <k ),
+
+where the second equality uses the induction hypothesis. This proves (A.6) by backward induction. At the empty prefix, it gives 
+
+V1(x) = X
+
+> y∈Y
+
+Gx(y) = Zx. (A.7) In particular, the positivity condition V1(x) > 0 implies Zx > 0. 
+
+Sequence-level minimizer. Define 
+
+qR(y | x) := Gx(y)
+
+Zx
+
+, SR(x) := {y ∈ Y : Gx(y) > 0}.
+
+By (A.7), qR(· | x) is a probability distribution. The set SR(x) is the common support of all positive-weight teachers. Any policy assigning positive mass outside this set has infinite reverse KL to at least one such teacher, and therefore incurs infinite objective value. For a policy supported on 
+
+SR(x), we have 
+
+LR,x (π) = X
+
+> y∈S R(x)
+
+π(y | x)
+
+log π(y | x) − X
+
+> i∈I +
+> x
+
+wi(x) log pi(y | x)
+
+
+
+= X
+
+> y∈S R(x)
+
+π(y | x) log π(y | x)
+
+Gx(y)= X
+
+> y∈S R(x)
+
+π(y | x) log π(y | x)
+
+qR(y | x) − log Zx
+
+= KL  π(· | x) qR(· | x) − log V1(x). (A.8) Here, the second equality uses the definition of Gx, the third uses Gx = ZxqR and P 
+
+> y
+
+π(y | x) = 1, and the last uses (A.7). The same identity holds in the extended-real sense when π puts positive mass outside SR(x), since both sides are then infinite. Since − log V1(x) does not depend on π, nonnegativity of KL divergence shows that the unique minimizing sequence distribution is 
+
+π∗
+
+> R
+
+(y | x) = qR(y | x) = 
+
+Q 
+
+> i∈I +
+> x
+
+pi(y | x)wi(x)
+
+V1(x) ,
+
+which proves (5.1). 18 Token-level conditionals. Fix h ∈ [H] and a prefix u = ( u1, . . . , u h−1), and let 
+
+G<h (x, u ) := 
+
+> h−1
+
+Y
+
+> k=1
+
+gk(uk | x, u <k ),
+
+where the empty product is one. Combining (A.5) and (A.6), and summing over all continuations, gives 
+
+π∗
+
+> R
+
+(u | x) = G<h (x, u )Vh(x, u )
+
+V1(x) ,π∗
+
+> R
+
+(( u, a ) | x) = G<h (x, u )gh(a | x, u )Vh+1 (x, (u, a )) 
+
+V1(x) . (A.9) If π∗
+
+> R
+
+(u | x) > 0, then both G<h (x, u ) and Vh(x, u ) are positive. Taking the ratio of the two prefix probabilities yields 
+
+π∗
+
+> R
+
+(a | x, u ) = π∗
+
+> R
+
+(( u, a ) | x)
+
+π∗
+
+> R
+
+(u | x)= gh(a | x, u )Vh+1 (x, (u, a )) 
+
+Vh(x, u ) , (A.10) which is (5.2). These conditionals are uniquely determined at every positive-probability prefix. At a null prefix with Vh(x, u ) > 0, the right-hand side of (A.10) still defines a valid conditional, because its numerator sums to Vh(x, u ). When Vh(x, u ) = 0, choose an arbitrary conditional instead. To verify that these choices induce the minimizing sequence law, take any y ∈ S R(x). All factors and continuation values along this response are positive, so the selected conditionals telescope: 
+
+> H
+
+Y
+
+> h=1
+
+gh(ah | x, y <h )Vh+1 (x, y ≤h)
+
+Vh(x, y <h ) =
+
+QHh=1 gh(ah | x, y <h )
+
+V1(x)= Gx(y)
+
+Zx
+
+= π∗
+
+> R
+
+(y | x),
+
+where y≤h := ( a1, . . . , a h) and the first equality uses VH+1 (x, y ) = 1. These probabilities already sum to one over SR(x). Since every selected token conditional is normalized, the induced autoregressive law assigns zero mass to all other responses and equals π∗
+
+> R
+
+(· | x). Thus, uniqueness concerns the sequence distribution and its conditionals at positive-probability prefixes, not arbitrary conditionals at null prefixes. Applying (A.1) across contexts completes the proof. 
+
+# B Proof of Theorem 4.3 
+
+Proof. In this section, we prove Theorem 4.3. Let Ft := σ {xs,j , y s,j , q s,j,h (a) : 1 ≤ s < t, j ∈
+
+[m], h ∈ [H], a ∈ A} . Then, bπt is Ft-measurable. Fix a level h, a state ( x, u ) ∈ X × A h−1, and a token a ∈ A . Under either feedback model, 
+
+E [qt,j,h (a) | F t, i t = i, x t,j = x, y t,j,<h = u] = pi(a|x, u ). (B.1) 19 Indeed, without logits, qt,j,h (a) = 1(at,j,h = a), whose conditional mean is pi(a|x, u ). With logits, 
+
+qt,j,h (a) = pi(a|x, u ) is observed directly. Conditioned on it = i, using the independence of samples between each round, we have 
+
+P xt,j = x, y t,j,<h = u|it = i, Ft
+
+ = ρi(x)pi(u|x). (B.2) Combining (B.1) and (B.2), and using that it is uniform over I, we have 
+
+E 1(xt,j = x, y t,j,<h = u)qt,j,h (a) Ft
+
+
+
+= X
+
+> i∈I
+
+P(it = i | F t) E [1(xt,j = x, y t,j,<h = u)qt,j,h (a) | F t, i t = i]= 1
+
+I
+
+X
+
+> i∈I
+
+P xt,j = x, y t,j,<h = u Ft, i t = i
+
+· Eqt,j,h (a) Ft, i t = i, x t,j = x, y t,j,<h = u
+
+= 1
+
+I
+
+X
+
+> i∈I
+
+ρi(x)pi(u|x)pi(a|x, u ). (B.3) The right-hand side is precisely the joint prefix–token probability under the forward target (4.2). More explicitly, 1
+
+I
+
+X
+
+> i∈I
+
+ρi(x)pi(u|x)pi(a|x, u ) = ¯ ρ(x)π∗
+
+> F
+
+(u|x)π∗
+
+> F
+
+(a|x, u ). (B.4) To see this identity, first note that ¯ρ(x)π∗
+
+> F
+
+(u|x) = 
+
+ 1
+
+I
+
+X
+
+> k∈I
+
+ρk(x)
+
+ X
+
+> i∈I
+
+ρi(x)
+
+P 
+
+> k∈I
+
+ρk(x) pi(u|x)
+
+!
+
+= 1
+
+I
+
+X
+
+> i∈I
+
+ρi(x)pi(u|x). (B.5) Moreover, conditioned on the prefix ( x, u ), the posterior weight of teacher i is 
+
+wi(x, u ) = ρi(x)pi(u|x)
+
+P 
+
+> k∈I
+
+ρk(x)pk(u|x) .
+
+Therefore, 
+
+π∗
+
+> F
+
+(a|x, u ) = X
+
+> i∈I
+
+wi(x, u )pi(a|x, u )=
+
+P 
+
+> i∈I
+
+ρi(x)pi(u|x)pi(a|x, u )
+
+P 
+
+> k∈I
+
+ρk(x)pk(u|x) . (B.6) Multiplying (B.5) and (B.6), the prefix normalizing factor cancels, giving ¯ρ(x)π∗
+
+> F
+
+(u|x)π∗
+
+> F
+
+(a|x, u ) = 1
+
+I
+
+X
+
+> i∈I
+
+ρi(x)pi(u|x)pi(a|x, u ).
+
+20 Recall that 
+
+ct(x, u, a ) := 1
+
+m
+
+> m
+
+X
+
+> j=1
+
+1(xt,j = x, y t,j,<h = u) qt,j,h (a).
+
+Averaging (B.3) over the m rollouts therefore yields 
+
+E [ct(x, u, a ) | F t] = ¯ ρ(x)π∗
+
+> F
+
+(u|x)π∗
+
+> F
+
+(a|x, u ). (B.7) Only linearity of expectation is used here. In particular, the m rollouts need not be independent after marginalizing over their shared teacher index it.For any autoregressive policy π, define its round-t empirical loss by 
+
+ℓt(π) := −
+
+> H
+
+X
+
+> h=1
+
+X
+
+> x∈X
+
+X
+
+> u∈A h−1
+
+X
+
+> a∈A
+
+ct(x, u, a ) log π(a|x, u ). (B.8) Define L(π) := Ex∼¯ρ,y ∼π∗
+
+> F(·| x)
+
+ − log π(y|x). Using the autoregressive representation of π, we have 
+
+− log π(y|x) = −
+
+> H
+
+X
+
+> h=1
+
+log π(ah|x, y <h ).
+
+Consequently, using the linearity of expectation, L(π) can be expressed as 
+
+L(π) = −
+
+> H
+
+X
+
+> h=1
+
+X
+
+> x,u,a
+
+¯ρ(x)π∗
+
+> F
+
+(u|x)π∗
+
+> F
+
+(a|x, u ) log π(a|x, u ).
+
+Substituting (B.7) into (B.8) now gives, for every Ft-measurable policy π,
+
+E [ℓt(π) | F t] = L(π). (B.9) Moreover, we have 
+
+L(π) − L(π∗
+
+> F
+
+) = Ex∼¯ρ,y ∼π∗
+
+> F(·| x)
+
+
+
+log π∗
+
+> F
+
+(y|x)
+
+π(y|x)
+
+
+
+= Ex∼¯ρKL π∗
+
+> F
+
+(·| x)∥π(·| x). (B.10) Applying (B.9) and (B.10) to bπt and π∗ 
+
+> F
+
+and the tower property, we have 
+
+E Regret( T ) = E
+
+ TX
+
+> t=1
+
+L(bπt) − L(π∗
+
+> F
+
+)
+
+= E
+
+ TX
+
+> t=1
+
+ℓt(bπt) − ℓt(π∗
+
+> F
+
+)
+
+. (B.11) Fix h ∈ [H], define 
+
+ℓt,h (π) := − X
+
+> x∈X
+
+X
+
+> u∈A h−1
+
+X
+
+> a∈A
+
+ct(x, u, a ) log π(a|x, u ).
+
+21 Then, ℓt(π) = P 
+
+> h
+
+ℓt,h (π). We consider PTt=1 
+
+ℓt,h (bπt) − ℓt,h (π∗
+
+> F
+
+). Recall that Wt(x, u, a ) = 
+
+Pti=1 ci(x, u, a ), Wt(x, u ) = P 
+
+> a
+
+Wt(x, u, a ). For a fixed state ( x, u ), we omit ( x, u ) and use the shorthand notation Wt(a) and Wt when it will not cause any confusion. Similarly, we write 
+
+ct(a) = ct(x, u, a ) and define ct := P 
+
+> a
+
+ct(a). Thus, Wt = Pti=1 ci.Using the definition of ct(x, u, a ) in (4.3), we have 
+
+ct = 1
+
+m
+
+> m
+
+X
+
+> j=1
+
+1(xt,j = x, y t,j,<h = u) X
+
+> a
+
+qt,j,h (a).
+
+Note that in both cases, P 
+
+> a
+
+qt,j,h (a) = 1. Thus, we have 
+
+ct = 1
+
+m
+
+> m
+
+X
+
+> j=1
+
+1(xt,j = x, y t,j,<h = u) ≤ 1.
+
+In Algorithm 1, the policy at context ( x, u ) is defined as 
+
+bπt(a|x, u ) = Wt−1(a) + 1 /2
+
+Wt−1 + A/ 2 .
+
+For simplicity, we write the action set as A = {1, 2, . . . , A }. Let Qt be a random A-dim probability vector with Dirichlet distribution 
+
+Qt ∼ Dir 
+
+
+
+Wt−1(1) + 12 , . . . , W t−1(A) + 12
+
+
+
+.
+
+The goal of this construction is the following fact: the mean of Qt is exactly the output policy: 
+
+Eq∼Qt [q(a)] = Wt−1(a) + 1 /2
+
+Wt−1 + A/ 2 = bπt(a|x, u ).
+
+For a positive vector v = ( v1, . . . , v A), define the multivariate beta function by B( v) := 
+
+QAa=1 Γ( va)Γ( PAa=1 va) , (B.12) where Γ is the gamma function. The beta function is the normalizing constant of the Dirichlet distribution. Indeed, for every positive vector v, the density of the Dirichlet distribution Qv on the simplex ∆ A := {q ∈ RA 
+
+> +
+
+: P 
+
+> a
+
+q(a) = 1 } is 
+
+fv(q) = 1B( v)
+
+> A
+
+Y
+
+> a=1
+
+q(a)va−1, q ∈ ∆A.
+
+Equivalently, 
+
+Z
+
+> ∆A
+> A
+
+Y
+
+> a=1
+
+q(a)va−1 dq = B( v).
+
+22 More generally, for every nonnegative vector c ∈ RA
+
+> +
+
+,
+
+Eq∼Qv
+
+ AY
+
+> a=1
+
+q(a)ca
+
+
+
+= 1B( v)
+
+Z
+
+> ∆A
+> A
+
+Y
+
+> a=1
+
+q(a)ca+va−1dq
+
+= B( v + c)B( v) .
+
+Therefore, we have 
+
+Eq∼Qt
+
+ Y
+
+> a∈A
+
+q(a)ct(a)
+
+
+
+= B Wt−1(1) + ct(1) + 12 , . . . , W t−1(A) + ct(A) + 12
+
+
+
+B Wt−1(1) + 12 , . . . , W t−1(A) + 12
+
+
+
+= B Wt(1) + 12 , . . . , W t(A) + 12
+
+
+
+B Wt−1(1) + 12 , . . . , W t−1(A) + 12
+
+ , (B.13) where we use Wt(a) = Wt−1(a) + ct(a). Let 
+
+αt := X
+
+> a∈A
+
+ct(a) ≤ 1, A+ 
+
+> t
+
+:= {a ∈ A : ct(a) > 0}.
+
+For every a ∈ A + 
+
+> t
+
+, define the H¨ older exponent ra := 1 /c t(a). If αt < 1, introduce one additional exponent r0 := 1 /(1 − αt). These exponents satisfy 1
+
+r0
+
++ X
+
+> a∈A +
+> t
+
+1
+
+ra
+
+= (1 − αt) + X
+
+> a∈A +
+> t
+
+ct(a) = 1 .
+
+Using the generalized H¨ older’s inequality, we have 
+
+Eq∼Qt
+
+ Y
+
+> a∈A
+
+q(a)ct(a)
+
+
+
+≤ E[1 r0 ] 1
+
+> r0
+
+Y
+
+> a∈A +
+> t
+
+Eq∼Qt
+
+h
+
+q(a)ct(a)ira
+
+ 1
+
+> ra
+
+= Y
+
+> a∈A +
+> t
+
+Eq∼Qt
+
+q(a)ct(a) = Y
+
+> a∈A
+
+bπt(a|x, u )ct(a), (B.14) where we used Eq∼Qt [q(a)] = bπt(a|x, u ). If αt = 1, we can skip r0 and use the same generalized H¨ older’s inequality. Combining (B.13) and (B.14), multiplying over t, and using the telescoping argument, we have 
+
+> T
+
+Y
+
+> t=1
+
+Y
+
+> a∈A
+
+bπt(a|x, u )ct(a) ≥
+
+> T
+
+Y
+
+> t=1
+
+B Wt(·) + 12 1
+
+B Wt−1(·) + 12 1
+
+= B WT (·) + 12 1
+
+B  12 1 .
+
+Taking the negative logarithm, we have 
+
+−
+
+> T
+
+X
+
+> t=1
+
+X
+
+> a∈A
+
+ct(a) log bπt(a|x, u ) ≤ log B( 12 1)B WT (·) + 12 1 . (B.15) 23 Next, we consider an arbitrary policy π(·| x, u ). First suppose WT > 0. By the nonnegativity of KL divergence, 
+
+X
+
+> a∈A
+
+WT (a) log π(a|x, u ) = X
+
+> a∈A
+
+WT (a) log WT (a)
+
+WT
+
+− WT
+
+X
+
+> a∈A
+
+WT (a)
+
+WT
+
+log WT (a)
+
+WT · π(a|x, u )= X
+
+> a∈A
+
+WT (a) log WT (a)
+
+WT
+
+− WT KL 
+
+ WT (·)
+
+WT
+
+π(·| x, u )
+
+
+
+≤ X
+
+> a∈A
+
+WT (a) log WT (a)
+
+WT
+
+, (B.16) where we set 0 log 0 := 0. Summing (B.15) and (B.16), we have 
+
+> T
+
+X
+
+> t=1
+
+X
+
+> a∈A
+
+ct(a) log π(a|z)
+
+bπt(a|z) ≤ log B( 12 1)B( WT (·) + 12 1) + X
+
+> a∈A
+
+WT (a) log WT (a)
+
+WT
+
+=: R WT (·).
+
+When WT = 0, let R WT (·) = 0. The following lemma bounds R WT (·) using Stirling’s formula. 
+
+Lemma B.1. Let WT (a) ≥ 0 for every a ∈ A , and let 
+
+WT := X
+
+> a∈A
+
+WT (a).
+
+Then, R WT (·) satisfies 
+
+R WT (·) ≤ A log( WT + 1) + 3 A. 
+
+We defer the proof of Lemma B.1 to Appendix D. Choose π = π∗
+
+> F
+
+. For any ( x, u ) ∈ X × A h−1,we have 
+
+> T
+
+X
+
+> t=1
+
+X
+
+> a∈A
+
+ct(x, u, a ) log π∗
+
+> F
+
+(a|x, u )
+
+bπt(a|x, u ) ≤ A log  WT (x, u ) + 1  + 3 A. 
+
+Therefore, we have 
+
+> T
+
+X
+
+> t=1
+
+ℓt,h (bπt) − ℓt,h (π∗
+
+> F
+
+) = X
+
+> x∈X
+
+X
+
+> u∈A h−1
+> T
+
+X
+
+> t=1
+
+X
+
+> a∈A
+
+ct(x, u, a ) log π∗
+
+> F
+
+(a|x, u )
+
+bπt(a|x, u )
+
+≤ X
+
+> (x,u )∈X ×A h−1
+
+h
+
+A log  WT (x, u ) + 1  + 3 A
+
+i
+
+.
+
+For every fixed level h and round t, it is easy to check that 
+
+X
+
+> (x,u )∈X ×A h−1
+
+X
+
+> a∈A
+
+ct(x, u, a ) = 1 .
+
+Consequently, 
+
+X
+
+> (x,u )∈X ×A h−1
+
+WT (x, u ) = T, 
+
+24 and hence WT (x, u ) ≤ T for any ( x, u ). This leads to 
+
+> T
+
+X
+
+> t=1
+
+ℓt,h (bπt) − ℓt,h (π∗
+
+> F
+
+) ≤ 2SA h log T. (B.17) Finally, summing (B.17) over h ∈ [H], we have 
+
+> T
+
+X
+
+> t=1
+
+ℓt(bπt) − ℓt(π∗
+
+> F
+
+) ≤ 2S log T
+
+> H
+
+X
+
+> h=1
+
+Ah
+
+= 2 S · log T A(AH − 1) 
+
+A − 1
+
+≤ 4SA H log T. (B.18) Using (B.11), we obtain 
+
+E Regret( T ) ≤ 4SA H log T. 
+
+We next consider the high-probability regret bound. Define 
+
+Xt := ℓt(π∗
+
+> F
+
+) − ℓt(bπt),rt := −E[Xt | F t] = Ex∼¯ρKL  π∗
+
+> F
+
+(·| x)∥bπt(·| x).
+
+Thus, Regret( T ) = PTt=1 rt. Define M0 = 0, and 
+
+Mt := 
+
+> t
+
+X
+
+> s=1
+
+(Xs + rs), t ∈ [T ].
+
+Since rt = −E[Xt | F t], we have E[Mt − Mt−1|F t] = 0. Thus, {Mt}Tt=0 is a martingale with respect to {F t+1 }Tt=0 .Our goal is to control MT . Using the definition of ℓt,
+
+Xt =
+
+> H
+
+X
+
+> h=1
+
+X
+
+> (x,u,a )
+
+ct(x, u, a ) log bπt(a|x, u )
+
+π∗
+
+> F
+
+(a|x, u ) .
+
+First note that in Algorithm 1, 
+
+bπt(a|x, u ) = Wt−1(x, u, a ) + 1 /2
+
+Wt−1(x, u ) + A/ 2
+
+≥ 12( t − 1) + A ≥ 12T + A .
+
+Since π∗
+
+> F
+
+(a|x, u ) ≤ 1, it follows that 
+
+Xt
+
+H ≥ − LT , LT := log(2 T + A). (B.19) 25 Here we use the following equation 
+
+X
+
+> (x,u,a )
+
+ct(x, u, a ) = 1 .
+
+Moreover, we can see 
+
+> H
+
+X
+
+> h=1
+
+X
+
+> (x,u,a )
+
+ct(x, u, a )
+
+H = 1 .
+
+Using the AM-GM inequality, we have exp 
+
+ Xt
+
+H
+
+
+
+=
+
+> H
+
+Y
+
+> h=1
+
+Y
+
+> (x,u,a )
+
+ bπt(a|x, u )
+
+π∗
+
+> F
+
+(a|x, u )
+
+ct(x,u,a )/H 
+
+≤ 1
+
+H
+
+> H
+
+X
+
+> h=1
+
+X
+
+> (x,u,a )
+
+ct(x, u, a ) bπt(a|x, u )
+
+π∗
+
+> F
+
+(a|x, u ) .
+
+Taking conditional expectation over Ft and using 
+
+E[ct(x, u, a ) | F t] = ¯ ρ(x)π∗
+
+> F
+
+(u|x)π∗
+
+> F
+
+(a|x, u ),
+
+we obtain 
+
+E
+
+
+
+exp 
+
+ Xt
+
+H
+
+
+
+Ft
+
+
+
+≤ 1
+
+H
+
+> H
+
+X
+
+> h=1
+
+X
+
+> (x,u,a )
+
+¯ρ(x)π∗
+
+> F
+
+(u|x)π∗
+
+> F
+
+(a|x, u ) bπt(a|x, u )
+
+π∗
+
+> F
+
+(a|x, u )= 1
+
+H
+
+> H
+
+X
+
+> h=1
+
+X
+
+> (x,u )
+
+¯ρ(x)π∗
+
+> F
+
+(u|x) X
+
+> a
+
+bπt(a|x, u )
+
+≤ 1
+
+H
+
+> H
+
+X
+
+> h=1
+
+X
+
+> x∈X
+
+¯ρ(x) X
+
+> u∈A h−1
+
+π∗
+
+> F
+
+(u|x)= 1 . (B.20) The following lemma shows that a one-sided lower bound and an exponential central condition provide exponential control of deviations from the conditional mean. 
+
+Lemma B.2. Let F be a σ-algebra, and let Y be a random variable satisfying, almost surely, 
+
+Y ≥ − L, E[eY | F ] ≤ 1,
+
+for some L ≥ 0. Define μ := −E[Y | F ]. Then μ ∈ [0 , L ], and, for every θ ∈ [0 , 1], log E
+
+h
+
+eθ(Y +μ) F
+
+i
+
+≤ (1 + L)θ2μ. 
+
+26 Applying Lemma B.2 to Y = Xt/H , L = LT , we have for every λ ∈ [0 , 1/H ]log E
+
+h
+
+eλ(Xt+rt) Ft
+
+i
+
+≤ H(1 + LT )λ2rt. (B.21) Define 
+
+Et(λ) := exp 
+
+
+
+λ
+
+> t
+
+X
+
+> s=1
+
+(Xs + rs) − H(1 + LT )λ2
+
+> t
+
+X
+
+> s=1
+
+rs
+
+
+
+.
+
+Then, (B.21) implies that {E s(λ)}Ts=0 is a nonnegative supermartingale with E0(λ) = 1. As a result, 
+
+E[ET (λ)] ≤ E[E0(λ)] = 1. Moreover, we have 
+
+ET (λ) = exp 
+
+
+
+λM T − H(1 + LT )λ2 Regret( T )
+
+
+
+.
+
+Therefore, for any C > 0, by Markov’s inequality, we have 
+
+P
+
+h
+
+λM T − H(1 + LT )λ2 Regret( T ) ≥ C
+
+i
+
+≤ E[ET (λ)] 
+
+eC ≤ 1
+
+eC .
+
+Set C = log(1 /δ ). Now we obtain with probability at least 1 − δ,
+
+MT =
+
+> T
+
+X
+
+> t=1
+
+(Xt + rt) ≤ H(1 + LT )λ Regret( T ) + log(1 /δ )
+
+λ . (B.22) On the other hand, (B.18) gives 
+
+−
+
+> T
+
+X
+
+> t=1
+
+Xt =
+
+> T
+
+X
+
+> t=1
+
+[ℓt(bπt) − ℓt(π∗
+
+> F
+
+)] ≤ 4SA H log T. 
+
+Moreover, we have Regret( T ) = −
+
+> T
+
+X
+
+> t=1
+
+Xt +
+
+> T
+
+X
+
+> t=1
+
+(Xt + rt).
+
+Therefore, with probability at least 1 − δ, the following inequality holds: Regret( T ) ≤ 4SA H log T + H(1 + LT )λ Regret( T ) + log(1 /δ )
+
+λ . (B.23) Choose 
+
+λ = 12H(1 + log(2 T + A)) ≤ 1
+
+H .
+
+We have H(1 + LT )λ = 1 /2. Rearranging (B.23) yields Regret( T ) ≤ 8SA H log T + 4 H 1 + log(2 T + A) log 1
+
+δ .
+
+27 C Proof of Theorem 5.5 
+
+Proof of Theorem 5.5. We first control the error of the optimistic token-score estimates. Let Ft
+
+denote the history before round t. In this way, both blt−1 and bπt are Ft-measurable. Let E be the event in Lemma 5.4, which satisfies P(E) ≥ 1 − 2δ. On this event, simultaneously for every round s and every visited triple ( x, u, a ), 
+
+¯ls(x, u, a ) − log gh(a|x, u ) ≤ βs(x, u, a ). (C.1) Moreover, Assumption 5.3 and the definition of gh imply that for every teacher i,
+
+log pi(a|x, u ) − log gh(a|x, u ) = log pi(a|x, u )
+
+πref (a|x, u ) − X
+
+> k∈I
+
+wk(x) log pk(a|x, u )
+
+πref (a|x, u ) ≤ 2B. 
+
+Since ¯ls(x, u, a ) is an average of the observed teacher log-probabilities at this triple, it follows that 
+
+¯ls(x, u, a ) − log gh(a|x, u ) ≤ 2B. (C.2) Combining (C.1) and (C.2), we obtain 
+
+¯ls(x, u, a ) − log gh(a|x, u ) ≤ min βs(x, u, a ), 2B .
+
+Consequently, on the event E, the optimistic estimate bls = ¯ls + min {βs, 2B} satisfies 0 ≤ bls(x, u, a ) − log gh(a|x, u ) ≤ min 2βs(x, u, a ), 4B .
+
+For an unvisited triple, the algorithm sets 
+
+bls(x, u, a ) = log πref (a|x, u ) + B. 
+
+Assumption 5.3 implies 
+
+−B ≤ log gh(a|x, u ) − log πref (a|x, u ) ≤ B. 
+
+Therefore, 0 ≤ bls(x, u, a ) − log gh(a|x, u ) ≤ 2B. 
+
+We next consider the output policy. Multiplying the token conditionals defined by the backward recursion gives 
+
+bπt(y|x) = 
+
+> H
+
+Y
+
+> h=1
+
+exp  blt−1(x, y <h , a h) bVt−1,h +1 (x, y ≤h)
+
+bVt−1,h (x, y <h )=exp 
+
+PHh=1 blt−1(x, y <h , a h)
+
+bVt−1,1(x) , (C.3) where the second equation holds by canceling out the telescoping terms and bVt−1,H +1 = 1. Comparing this expression with the reverse target in (5.1), we obtain log bπt(y|x)
+
+π∗
+
+> R
+
+(y|x) =
+
+> H
+
+X
+
+> h=1
+
+hblt−1(x, y <h , a h) − log gh(ah|x, y <h )
+
+i
+
++ log V1(x)
+
+bVt−1,1(x) . (C.4) 28 Moreover, the ratio of the normalizing constants can be expressed as an expectation under bπt. To see this, first expand the expectation: 
+
+Ey∼bπt(·| x) exp 
+
+
+
+−
+
+> H
+
+X
+
+> h=1
+
+hblt−1(x, y <h , a h) − log gh(ah|x, y <h )
+
+i
+
+= X
+
+> y∈Y
+
+bπt(y|x) exp 
+
+
+
+−
+
+> H
+
+X
+
+> h=1
+
+blt−1(x, y <h , a h) + 
+
+> H
+
+X
+
+> h=1
+
+log gh(ah|x, y <h )
+
+
+
+. (C.5) Substituting (C.3) into (C.5), the right-hand side becomes 
+
+X
+
+> y∈Y
+
+exp   P Hh=1 blt−1(x, y <h , a h)bVt−1,1(x) exp 
+
+
+
+−
+
+> H
+
+X
+
+> h=1
+
+blt−1(x, y <h , a h) + 
+
+> H
+
+X
+
+> h=1
+
+log gh(ah|x, y <h )
+
+
+
+= 1
+
+bVt−1,1(x)
+
+X
+
+> y∈Y
+
+exp 
+
+ HX
+
+> h=1
+
+log gh(ah|x, y <h )
+
+
+
+= 1
+
+bVt−1,1(x)
+
+X
+
+> y∈Y
+> H
+
+Y
+
+> h=1
+
+gh(ah|x, y <h ).
+
+Finally, recall that in Theorem 5.1, we have seen 
+
+V1(x) = X
+
+> y∈Y
+> H
+
+Y
+
+> h=1
+
+gh(ah|x, y <h ).
+
+Consequently, 
+
+Ey∼bπt(·| x) exp 
+
+
+
+−
+
+> H
+
+X
+
+> h=1
+
+hblt−1(x, y <h , a h) − log gh(ah|x, y <h )
+
+i
+
+= V1(x)
+
+bVt−1,1(x) . (C.6) Taking expectation over bπt(·| x) and substituting (C.6) into (C.4) yields KL  bπt(·| x) π∗
+
+> R
+
+(·| x) = Ey∼bπt(·| x)
+
+ HX
+
+> h=1
+
+hblt−1(x, y <h , a h) − log gh(ah|x, y <h )
+
+i
+
++ log Ey∼bπt(·| x) exp 
+
+
+
+−
+
+> H
+
+X
+
+> h=1
+
+hblt−1(x, y <h , a h) − log gh(ah|x, y <h )
+
+i
+
+. (C.7) On the event E, blt−1(x, y <h , a h) ≥ log gh(ah|x, y <h ) for any t, h . We can therefore apply the basic inequality e−v ≤ 1 − v + v2/2 for v ≥ 0. Let V = PHh=1 
+
+blt−1(x, y <h , a h) − log gh(ah|x, y <h ). The right-hand side can be bounded as 
+
+E[V ] + log E exp( −V ) ≤ E[V ] + log  1 − E[V ] + E[V 2]/2
+
+≤ E[V ] − E[V ] + 12 E[V 2]= 12 E[V 2],
+
+29 where we use log x ≤ x − 1 for any x > 0. As a result, we have KL  bπt(·| x) π∗
+
+> R
+
+(·| x) ≤ 12 Ey∼bπt(·| x)
+
+ HX
+
+> h=1
+
+hblt−1(x, y <h , a h) − log gh(ah|x, y <h )
+
+i2
+
+≤ H
+
+2 Ey∼bπt(·| x)
+
+ HX
+
+> h=1
+
+hblt−1(x, y <h , a h) − log gh(ah|x, y <h )
+
+i2
+
+, (C.8) where the last inequality holds due to the Cauchy–Schwarz inequality. We next relate the expected squared errors in (C.8) to those evaluated on the observed rollouts. Define 
+
+Xt := H
+
+2m
+
+> m
+
+X
+
+> j=1
+> H
+
+X
+
+> h=1
+
+hblt−1(xt,j , y t,j,<h , a t,j,h ) − log gh(at,j,h |xt,j , y t,j,<h )
+
+i2
+
+.
+
+Conditionally on Ft, each rollout has joint distribution 
+
+P(xt,j = x, y t,j = y | F t) = 1
+
+I
+
+X
+
+> i∈I
+
+ρi(x)bπt(y|x)= ¯ ρ(x)bπt(y|x).
+
+Since blt−1 and bπt are Ft-measurable, linearity of conditional expectation therefore gives 
+
+E[Xt | F t] = H
+
+2m
+
+> m
+
+X
+
+> j=1
+
+Ex∼¯ρEy∼bπt(·| x)
+
+ HX
+
+> h=1
+
+hblt−1(x, y <h , a h) − log gh(ah|x, y <h )
+
+i2
+
+= H
+
+2 Ex∼¯ρEy∼bπt(·| x)
+
+ HX
+
+> h=1
+
+hblt−1(x, y <h , a h) − log gh(ah|x, y <h )
+
+i2
+
+. (C.9) Note that this does not require independence among the rollouts within a round. On the event E,combining (C.9) with (C.8), we have Regret( T ) = 
+
+> T
+
+X
+
+> t=1
+
+Ex∼¯ρKL  bπt(·| x) π∗
+
+> R
+
+(·| x) ≤
+
+> T
+
+X
+
+> t=1
+
+E[Xt | F t]. (C.10) To apply Lemma I.6, we need a bound on Xt. At every previously visited triple, (C.2) and the definition of blt−1 give 
+
+blt−1(x, u, a ) − log gh(a|x, u ) ≤ ¯lt−1(x, u, a ) − log gh(a|x, u ) + min {βt−1(x, u, a ), 2B}≤ 4B. 
+
+At an unvisited triple, blt−1(x, u, a ) = log πref (a|x, u ) + B indicates blt−1(x, u, a ) − log gh(a|x, u ) ∈
+
+[0 , 2B]. Consequently, in both cases, 0 ≤ Xt ≤ H
+
+2m · mH · (4 B)2 = 8 H2B2.
+
+30 Moreover, Xt is Ft+1 -measurable. Applying Lemma I.6, with probability at least 1 − δ, the following inequality holds 
+
+> T
+
+X
+
+> t=1
+
+E[Xt | F t] ≤ 2
+
+> T
+
+X
+
+> t=1
+
+Xt + 64 H2B2 log 2
+
+δ . (C.11) Substituting (C.11) into (C.10) and taking a union bound, we conclude that, with probability at least 1 − 3δ,Regret( T ) ≤ Hm
+
+> T
+
+X
+
+> t=1
+> m
+
+X
+
+> j=1
+> H
+
+X
+
+> h=1
+
+hblt−1(xt,j , y t,j,<h , a t,j,h ) − log gh(at,j,h |xt,j , y t,j,<h )
+
+i2
+
+| {z }
+
+> I
+
++ 64 H2B2 log 2
+
+δ . (C.12) It remains to bound I for every data trajectory on E. Regrouping the observations by their corresponding triples gives 
+
+I =
+
+> H
+
+X
+
+> h=1
+
+X
+
+> (x,u,a )
+> T
+
+X
+
+> t=1
+
+Nt(x, u, a ) − Nt−1(x, u, a )hblt−1(x, u, a ) − log gh(a|x, u )
+
+i2
+
+.
+
+Here Nt(x, u, a ) − Nt−1(x, u, a ) counts the visits to this triple in round t, each of which contributes the same squared error. Since there are m samples per round, 0 ≤ Nt(x, u, a ) − Nt−1(x, u, a ) ≤ m, NT (x, u, a ) ≤ mT. 
+
+For each fixed triple ( x, u, a ), we split the inner sum according to whether Nt−1(x, u, a ) = 0 or 
+
+Nt−1(x, u, a ) ≥ 1. In the former case, only the first round that visits this triple can contribute, with at most m visits. Hence, 
+
+X 
+
+> t∈[T]:
+> Nt−1(x,u,a )=0
+
+Nt(x, u, a ) − Nt−1(x, u, a )hblt−1(x, u, a ) − log gh(a|x, u )
+
+i2
+
+≤ 4mB 2.
+
+Summing this bound over all K := S PHh=1 Ah triples and applying Lemma 5.4 gives 
+
+I ≤ 4mB 2K
+
++
+
+> H
+
+X
+
+> h=1
+
+X
+
+> (x,u,a )
+
+X 
+
+> t∈[T]:
+> Nt−1(x,u,a )≥1
+
+Nt(x, u, a ) − Nt−1(x, u, a ) · min 
+
+n
+
+16 B2, 4βt−1(x, u, a )2o
+
+. (C.13) Recall that 
+
+βt(x, u, a ) = eO
+
+
+
+B
+
+s
+
+mH Nt(x, u, a ) + BmH Nt(x, u, a )
+
+
+
+.
+
+31 For Nt−1(x, u, a ) ≥ 1, squaring the confidence radius gives 4βt−1(x, u, a )2 ≤ eO
+
+ B2mH Nt−1(x, u, a ) + B2m2H2
+
+Nt−1(x, u, a )2
+
+
+
+,
+
+where we used ( v + w)2 ≤ 2v2 + 2 w2. Combining this with the constant bound 16 B2, we obtain min 
+
+n
+
+16 B2, 4βt−1(x, u, a )2o
+
+≤ eO
+
+
+
+B2 min 
+
+
+
+1, mH Nt−1(x, u, a ) + m2H2
+
+Nt−1(x, u, a )2
+
+ 
+
+≤ eO
+
+
+
+B2 min 
+
+
+
+1, mH Nt−1(x, u, a )
+
+ 
+
+,
+
+where we use min {1, v + v2} ≤ 2 min {1, v } since v2 ≤ v when 0 ≤ v ≤ 1. Fix a triple ( x, u, a ) with NT (x, u, a ) ≥ 1. Order its visits chronologically, breaking ties within each round arbitrarily. If its k-th visit occurs in round t, then 
+
+k ≤ Nt−1(x, u, a ) + m ≤ Nt−1(x, u, a ) + mH, 
+
+because at most m visits occur in that round and H ≥ 1. For each visit included in the remaining sum, Nt−1(x, u, a ) ≥ 1, and hence min 
+
+
+
+1, mH Nt−1(x, u, a )
+
+
+
+≤ 2mH Nt−1(x, u, a ) + mH 
+
+≤ 2mH k .
+
+The first inequality uses min {1, v } ≤ 2v/ (1 + v) for v ≥ 0. Since Nt(x, u, a ) − Nt−1(x, u, a ) counts the visits in round t, the following summation counts all the visits to ( x, u, a ) and thus can be indexed by k, leading to 
+
+X 
+
+> t∈[T]:
+> Nt−1(x,u,a )≥1
+
+Nt(x, u, a ) − Nt−1(x, u, a ) min 
+
+
+
+1, mH Nt−1(x, u, a )
+
+
+
+≤ 2mH  
+
+> NT(x,u,a )
+
+X
+
+> k=1
+
+1
+
+k
+
+≤ 2mH 1 + log NT (x, u, a )
+
+≤ 2mH log( emT ), (C.14) where we use PTk=1 1/k ≤ 1 + log T and NT (x, u, a ) ≤ mT .Substituting (C.14) into (C.13) and summing over all ( x, u, a ) triples, we have 
+
+I ≤ 4mB 2K + eO B2mHK log( emT ) = eO B2mHK log T  = eO B2mSHA H log T .
+
+In conclusion, (C.12) gives that with probability at least 1 − 3δ, the following inequality holds: Regret( T ) ≤ Hm I + eO(B2H2)
+
+≤ eO B2H2SA H log T .
+
+This completes the proof of Theorem 5.5. 32 D Proof of Lemmas Used in Appendices B and C 
+
+D.1 Proof of Lemma B.1 
+
+Proof of Lemma B.1. When WT = 0, the inequality holds naturally. We therefore assume through-out the rest of the proof that WT > 0. If A = 1, then B( v) = Γ( v)Γ( v) = 1 for every v > 0, and 
+
+WT (1) log WT (1) 
+
+WT
+
+= 0 .
+
+Thus, R(WT (·)) = 0. It remains to consider A ≥ 2. By the definition of the beta function (B.12), we have 
+
+− log B 
+
+
+
+WT (·) + 12 1
+
+
+
+= log Γ 
+
+
+
+WT + A
+
+2
+
+
+
+− X
+
+> a∈A
+
+log Γ 
+
+
+
+WT (a) + 12
+
+
+
+. (D.1) Using Lemma I.8 with s = WT + A/ 2, we have log Γ 
+
+
+
+WT + A
+
+2
+
+
+
+≤
+
+
+
+WT + A − 12
+
+
+
+log 
+
+
+
+WT + A
+
+2
+
+
+
+−
+
+
+
+WT + A
+
+2
+
+
+
++ 12 log(2 π) + 112( WT + A/ 2) . (D.2) For every a ∈ A , applying Lemma I.8 with s = WT (a) + 1 /2, we have log Γ 
+
+
+
+WT (a) + 12
+
+
+
+≥ WT (a) log 
+
+
+
+WT (a) + 12
+
+
+
+−
+
+
+
+WT (a) + 12
+
+
+
++ 12 log(2 π). (D.3) Substituting (D.2) and (D.3) into (D.1), we obtain 
+
+− log B 
+
+
+
+WT (·) + 12 1
+
+
+
+≤ − X
+
+> a∈A
+
+WT (a) log 
+
+
+
+WT (a) + 12
+
+
+
++
+
+
+
+WT + A − 12
+
+
+
+log 
+
+
+
+WT + A
+
+2
+
+
+
+− A − 12 log(2 π) + 112( WT + A/ 2) ,
+
+where we use P 
+
+> a∈A
+
+WT (a) = WT . Recall that 
+
+R WT (·) = log B 
+
+ 12 1
+
+
+
+− log B 
+
+
+
+WT (·) + 12 1
+
+
+
++ X
+
+> a∈A
+
+WT (a) log WT (a)
+
+WT
+
+.
+
+Therefore, we have 
+
+R WT (·) ≤ log B 
+
+ 12 1
+
+
+
++ X
+
+> a∈A
+
+WT (a) log WT (a)
+
+WT (a) + 1 /2
+
+| {z }
+
+> I1
+
++ WT log WT + A/ 2
+
+WT
+
+| {z }
+
+> I2
+
++ A − 12 log 
+
+
+
+WT + A
+
+2
+
+| {z }
+
+> I3
+
+− A − 12 log(2 π) + 112( WT + A/ 2) . (D.4) 33 Since 0 ≤ WT (a)/[WT (a) + 1 /2] ≤ 1, I1 ≤ 0. For I2, using log(1 + s) ≤ s for every s ≥ 0, we have 
+
+I2 = WT log 
+
+
+
+1 + A
+
+2WT
+
+
+
+≤ A
+
+2 .
+
+For I3, we have WT + A 
+
+> 2
+
+≤ (WT + 1)  1 + A/ 2. Thus, 
+
+WT + A
+
+2 ≤ (WT + 1) 
+
+
+
+1 + A
+
+2
+
+
+
+,
+
+and hence I3 ≤ (A − 1) log( WT + 1) /2 + ( A − 1) log(1 + A/ 2) /2. As a result, (D.4) indicates 
+
+R WT (·) ≤ A − 12 log( WT + 1) + log B 
+
+ 12 1
+
+
+
++ A
+
+2 + A − 12 log 
+
+
+
+1 + A
+
+2
+
+
+
++ 112 . (D.5) Finally, by definition, log B 
+
+ 12 1
+
+
+
+= A
+
+2 log π − log Γ 
+
+ A
+
+2
+
+
+
+.
+
+Applying Lemma I.8 with s = A/ 2, we have log Γ 
+
+ A
+
+2
+
+
+
+≥ A − 12 log A
+
+2 − A
+
+2 + 12 log(2 π).
+
+Since A ≥ 2, we have log B 
+
+ 12 1
+
+
+
+≤ A
+
+2 (log π + 1) − A − 12 log A
+
+2 . (D.6) Substituting (D.6) into (D.5), we have 
+
+R WT (·) ≤ A − 12 log( WT + 1) + A
+
+2 + A − 12 log 
+
+
+
+1 + A
+
+2
+
+
+
++ 112 + A
+
+2 (log π + 1) − A − 12 log A
+
+2
+
+≤ A log( WT + 1) + 3 A, 
+
+where we use log(1 + A/ 2) − log( A/ 2) ≤ 2/A . This completes the proof of Lemma B.1. 
+
+D.2 Proof of Lemma B.2 
+
+Proof of Lemma B.2. By conditional Jensen’s inequality, exp  E[Y | F ] ≤ E[eY | F ] ≤ 1.
+
+Therefore, E[Y | F ] ≤ 0 and hence μ ≥ 0. Moreover, Y ≥ − L implies E[Y | F ] ≥ − L, so μ ≤ L.We first show that, for every y ≥ − L and θ ∈ [0 , 1], 
+
+eθy − 1 − θy ≤ (1 + L)θ2(ey − 1 − y). (D.7) 34 First, suppose that y ≥ 0. Expanding the exponential using Taylor’s series gives 
+
+eθy − 1 − θy =
+
+> ∞
+
+X
+
+> k=2
+
+θkyk
+
+k!
+
+≤ θ2
+
+> ∞
+
+X
+
+> k=2
+
+yk
+
+k!= θ2(ey − 1 − y),
+
+where we used θk ≤ θ2 for every k ≥ 2. It remains to show (D.7) when −L ≤ y ≤ 0. Let y = −s for some s ∈ [0 , L ]. Then, on the one hand, the left-hand side of (D.7) satisfies 
+
+e−θs − 1 + θs ≤ θ2s2
+
+2 .
+
+On the other hand, the right-hand side of (D.7) satisfies: (1 + L)θ2(e−s − 1 + s) = (1 + L)θ2
+
+Z s
+
+> 0
+
+(1 − e−v) d v
+
+≥ (1 + L)θ2
+
+Z s
+
+> 0
+
+v
+
+1 + v dv
+
+≥ (1 + L)θ2
+
+Z s
+
+> 0
+
+v
+
+1 + L dv
+
+= θ2s2
+
+2 ,
+
+where the first inequality holds due to ex ≥ 1 + x, and thus e−x ≤ 1/(1 + x) whenever x ≥ 0. The second inequality holds due to v ≤ s ≤ L. Therefore, we have proved (D.7) for y ∈ [−L, 0]. Using (D.7), we obtain 
+
+E[eθY | F ] = 1 + θE[Y | F ] + E[eθY − 1 − θY | F ]
+
+≤ 1 − θμ + (1 + L)θ2E[eY − 1 − Y | F ]. (D.8) Using E[eY | F ] ≤ 1, we have 
+
+E[eY − 1 − Y | F ] = E[eY | F ] − 1 − E[Y | F ]
+
+≤ − E[Y | F ]= μ. 
+
+Therefore, (D.8) gives 
+
+E[eθY | F ] ≤ 1 − θμ + (1 + L)θ2μ. 
+
+Consequently, log E
+
+h
+
+eθ(Y +μ) F
+
+i
+
+= θμ + log E[eθY | F ]
+
+≤ θμ + log  1 − θμ + (1 + L)θ2μ
+
+≤ θμ − θμ + (1 + L)θ2μ
+
+= (1 + L)θ2μ, 
+
+where the last inequality uses log(1 + s) ≤ s. This completes the proof of Lemma B.2. 35 D.3 Proof of Lemma 5.4 
+
+Proof. Fix a level h and a triple z = ( x, u, a ). Let Ft denote the history before round t. Define 
+
+Yt(z) := 1
+
+m
+
+> m
+
+X
+
+> j=1
+
+1 xt,j = x, y t,j,<h = u, a t,j,h = a lt,j,h − log gh(a|x, u ).
+
+By the definitions of St and Nt, we have 
+
+> t
+
+X
+
+> s=1
+
+Ys(z) = St(x, u, a ) − Nt(x, u, a ) log gh(a|x, u )
+
+m . (D.9) Under the on-policy protocol, conditionally on Ft, the teacher index is uniform over I, the context follows ρit , and the response is generated by bπt. Therefore, 
+
+E[Yt(z) | F t] = 1
+
+m
+
+> m
+
+X
+
+> j=1
+
+1
+
+I
+
+X
+
+> i∈I
+
+ρi(x)bπt(u|x)bπt(a|x, u )log pi(a|x, u ) − log gh(a|x, u )
+
+= ¯ ρ(x)bπt(u|x)bπt(a|x, u ) X
+
+> i∈I
+
+wi(x)log pi(a|x, u ) − log gh(a|x, u )
+
+= 0 ,
+
+where the second equality uses ρi(x)/I = ¯ ρ(x)wi(x). The last equality holds due to P 
+
+> i
+
+wi(x) = 1 and log gh(a|x, u ) = P 
+
+> i
+
+wi(x) log pi(a|x, u ). Using Assumption 5.3, for every teacher i,
+
+log pi(a|x, u ) − log gh(a|x, u ) = log pi(a|x, u )
+
+πref (a|x, u ) − X
+
+> k∈I
+
+wk(x) log pk(a|x, u )
+
+πref (a|x, u )
+
+≤ B + X
+
+> k∈I
+
+wk(x)B = 2 B. 
+
+When 1 xt,j = x, y t,j,<h = u, a t,j,h = a̸ = 0, lt,j,h = log pi(a|x, u ) for some i ∈ I . Thus, 
+
+lt,j,h − log gh(a|x, u ) ≤ 2B. 
+
+In the definition of Yt(z), at most m summands can be nonzero. Thus, |Yt(z)| ≤ 2Bm/m = 2 B.Moreover, Jensen’s inequality gives 
+
+Yt(z)2 ≤ 1
+
+m
+
+> m
+
+X
+
+> j=1
+
+1 xt,j = x, y t,j,<h = u, a t,j,h = a lt,j,h − log gh(a|x, u )2
+
+≤ 4B2
+
+m
+
+> m
+
+X
+
+> j=1
+
+1 xt,j = x, y t,j,<h = u, a t,j,h = a.
+
+Taking the conditional expectation, we obtain Var( Yt(z) | F t) = E[Yt(z)2 | F t]
+
+≤ 4B2
+
+m E
+
+ mX
+
+> j=1
+
+1 xt,j = x, y t,j,<h = u, a t,j,h = a Ft
+
+
+
+. (D.10) 36 Define Vt(z) := Pts=1 Var( Ys(z) | F s). Since E[Ys(z) | F s] = 0 and |Ys(z)| ≤ 2B, Lemma I.4 implies that both 
+
+ tX
+
+> s=1
+
+Ys(z), V t(z)
+
+
+
+and 
+
+
+
+−
+
+> t
+
+X
+
+> s=1
+
+Ys(z), V t(z)
+
+
+
+are sub-gamma processes with parameter 2 B/ 3. Let K := S PHh=1 Ah. Then, applying Lemma I.5 with ρ = 2 B, with probability at least 1 − δ/ (2 K), we have 
+
+> t
+
+X
+
+> s=1
+
+Ys(z) ≤ 4pVt(z) log(2 HtK/δ ) + 88 3 B log(2 HtK/δ ), (D.11) where we can choose Ht = e + log(1 + T ) since Vt(z) ≤ 4B2T . Applying the same inequality to 
+
+−Ys(z), and taking the union bound, we obtain that with probability at least 1 − δ, the following inequality holds for any h and any z = ( x, u, a ): 
+
+> t
+
+X
+
+> s=1
+
+Ys(z) ≤ 4pVt(z) log(2 HtK/δ ) + 88 3 B log(2 HtK/δ ).
+
+Since 1
+
+m
+
+> m
+
+X
+
+> j=1
+
+1 xs,j = x, y s,j,<h = u, a s,j,h = a ∈ [0 , 1] ,
+
+we can apply Lemma I.6 and obtain that for any h and z = ( x, u, a ), with probability at least 1 − δ/K , the following inequality holds simultaneously for all t ∈ [T ]: 
+
+> t
+
+X
+
+> s=1
+
+E
+
+ 1
+
+m
+
+> m
+
+X
+
+> j=1
+
+1 xs,j = x, y s,j,<h = u, a s,j,h = a Fs
+
+
+
+≤ 2
+
+> t
+
+X
+
+> s=1
+
+1
+
+m
+
+> m
+
+X
+
+> j=1
+
+1 xs,j = x, y s,j,<h = u, a s,j,h = a + 8 log(2 K/δ ). (D.12) Taking a union bound over h and ( x, u, a ), the inequality holds for all h and ( x, u, a ) simultaneously. Combining (D.10) and (D.12), we have 
+
+Vt(z) ≤ 8B2
+
+m
+
+> t
+
+X
+
+> s=1
+> m
+
+X
+
+> j=1
+
+1 xs,j = x, y s,j,<h = u, a s,j,h = a + 32 B2 log(2 K/δ )= 8B2Nt(x, u, a )
+
+m + 32 B2 log(2 K/δ ). (D.13) Substituting (D.13) into (D.11), we have, with probability at least 1 − 2δ, simultaneously for every 
+
+t ∈ [T ], h, and z = ( x, u, a ), the following inequality holds 
+
+> t
+
+X
+
+> s=1
+
+Ys(z) ≤ 4
+
+r 8B2Nt(x, u, a )
+
+m + 32 B2 log 2Kδ
+
+
+
+log 2HtKδ + 88 3 B log 2HtKδ
+
+37 ≲ B
+
+r Nt(x, u, a )
+
+m log 2HtKδ + B log 2HtKδ ,
+
+where we use √v + w ≤ √v + √w and log(2 K/δ ) ≤ log(2 HtK/δ ). For every triple with Nt(x, u, a ) ≥ 1, (D.9) gives 
+
+¯lt(x, u, a ) − log gh(a|x, u ) = mNt(x, u, a )
+
+> t
+
+X
+
+> s=1
+
+Ys(z)
+
+≲ B
+
+s
+
+mNt(x, u, a ) log 2HtKδ + Bm Nt(x, u, a ) log 2HtKδ .
+
+Finally, since K ≤ SHA H and Ht = e + log(1 + T ), log 2HtKδ ≤ H log A + log 
+
+ 2SH  e + log(1 + T )
+
+δ
+
+
+
+.
+
+Hiding the logarithmic factors, we can define 
+
+βt(x, u, a ) = eO
+
+
+
+B
+
+s
+
+mH Nt(x, u, a ) + BmH Nt(x, u, a )
+
+
+
+,
+
+and conclude that 
+
+¯lt(x, u, a ) − log gh(a|x, u ) ≤ βt(x, u, a ).
+
+This completes the proof of Lemma 5.4. 
+
+# E Missing Proof in Section 6 
+
+Proof of Proposition 6.1. Fix N ≥ 2 and α ∈ (0 , 1), and let b := 1 /N . For q ∈ (b, 1), write the correct-response probabilities as 
+
+F (q) := π∗
+
+> F
+
+(y⋆|x) = αq + (1 − α)b, R(q) := π∗
+
+> R
+
+(y⋆|x) = qα
+
+qα + ( N − 1) 1−α(1 − q)α .
+
+Both probabilities lie in (0 , 1). Since the log-odds function is strictly increasing, F (q) − R(q) has the same sign as 
+
+G(q) := log F (q)1 − F (q) − log R(q)1 − R(q)= log F (q)1 − F (q) − α log q
+
+1 − q + (1 − α) log( N − 1) .
+
+The function G extends continuously to q = b, with G(b) = 0. Differentiating gives 
+
+G′(q) = αF (q)(1 − F (q)) − αq(1 − q)38 = α(q − F (q))(1 − q − F (q)) 
+
+F (q)(1 − F (q)) q(1 − q) .
+
+For q > b , we have q − F (q) = (1 − α)( q − b) > 0. Thus, the sign of G′(q) is the sign of 1 − q − F (q) = 1 − (1 + α)q − (1 − α)b, 
+
+which vanishes at qm := [1 − (1 − α)b]/(1 + α). If N ≥ 3, then b < q m < 1, so G is strictly increasing on ( b, q m) and strictly decreasing on ( qm, 1). In particular, G(qm) > 0. Moreover, 
+
+F (q) → α + (1 − α)b ∈ (0 , 1) as q ↑ 1, and hence G(q) → −∞ . The intermediate value theorem and strict decrease on ( qm, 1) imply that there is exactly one zero qc ∈ (qm, 1). We have G(q) > 0 for 
+
+b < q < q c and G(q) < 0 for qc < q < 1, giving the claimed ordering. If N = 2, then qm = b = 1 /2, so G′(q) < 0 throughout (1 /2, 1). Since G(b) = 0, this gives 
+
+G(q) < 0 and therefore R(q) > F (q) on that interval. Finally, both targets are below the expert probability for q > b : we have F (q) < q , and 
+
+R(q)1 − R(q) = q
+
+1 − q
+
+ 1 − q
+
+(N − 1) q
+
+1−α
+
+< q
+
+1 − q ,
+
+which implies R(q) < q .
+
+Proof of Proposition 6.3. Fix a context x and suppress its dependence in the notation. Since the forward target is the weighted arithmetic mixture of the teachers, summing over E gives 
+
+π∗
+
+> F
+
+(E) = X
+
+> i
+
+wipi(E) ≥ wkpk(E),
+
+where the inequality follows from the nonnegativity of every summand. For the reverse target, fix α, q, η ∈ (0 , 1) and write m := |E| and n := |Y \ E|. Both m and n
+
+are positive. For ε ∈ (0 , 1), define two teachers by 
+
+p1(y) = 
+
+(
+
+q/m, y ∈ E, 
+
+(1 − q)/n, y / ∈ E, p2(y) = 
+
+(
+
+ε/m, y ∈ E, 
+
+(1 − ε)/n, y / ∈ E. 
+
+These distributions have full support, and p1(E) = q. With weights α and 1 − α, the unnormalized geometric masses on the two sets are 
+
+X
+
+> y∈E
+
+p1(y)αp2(y)1−α = qαε1−α,
+
+X
+
+> y / ∈E
+
+p1(y)αp2(y)1−α = (1 − q)α(1 − ε)1−α.
+
+Consequently, 
+
+π∗
+
+> R
+
+(E) = qαε1−α
+
+qαε1−α + (1 − q)α(1 − ε)1−α .
+
+As ε ↓ 0, the numerator tends to zero and the denominator tends to (1 − q)α > 0. Hence π∗
+
+> R
+
+(E) → 0, and a sufficiently small positive ε ensures π∗
+
+> R
+
+(E) < η . This choice retains full support for both teachers and proves the claim. 39 Proof of Proposition 6.5. Fix β ∈ (0 , 1/2) and r ∈ (1 /2, 1), and set α := 1 − β. We construct the expert using token probabilities that do not depend on the horizon. Fix δ ∈ (0 , 1/2), let p1(a|x) = r,and, at every subsequent position, set 
+
+p1(a|x, u ) = 
+
+(
+
+1 − δ, if the first token of u is a, 
+
+1/2, if the first token of u is b. 
+
+The probability of b is the complementary probability at every prefix. Let p2 assign probability 1 /2to each token at every prefix. Both teachers assign positive probability to every response in {a, b }H
+
+for every finite H.Marginalizing the forward mixture over the last H − 1 tokens yields 
+
+π∗
+
+> F
+
+(a|x) = αr + β
+
+2 = 12 + α
+
+
+
+r − 12
+
+
+
+> 12 .
+
+Thus π∗
+
+> F
+
+(a|x) > π ∗
+
+> F
+
+(b|x) for every H.For the reverse target, the uniform teacher contributes the same factor 2 −βH to every complete response, so 
+
+π∗
+
+> R
+
+(y|x) = p1(y|x)α
+
+P 
+
+> z∈{ a,b }H
+
+p1(z|x)α .
+
+Define Cα := (1 − δ)α + δα and Dα := 2 1−α. Summing the powered expert probabilities over continuations gives 
+
+X
+
+> v∈{ a,b }H−1
+
+p1(av |x)α = rαCH−1 
+
+> α
+
+,
+
+X
+
+> v∈{ a,b }H−1
+
+p1(bv |x)α = (1 − r)αDH−1 
+
+> α
+
+.
+
+Since 0 < α < 1, the function t 7 → tα is strictly concave. As δ̸ = 1 /2, strict concavity implies 
+
+Cα = (1 − δ)α + δα < 2
+
+ 12
+
+α
+
+= Dα.
+
+The reverse target’s first-token odds therefore satisfy 
+
+π∗
+
+> R
+
+(a|x)
+
+π∗
+
+> R
+
+(b|x) =
+
+ r
+
+1 − r
+
+α  Cα
+
+Dα
+
+H−1
+
+.
+
+In particular, these odds are strictly less than one whenever 
+
+H > 1 + α log( r/ (1 − r)) log( Dα/C α) .
+
+The denominator is strictly positive, so this bound is finite for every fixed β and r in the stated ranges. The same construction thus satisfies π∗
+
+> R
+
+(a|x) < π ∗
+
+> R
+
+(b|x) for every sufficiently large integer 
+
+H, completing the proof. 40 F Parameter Sensitivity of Aggregation Targets 
+
+We extend the examples in Section 6 by varying the teacher weights, expert confidence, response-space size, and continuation distributions. All curves are deterministic evaluations of the closed-form targets, rather than results of training a student. Each comparison holds the other parameters fixed. The vertical axes show the full probability range, and dashed lines indicate the expert’s probability. 
+
+Uninformative teachers. The expert has weight α, assigns probability q to the correct response, and distributes its remaining mass uniformly over the N − 1 incorrect responses. The other teachers are uniform and have total weight 1 − α. Writing F (q) := π∗
+
+> F
+
+(y⋆|x) and R(q) := π∗
+
+> R
+
+(y⋆|x), we evaluate 
+
+F (q) = αq + 1 − αN , R(q) = qα
+
+qα + ( N − 1) 1−α(1 − q)α .
+
+Here N counts responses; splitting the uniform teachers’ total weight among more identical teachers leaves both targets unchanged. 0.1 0.5 1                                          
+
+> Expert confidence q
+> 0.0 0.5 1.0
+> (a) α= 0.5, N= 10
+> 0.1 0.5 1
+> Expert confidence q
+> (b) α= 0.9, N= 10
+> 0.1 0.5 1
+> Expert confidence q
+> (c) α= 0.99, N= 10
+> 0.5 0.75 1
+> Expert confidence q
+> 0.0 0.5 1.0
+> (d) α= 0.9, N= 2
+> 0.01 0.5 1
+> Expert confidence q
+> (e) α= 0.9, N= 100
+> 0.001 0.5 1
+> Expert confidence q
+> (f) α= 0.9, N= 1000
+> Correct-response probability
+> Expert Forward KL Reverse KL
+
+Figure 2: Sensitivity to expert weight and response-space size with uninformative teachers. Panels (a–c) vary α ∈ { 0.5, 0.9, 0.99 } at N = 10. Panels (d–f), together with (b), compare 
+
+N ∈ { 2, 10 , 100 , 1000 } at α = 0 .9. Each curve varies q from 1 /N toward 1. Dotted vertical lines mark the interior crossing when it exists. 41 Figure 2 shows that the region in which reverse aggregation retains more correct-response probability depends on both parameters. For the weights shown at N = 10, increasing α lowers the confidence threshold, although the targets become close as both approach the expert. At α = 0 .9, increasing N from 10 to 1000 raises the threshold, narrowing the range of q with a reverse advantage. The binary case differs: reverse aggregation is larger throughout q ∈ (1 /2, 1), with no interior crossing. 
+
+Misleading teachers. We fix N = 10 and replace the uniform teacher by a teacher of weight 1 − α that assigns probability ε to the correct response. Both teachers distribute their remaining probability uniformly over the incorrect responses. The targets are 
+
+F (ε) = αq + (1 − α)ε, R(ε) = qαε1−α
+
+qαε1−α + (1 − q)α(1 − ε)1−α .
+
+Figure 3 varies the expert weight at fixed q = 0 .99, and its confidence at fixed α = 0 .9. The horizontal coordinate is log 10 ε; we evaluate the reverse target in the log domain to retain accuracy for extremely small probabilities. Higher expert weight or confidence shifts the decline in reverse probability to smaller values of ε.This protection can be substantial: at q = 0 .99, the reverse probability equals 1 /2 at approximately 
+
+ε = 10 −18 for α = 0 .9, compared with 10 −198 for α = 0 .99. Nevertheless, every fixed α < 1 permits suppression as ε ↓ 0, whereas forward aggregation remains above αq . The extreme ranges illustrate the absence of a uniform positive lower bound for reverse aggregation; they do not estimate how often such predictions arise in practice. 
+
+Long horizons. The expert selects the correct first token a with probability r. At every subsequent position, its probabilities for ( a, b ) are (1 − δ, δ ) after an initial a and (1 /2, 1/2) after an initial b.The other teacher is uniform at every prefix. With expert weight α, let Cα = (1 − δ)α + δα and 
+
+Dα = 2 1−α. The first-token probabilities are 
+
+FH = αr + 1 − α
+
+2 , RH =
+
+"
+
+1 + 
+
+ 1 − rr
+
+α  Dα
+
+Cα
+
+H−1#−1
+
+.
+
+Figure 4 varies α, r, and δ separately around ( α, r, δ ) = (0 .9, 0.99 , 0.01), evaluating every integer H
+
+from 1 to 1000. Increasing the expert’s weight or first-token confidence delays the reversal in the displayed settings. At r = 0 .99 and δ = 0 .01, the first horizon with RH < 1/2 is 10, 68, or 717 for α = 0 .5, 0 .9, or 0 .99, respectively. Making the continuations after a more diffuse also delays reversal. For δ = 0 .3, the reverse probability first falls below 1 /2 at H = 555, compared with H = 68 at δ = 0 .01. Forward aggregation is independent of H in every panel. Thus, in this construction, the deterioration arises from the difference between the continuation distributions, while expert confidence and weight determine how long the initial preference persists. 
+
+# G Forward KL with Function Approximation 
+
+The tabular estimator learns a separate conditional distribution at each prefix. Function approxima-tion allows these conditionals to share a common representation. Let Π = {πθ : θ ∈ Θ} be a finite 42 −10 −5 −1 
+
+log 10 ε
+
+> 0.0 0.5 1.0
+
+(a) α = 0.5, q = 0.99   
+
+> −60 −30 −1
+
+log 10 ε
+
+(b) α = 0.9, q = 0.99   
+
+> −600 −300 −1
+
+log 10 ε
+
+(c) α = 0.99, q = 0.99   
+
+> −60 −30 −1
+
+log 10 ε
+
+> 0.0 0.5 1.0
+
+(d) α = 0.9, q = 0.6   
+
+> −60 −30 −1
+
+log 10 ε
+
+(e) α = 0.9, q = 0.9   
+
+> −60 −30 −1
+
+log 10 ε
+
+(f) α = 0.9, q = 0.999 
+
+> Correct-response probability
+
+Expert Forward KL Reverse KL Figure 3: Sensitivity to expert weight and confidence with misleading teachers. Panels (a–c) fix q =0.99 and vary α. Panels (d–f), together with (b), fix α = 0 .9 and compare q ∈ { 0.6, 0.9, 0.99 , 0.999 }.Horizontal ranges differ: log 10 ε ∈ [−10 , −1] in (a), [ −600 , −1] in (c), and [ −60 , −1] otherwise. Moving left makes the other teacher more misleading. class of autoregressive policies, where 
+
+πθ(y|x) = 
+
+> H
+
+Y
+
+> h=1
+
+πθ(ah|x, y <h ).
+
+We make the standard realizability assumption for the function class. 
+
+Assumption G.1. There exists θ∗ ∈ Θ such that, for every context x and every response y ∈ Y ,
+
+πθ∗ (y|x) = π∗
+
+> F
+
+(y|x).
+
+G.1 Algorithm Design 
+
+We aggregate the candidate policies at the token level, using sampled tokens when logits are unavailable and full teacher probabilities otherwise. Recall the token feedback qt,j,h (a) defined in 43 1 10 100 10 3
+
+Horizon H
+
+0.0 0.5 1.0 
+
+(a) α = 0.5 
+
+1 10 100 10 3
+
+Horizon H
+
+(b) α = 0.9 
+
+1 10 100 10 3
+
+Horizon H
+
+(c) α = 0.99 
+
+1 10 100 10 3
+
+Horizon H
+
+0.0 0.5 1.0 
+
+(d) r = 0.6 
+
+1 10 100 10 3
+
+Horizon H
+
+(e) r = 0.9 
+
+1 10 100 10 3
+
+Horizon H
+
+(f) r = 0.99 
+
+1 10 100 10 3
+
+Horizon H
+
+0.0 0.5 1.0 
+
+(g) δ = 0.01 
+
+1 10 100 10 3
+
+Horizon H
+
+(h) δ = 0.1 
+
+1 10 100 10 3
+
+Horizon H
+
+(i) δ = 0.3 
+
+> Correct first-token probability
+
+Expert Forward KL Reverse KL Figure 4: Sensitivity of first-token probabilities to the horizon. Top row: vary α with r = 0 .99 and 
+
+δ = 0 .01. Middle row: vary r with α = 0 .9 and δ = 0 .01. Bottom row: vary δ ∈ { 0.01 , 0.1, 0.3}
+
+with α = 0 .9 and r = 0 .99. The baseline is repeated in (b), (f), and (g). The horizontal axis is logarithmic; curves connect values computed at integer horizons. Section 4: 
+
+qt,j,h (a) := 
+
+(1(at,j,h = a) w/o logit ,  
+
+> exp( Zt,j,h (a)) P
+> b∈A exp( Zt,j,h (b))
+
+, w/ logit .
+
+44 For each θ ∈ Θ, define its empirical loss in round t by 
+
+ℓt(πθ) := − 1
+
+m
+
+> m
+
+X
+
+> j=1
+> H
+
+X
+
+> h=1
+
+X
+
+> a∈A
+
+qt,j,h (a) log πθ(a|xt,j , y t,j,<h ). (G.1) The main idea of the algorithm is to maintain a distribution pt(θ) over the parameter space Θ. More specifically, choose a prior distribution p0 on Θ with p0(θ) > 0 for every θ ∈ Θ, and initialize 
+
+L0(θ) = 0. At the beginning of round t, for any prefix ( x, u ), the learner uses 
+
+bπt(a|x, u ) := X
+
+> θ∈Θ
+
+pt−1(θ)πθ(a|x, u ). (G.2) After observing the feedback, the learner updates 
+
+pt(θ) := pt−1(θ) exp  −ℓt(πθ)/H P 
+
+> θ′∈Θ
+
+pt−1(θ′) exp  −ℓt(πθ′ )/H  . (G.3) The factor 1 /H normalizes the sum of the H token losses in each rollout. Intuitively, the update favors candidates with smaller cumulative empirical losses, relative to their prior weights. 
+
+Algorithm 3 Forward KL with Function Approximation  
+
+> 1:
+
+Input: Finite policy class Π = {πθ : θ ∈ Θ}, prior p0 with p0(θ) > 0 for every θ, number of rounds T . 
+
+> 2:
+
+for t = 1 , . . . , T do  
+
+> 3:
+
+For any prefix ( x, u ), construct the policy bπt(a|x, u ) as in (G.2).  
+
+> 4:
+
+Observe the batch of teacher-generated rollouts {(xt,j , y t,j )}mj=1 and, when available, the teacher logits {Zt,j,h }j,h . 
+
+> 5:
+
+For every θ ∈ Θ, compute ℓt(πθ) as in (G.1)  
+
+> 6:
+
+For every θ ∈ Θ, update the mixture weights pt(θ) as in (G.3)  
+
+> 7:
+
+end for  
+
+> 8:
+
+Output: {bπt}Tt=1 .This exponential reweighting resembles the posterior updates used in Thompson sampling. Unlike Thompson sampling, however, our algorithm predicts with a mixture of the candidate policies rather than a single sampled candidate. Evaluating this mixture at each decoding step introduces large computational cost, which is a key limitation of our forward-KL algorithm with function approximation. 
+
+G.2 Theoretical Guarantee 
+
+In this section, we first work on a finite function class Θ. We will apply the results to the setting with finite covering number later. The following theorem bounds the regret by the prior weight of a good candidate and its approximation error. Under realizability, the approximation term vanishes. 
+
+Theorem G.2. Let T ≥ 2. Suppose the regret in (3.2) is defined with D(p∥q) = KL( q∥p). Under off-policy distillation protocol and the function approximation setting, both with and without access to teacher logits, Algorithm 3 satisfies 
+
+E Regret( T ) ≤ inf 
+
+> θ∈Θ
+
+
+
+H log 1
+
+p0(θ) + T Ex∼¯ρKL  π∗
+
+> F
+
+(·| x) πθ(·| x)
+
+,
+
+45 provided the right-hand side is finite. In particular, under Assumption G.1, for the optimal parameter 
+
+θ∗, Algorithm 3 satisfies 
+
+E Regret( T ) ≤ H log 1
+
+p0(θ∗) .
+
+Moreover, for any δ > 0, under Assumption G.1, the following inequality holds with probability at least 1 − δ:Regret( T ) ≤ 2H log 1
+
+p0(θ∗) + 4 H
+
+
+
+1 + log 2
+
+δp 0(θ∗)
+
+
+
+log 2
+
+δ .
+
+Proof. Let Ft be the σ-algebra generated by all rollouts and feedback observed before round t:
+
+Ft := σ
+
+
+
+(xs,j , y s,j ), q s,j,h (a) : s < t, j ∈ [m], h ∈ [H], a ∈ A 
+
+
+
+.
+
+Thus, both pt−1 and bπt are Ft-measurable. Recall the feedback counts ct(x, u, a ) defined in (4.3). For any policy π, (G.1) can be rewritten as 
+
+ℓt(π) = −
+
+> H
+
+X
+
+> h=1
+
+X
+
+> (x,u,a )
+
+ct(x, u, a ) log π(a|x, u ). (G.4) Easy to see, the following equation holds 
+
+X
+
+> (x,u,a )
+
+ct(x, u, a ) = 1 Therefore, we have 
+
+> H
+
+X
+
+> h=1
+
+X
+
+> (x,u,a )
+
+ct(x, u, a )
+
+H = 1 . (G.5) For any t ≥ 1, define the normalizing constant 
+
+Ct := X
+
+> θ∈Θ
+
+p0(θ) exp 
+
+
+
+− 1
+
+H
+
+> t
+
+X
+
+> s=1
+
+ℓs(πθ)
+
+
+
+,
+
+and C0 = 1. Direct iteration of (G.3) gives 
+
+pt(θ) = p0(θ) exp   − H−1 Pts=1 ℓs(πθ)
+
+Ct
+
+.
+
+Moreover, we have 
+
+Ct
+
+Ct−1
+
+= 1
+
+Ct−1
+
+X
+
+> θ′∈Θ
+
+p0(θ′) exp 
+
+
+
+− 1
+
+H
+
+> t−1
+
+X
+
+> s=1
+
+ℓs(πθ′ ) − ℓt(πθ′ )
+
+H
+
+
+
+= X
+
+> θ′∈Θ
+
+p0(θ′) exp   − H−1 Pt−1 
+
+> s=1
+
+ℓs(πθ′ )
+
+Ct−1
+
+| {z } 
+
+> =pt−1(θ′)
+
+exp  −ℓt(πθ′ )/H 
+
+46 = X
+
+> θ′∈Θ
+
+pt−1(θ′) exp  −ℓt(πθ′ )/H . (G.6) The definition of ℓt in (G.4) gives exp  −ℓt(πθ′ )/H  = exp 
+
+ HX
+
+> h=1
+
+X
+
+> (x,u,a )
+
+ct(x, u, a )
+
+H log πθ′ (a|x, u )
+
+
+
+=
+
+> H
+
+Y
+
+> h=1
+
+Y
+
+> (x,u,a )
+
+πθ′ (a|x, u )ct(x,u,a )/H . (G.7) Substituting (G.7) into (G.6), we have 
+
+Ct
+
+Ct−1
+
+= X
+
+> θ′∈Θ
+
+pt−1(θ′)
+
+> H
+
+Y
+
+> h=1
+
+Y
+
+> (x,u,a )
+
+πθ′ (a|x, u )ct(x,u,a )/H . (G.8) Using the generalized H¨ older’s inequality, we have 
+
+Ct
+
+Ct−1
+
+≤
+
+> H
+
+Y
+
+> h=1
+
+Y
+
+> (x,u,a )
+
+ X
+
+> θ′∈Θ
+
+pt−1(θ′)πθ′ (a|x, u )
+
+ct(x,u,a )/H 
+
+=
+
+> H
+
+Y
+
+> h=1
+
+Y
+
+> (x,u,a )
+
+bπt(a|x, u )ct(x,u,a )/H 
+
+= exp  −ℓt(bπt)/H ,
+
+where the last equation holds using (G.4). Taking the negative logarithm, and summing over t ∈ [T ] yields 
+
+> T
+
+X
+
+> t=1
+
+ℓt(bπt) ≤ − H
+
+> T
+
+X
+
+> t=1
+
+log Ct
+
+Ct−1
+
+= −H log CT , (G.9) where the equality uses C0 = 1. Now fix any comparator policy πθ such that θ ∈ Θ. Easy to see 
+
+CT = X
+
+> θ′
+
+p0(θ′) exp 
+
+
+
+− 1
+
+H
+
+> T
+
+X
+
+> t=1
+
+ℓt(πθ′ )
+
+
+
+≥ p0(θ) exp 
+
+
+
+− 1
+
+H
+
+> T
+
+X
+
+> t=1
+
+ℓt(πθ)
+
+
+
+.
+
+Therefore, we have 
+
+−
+
+> T
+
+X
+
+> t=1
+
+ℓt(πθ) ≤ H log CT + H log 1
+
+p0(θ) . (G.10) 47 Summing up (G.9) and (G.10), we have 
+
+> T
+
+X
+
+> t=1
+
+ℓt(bπt) − ℓt(πθ) ≤ H log 1
+
+p0(θ) . (G.11) As a result, 
+
+> T
+
+X
+
+> t=1
+
+ℓt(bπt) − ℓt(π∗
+
+> F
+
+) =
+
+> T
+
+X
+
+> t=1
+
+ℓt(bπt) − ℓt(πθ) +
+
+> T
+
+X
+
+> t=1
+
+ℓt(πθ) − ℓt(π∗
+
+> F
+
+)
+
+≤ H log 1
+
+p0(θ) +
+
+> T
+
+X
+
+> t=1
+
+ℓt(πθ) − ℓt(π∗
+
+> F
+
+). (G.12) Using the same argument as in Appendix B, we have 
+
+E[ct(x, u, a ) | F t] = 1
+
+I
+
+X
+
+> i∈I
+
+ρi(x)pi(u|x)pi(a|x, u )= ¯ ρ(x)π∗
+
+> F
+
+(u|x)π∗
+
+> F
+
+(a|x, u ).
+
+Consequently, using (G.4), for any Ft-measurable policy π with finite loss, 
+
+Eℓt(π) − ℓt(π∗
+
+> F
+
+) | F t
+
+
+
+=
+
+> H
+
+X
+
+> h=1
+
+X
+
+> (x,u,a )
+
+E[ct(x, u, a ) | F t] log π∗
+
+> F
+
+(a|x, u )
+
+π(a|x, u )=
+
+> H
+
+X
+
+> h=1
+
+X
+
+> (x,u )
+
+¯ρ(x)π∗
+
+> F
+
+(u|x)KL  π∗
+
+> F
+
+(·| x, u ) π(·| x, u )
+
+= Ex∼¯ρKL  π∗
+
+> F
+
+(·| x) π(·| x). (G.13) The last equality follows from the chain rule for KL divergence. Taking expectations in (G.12) and applying (G.13) to both bπt and πθ, we conclude that 
+
+E[Regret( T )] ≤ H log 1
+
+p0(θ) +
+
+> T
+
+X
+
+> t=1
+
+Ex∼¯ρKL  π∗
+
+> F
+
+(·| x) πθ(·| x)
+
+= H log 1
+
+p0(θ) + T Ex∼¯ρKL  π∗
+
+> F
+
+(·| x) πθ(·| x).
+
+Since the inequality holds for every fixed θ, taking the infimum gives 
+
+E[Regret( T )] ≤ inf 
+
+> θ∈Θ
+
+
+
+H log 1
+
+p0(θ) + T Ex∼¯ρKL  π∗
+
+> F
+
+(·| x) πθ(·| x)
+
+. (G.14) 
+
+High-probability bound under realizability. Suppose πθ∗ = π∗ 
+
+> F
+
+for some θ∗ ∈ Θ. As in Appendix B, define 
+
+Xt := ℓt(π∗
+
+> F
+
+) − ℓt(bπt),
+
+48 rt := −E[Xt | F t].
+
+By (G.13), Regret( T ) = PTt=1 rt. The argument establishing (B.20) applies to any Ft-measurable policy π, since it only uses policy normalization and the conditional mean of the feedback counts. Therefore, 
+
+E
+
+h
+
+exp 
+
+ Xt
+
+H
+
+
+
+Ft
+
+i
+
+= E
+
+
+
+exp 
+
+ ℓt(π∗
+
+> F
+
+) − ℓt(bπt)
+
+H
+
+
+
+Ft
+
+
+
+≤ 1. (G.15) To replace the lower bound provided by KT smoothing in the tabular proof, we control the mixture weight of θ∗. Define W0 = 1 and 
+
+Wt := Ct exp 
+
+ 1
+
+H
+
+> t
+
+X
+
+> s=1
+
+ℓs(π∗
+
+> F
+
+)
+
+
+
+= p0(θ∗)
+
+pt(θ∗) .
+
+The equality follows from the formula for pt(θ∗) and realizability. By (G.6), 
+
+Wt
+
+Wt−1
+
+= Ct
+
+Ct−1
+
+exp  ℓt(π∗
+
+> F
+
+)/H 
+
+= X
+
+> θ∈Θ
+
+pt−1(θ) exp 
+
+ ℓt(π∗
+
+> F
+
+) − ℓt(πθ)
+
+H
+
+
+
+,
+
+where we apply (G.6). Since Wt−1 and pt−1 are Ft-measurable, (G.15) implies 
+
+E[Wt | F t] = Wt−1
+
+X
+
+> θ∈Θ
+
+pt−1(θ)E
+
+
+
+exp 
+
+ ℓt(π∗
+
+> F
+
+) − ℓt(πθ)
+
+H
+
+
+
+Ft
+
+
+
+≤ Wt−1,
+
+where the last inequality holds due to (G.15). Thus, Wt is a nonnegative supermartingale with respect to {F t+1 }Tt=0 . Using Ville’s inequality (Lemma I.9), we have 
+
+P
+
+
+
+max  
+
+> 0≤t≤T
+
+Wt ≤ 2
+
+δ
+
+
+
+≥ 1 − δ
+
+2 . (G.16) Define 
+
+Jt := 1
+
+
+
+max  
+
+> 0≤s<t
+
+Ws ≤ 2
+
+δ
+
+
+
+, L := log 2
+
+δp 0(θ∗) .
+
+Whenever Jt = 1, the token-level mixture satisfies 
+
+bπt(a|x, u )
+
+π∗
+
+> F
+
+(a|x, u ) ≥ pt−1(θ∗) = p0(θ∗)
+
+Wt−1
+
+≥ e−L,
+
+where the first inequality holds due to bπt(a|x, u ) := P 
+
+> θ
+
+pt−1(θ)πθ(a|x, u ) ≥ pt−1(θ∗)π∗
+
+> F
+
+(a|x, u ). The second inequality holds due to (G.16). Thus, log bπt(a|x, u )
+
+π∗
+
+> F
+
+(a|x, u ) ≥ − L
+
+49 for every ( x, u, a ). Using the definition of Xt and the loss representation, we obtain 
+
+Xt
+
+H = ℓt(π∗
+
+> F
+
+) − ℓt(bπt)
+
+H
+
+=
+
+> H
+
+X
+
+> h=1
+
+X
+
+> (x,u,a )
+
+ct(x, u, a )
+
+H log bπt(a|x, u )
+
+π∗
+
+> F
+
+(a|x, u )
+
+≥ − L
+
+> H
+
+X
+
+> h=1
+
+X
+
+> (x,u,a )
+
+ct(x, u, a )
+
+H
+
+= −L. 
+
+The inequality uses ct(x, u, a ) ≥ 0, and the last equality follows from (G.5). When Jt = 0, we instead have JtXt/H = 0 ≥ − L, since L ≥ 0. Combining the two cases gives 
+
+JtXt
+
+H ≥ − L. 
+
+Moreover, since Jt is Ft-measurable, 
+
+E[eJtXt/H | F t] = 1 ∗ 1(Jt = 0) + 1(Jt = 1) E[eXt/H | F t]= 1 − Jt + JtE[eXt/H | F t]
+
+≤ 1,
+
+where the last inequality holds due to (G.15). Hence, Lemma B.2 and the argument leading to (B.22) apply to JtXt, whose conditional means are −Jtrt. Replacing LT by L and the failure probability by δ/ 2, we obtain, for any fixed 
+
+λ ∈ (0 , 1/H ], with probability at least 1 − δ/ 2, 
+
+> T
+
+X
+
+> t=1
+
+Jt(Xt + rt) ≤ H(1 + L)λ
+
+> T
+
+X
+
+> t=1
+
+Jtrt + log(2 /δ )
+
+λ .
+
+Choose λ = [2 H(1 + L)] −1. Conditioned on the event in (G.16), and taking a union bound, we conclude that, with probability at least 1 − δ,Regret( T ) ≤ − 
+
+> T
+
+X
+
+> t=1
+
+Xt + 12 Regret( T ) + 2 H(1 + L) log 2
+
+δ .
+
+Finally, (G.11) with θ = θ∗ gives 
+
+−
+
+> T
+
+X
+
+> t=1
+
+Xt ≤ H log 1
+
+p0(θ∗) .
+
+Substituting this bound and rearranging yields Regret( T ) ≤ 2H log 1
+
+p0(θ∗) + 4 H
+
+
+
+1 + log 2
+
+δp 0(θ∗)
+
+
+
+log 2
+
+δ .
+
+50 G.3 Function Class with Finite Covering Number 
+
+Let Π = {πθ : θ ∈ Θ} be a class of autoregressive policies containing π∗
+
+> F
+
+. For ε > 0, we define the 
+
+ε-covering number of the token log-probability class log Π as follows. 
+
+Definition G.3 (Covering number) . The covering number N (ε, log Π , ∥ · ∥ ∞) is the smallest cardinality of a finite subset Π ε ⊆ Π such that, for every π ∈ Π, there exists eπ ∈ Πε satisfying 
+
+∥ log π − log eπ∥∞ := sup 
+
+> h∈[H], x ∈X
+> u∈A h−1, a ∈A
+
+log π(a|x, u ) − log eπ(a|x, u ) ≤ ε. 
+
+When the function class Π has finite covering number Nε := N (ε, log Π , ∥ · ∥ ∞) < ∞, we can choose an ε-cover Π ε ⊆ Π of cardinality Nε, and run Algorithm 3 on Π ε with a prior distribution p0.Then, we have the following regret guarantee: 
+
+Theorem G.4. Let Π be a class of autoregressive policies containing π∗
+
+> F
+
+. Fix ε > 0 such that 
+
+Nε := N (ε, log Π , ∥ · ∥ ∞) < ∞.
+
+Let the algorithm be described as above and p0 be the uniform prior. Under off-policy feedback, both with and without teacher logits, the expected regret can be bounded by 
+
+E[Regret( T )] ≤ H log Nε + T Hε. 
+
+Moreover, for every δ ∈ (0 , 1), with probability at least 1 − δ,Regret( T ) ≤ 2H log Nε + T ε  + 4 H
+
+
+
+1 + log Nε + T ε + log 2
+
+δ
+
+
+
+log 2
+
+δ .
+
+Proof. Since π∗ 
+
+> F
+
+∈ Π, the definition of the ε-cover ensures that there exists π¯θ ∈ Πε such that 
+
+∥ log π∗ 
+
+> F
+
+− log π¯θ∥∞ ≤ ε. (G.17) In particular, for every prefix–token triple ( x, u, a ), log π∗
+
+> F
+
+(a|x, u )
+
+π¯θ(a|x, u ) ≤ ε. 
+
+Using the autoregressive factorization, for every complete response y = ( a1, . . . , a H ), we obtain log π∗
+
+> F
+
+(y|x)
+
+π¯θ(y|x) =
+
+> H
+
+X
+
+> h=1
+
+log π∗
+
+> F
+
+(ah|x, y <h )
+
+π¯θ(ah|x, y <h )
+
+≤ Hε. 
+
+Taking expectations over x ∼ ¯ρ and y ∼ π∗
+
+> F
+
+(·| x) therefore gives 
+
+Ex∼¯ρKL  π∗
+
+> F
+
+(·| x) π¯θ(·| x) ≤ Hε. (G.18) The uniform prior on the cover assigns p0(¯θ) = 1 /N ε. Applying Theorem G.2, we have 
+
+E[Regret( T )] ≤ H log 1
+
+p0(¯θ) + T Ex∼¯ρKL  π∗
+
+> F
+
+(·| x) π¯θ(·| x)
+
+51 ≤ H log Nε + T Hε, 
+
+where we use that p0 is uniform and (G.18). This has proved the expected regret bound. For the high-probability bound, let Θ ε index the Nε policies in Π ε, with p0(θ) = 1 /N ε for every 
+
+θ ∈ Θε. We use the same filtration Ft as in the finite-class analysis and define 
+
+Xt := ℓt(π∗
+
+> F
+
+) − ℓt(bπt),rt := −E[Xt | F t].
+
+By (G.13), Regret( T ) = PTt=1 rt. For the policy π¯θ in (G.17), 
+
+ℓt(π¯θ) − ℓt(π∗
+
+> F
+
+) = 
+
+> H
+
+X
+
+> h=1
+
+X
+
+> (x,u,a )
+
+ct(x, u, a ) log π∗
+
+> F
+
+(a|x, u )
+
+π¯θ(a|x, u )
+
+≤ ε
+
+> H
+
+X
+
+> h=1
+
+X
+
+> (x,u,a )
+
+ct(x, u, a ) = Hε. (G.19) Combining (G.19) with (G.11) gives 
+
+−
+
+> T
+
+X
+
+> t=1
+
+Xt =
+
+> T
+
+X
+
+> t=1
+
+[ℓt(bπt) − ℓt(π∗
+
+> F
+
+)] =
+
+> T
+
+X
+
+> t=1
+
+[ℓt(bπt) − ℓt(π¯θ)] + 
+
+> T
+
+X
+
+> t=1
+
+[ℓt(π¯θ) − ℓt(π∗
+
+> F
+
+)] 
+
+≤ H log Nε +
+
+> T
+
+X
+
+> t=1
+
+[ℓt(π¯θ) − ℓt(π∗
+
+> F
+
+)] 
+
+≤ H log Nε + T Hε. (G.20) Define Ct and Wt the same as in the last section, that is, 
+
+Ct := X
+
+> θ∈Θε
+
+p0(θ) exp 
+
+
+
+− 1
+
+H
+
+> t
+
+X
+
+> s=1
+
+ℓs(πθ)
+
+
+
+= 1
+
+Nε
+
+X
+
+> θ∈Θε
+
+exp 
+
+
+
+− 1
+
+H
+
+> t
+
+X
+
+> s=1
+
+ℓs(πθ)
+
+
+
+,Wt := Ct exp 
+
+ 1
+
+H
+
+> t
+
+X
+
+> s=1
+
+ℓs(π∗
+
+> F
+
+)
+
+
+
+,
+
+with C0 = W0 = 1. With a similar argument to (B.20), we have 
+
+E
+
+
+
+exp 
+
+ ℓt(π∗
+
+> F
+
+) − ℓt(bπt)
+
+H
+
+
+
+Ft
+
+
+
+≤ 1. (G.21) Using the normalizer-ratio identity (G.6), we have 
+
+Wt
+
+Wt−1
+
+= Ct
+
+Ct−1
+
+exp  ℓt(π∗
+
+> F
+
+)/H 
+
+52 = X
+
+> θ∈Θε
+
+pt−1(θ) exp 
+
+ ℓt(π∗
+
+> F
+
+) − ℓt(πθ)
+
+H
+
+
+
+,
+
+where the last equality holds due to the same argument as in (G.6). We also have 
+
+pt(¯θ) = N −1 
+
+> ε
+
+exp   − H−1 Pts=1 ℓs(π¯θ)
+
+Ct
+
+= 1
+
+NεWt
+
+exp 
+
+
+
+− 1
+
+H
+
+> t
+
+X
+
+> s=1
+
+[ℓs(π¯θ) − ℓs(π∗
+
+> F
+
+)] 
+
+
+
+≥ e−tε 
+
+NεWt
+
+,
+
+where the inequality uses (G.19). Furthermore, (G.17) implies π¯θ(a|x, u ) ≥ e−επ∗
+
+> F
+
+(a|x, u ). Therefore, the token-level mixture satisfies 
+
+bπt(a|x, u )
+
+π∗
+
+> F
+
+(a|x, u ) ≥ pt−1(¯θ) π¯θ(a|x, u )
+
+π∗
+
+> F
+
+(a|x, u )
+
+≥ e−tε 
+
+NεWt−1
+
+.
+
+Using the same concentration argument as in the last section, we can consider the high-probability event 
+
+
+
+max  
+
+> 0≤s<t
+
+Ws ≤ 2
+
+δ
+
+
+
+.
+
+On this event, we have 
+
+bπt(a|x, u )
+
+π∗
+
+> F
+
+(a|x, u ) ≥ δe −T ε 
+
+2Nε
+
+= e−L,
+
+where we define L := log(2 Nε/δ ) + T ε . Repeating the stopped-process argument from the proof of Theorem G.2, we obtain, with probability at least 1 − δ,Regret( T ) ≤ 2H log Nε + T ε  + 4 H
+
+
+
+1 + log Nε + T ε + log 2
+
+δ
+
+
+
+log 2
+
+δ .
+
+This proves Theorem G.4. 
+
+Example G.5. Suppose Θ ⊆ Rd is a nonempty compact set contained in a Euclidean ball of radius 
+
+R, where d ≥ 1. Assume that πθ∗ = π∗ 
+
+> F
+
+for some θ∗ ∈ Θ. Moreover, suppose that, for some L0 > 0, 
+
+log πθ(a|x, u ) − log πθ′ (a|x, u ) ≤ L0∥θ − θ′∥2
+
+for every θ, θ ′ ∈ Θ, h ∈ [H], and ( x, u, a ) ∈ X × A h−1 × A . Then, a standard Euclidean covering argument gives 
+
+N (ε, log Π , ∥ · ∥ ∞) ≤
+
+
+
+1 + 2RL 0
+
+ε
+
+d
+
+.
+
+53 For every T ≥ 2, choose such a cover with ε = 1 /T . By Theorem G.4, the expected regret satisfies 
+
+E Regret( T ) ≤ H d log  1 + 2 RL 0T  + 1  .
+
+Moreover, with probability at least 1 − δ, we have Regret( T ) ≤ eO(dH log T ).
+
+# H Reverse KL with Function Approximation 
+
+We now study on-policy distillation with function approximation. Fix any h ∈ [H]. For any prefix 
+
+x ∈ X , u ∈ A h−1, a ∈ A , following the notation in Theorem 5.1, we define the target as 
+
+f ∗(h, x, u, a ) := log gh(a|x, u ) = X
+
+> i∈I
+
+wi(x) log pi(a|x, u ).
+
+Specifically, we define 
+
+Z := 
+
+> H
+
+[
+
+> h=1
+
+ {h} × X × A h−1 × A ,
+
+and write zt,j,h := ( h, x t,j , y t,j,<h , a t,j,h ) for the query associated with the h-th token of rollout j in round t.Throughout this section, we retain Assumption 5.3, with reference policy πref and bound B > 0. Moreover, let F be a finite class of functions f : Z → R. We further impose the following realizability assumption. 
+
+Assumption H.1. f ∗ ∈ F .To measure how past observations constrain predictions at a new query, we introduce a new version of generalized Eluder dimension adapted to autoregressive trajectory batches. The underlying uncertainty compares the disagreement between two candidate score functions at the current query with their cumulative squared disagreement on previously observed data. Since the estimator is updated only after each round, this comparison uses observations from completed rounds, without incorporating feedback from the current batch. 
+
+Definition H.2. Fix λ > 0. For a sequence of trajectory batches, write 
+
+Zt := ( zt,j,h )j∈[m], h ∈[H], Z<t := ( Z1, . . . , Z t−1).
+
+For any query z ∈ Z , define 
+
+D2 
+
+> F
+
+(z; Z<t ) := sup 
+
+> f1,f 2∈F
+
+ f1(z) − f2(z)2
+
+λ +
+
+> t−1
+
+X
+
+> s=1
+
+1
+
+mH 
+
+> m
+
+X
+
+> j=1
+> H
+
+X
+
+> h=1
+
+ f1(zs,j,h ) − f2(zs,j,h )2
+
+. (H.1) The batched generalized Eluder dimension is dim T (F; λ) := sup 
+
+> Z1: T
+> T
+
+X
+
+> t=1
+
+1
+
+mH 
+
+> m
+
+X
+
+> j=1
+> H
+
+X
+
+> h=1
+
+min 1, D 2 
+
+> F
+
+(zt,j,h ; Z<t ) , (H.2) where the supremum is over all sequences of T trajectory batches, each containing m rollouts of horizon H.54 H.1 Algorithm Design 
+
+Recall that, for every visited query zt,j,h = ( h, x, u, a ), 
+
+Elt,j,h Ft, z t,j,h = ( h, x, u, a ) = X
+
+> i∈I
+
+wi(x) log pi(a|x, u )= log gh(a|x, u ) = f ∗(h, x, u, a ), (H.3) where Ft denotes the history before round t. This identity motivates estimating f ∗ by least squares. For each f ∈ F , define 
+
+ℓt(f ) := 1
+
+mH 
+
+> m
+
+X
+
+> j=1
+> H
+
+X
+
+> h=1
+
+ f (zt,j,h ) − lt,j,h 
+
+2. (H.4) Moreover, we define 
+
+Lt(f ) := 
+
+> t
+
+X
+
+> s=1
+
+ℓs(f ), L0(f ) := 0 .
+
+At the beginning of round t, the learner computes ¯ft−1 ∈ argmin  
+
+> f∈F
+
+Lt−1(f ). (H.5) Using the principle of optimism for online reinforcement learning, we therefore define a bonus using the batched generalized Eluder dimension, i.e., for any z ∈ Z , the bonus function is defined as 
+
+bt−1(z) := 
+
+q
+
+(4 β + λ)D2 
+
+> F
+
+(z; Z<t ), (H.6) where λ > 0 and β > 0 are parameters to be specified later. Given the reference policy πref and the bound B from Assumption 5.3, as it implies 
+
+f ∗(h, x, u, a ) − log πref (a|x, u ) ≤ B, 
+
+we define the optimistic score by 
+
+bft−1(h, x, u, a ) := min 
+
+n ¯ft−1(h, x, u, a ) + bt−1(h, x, u, a ), log πref (a|x, u ) + B
+
+o
+
+. (H.7) The following lemma establishes pointwise optimism and bounds the error of the optimistic score. 
+
+Lemma H.3. Under Assumptions 5.3 and H.1, fix δ ∈ (0 , 1) and choose 
+
+β = 32 B2 log |F| 
+
+δ , λ > 0.
+
+Then, with probability at least 1 − δ, simultaneously for every t ∈ [T ] and z ∈ Z ,
+
+¯ft−1(z) − f ∗(z) ≤ bt−1(z).
+
+Furthermore, the following inequality holds 0 ≤ bft−1(z) − f ∗(z) ≤ min 2bt−1(z), 2B .
+
+55 To construct the output policy, we apply the backward propagation as in the tabular setting to the estimated scores bft. More specifically, set bVt−1,H +1 (x, y ) = 1 and recursively define 
+
+bVt−1,h (x, u ) := X
+
+> a∈A
+
+exp   bft−1(h, x, u, a ) bVt−1,h +1 (x, (u, a )) , (H.8) for h = H, . . . , 1. We then output 
+
+bπt(a|x, u ) := exp   bft−1(h, x, u, a ) bVt−1,h +1 (x, (u, a )) 
+
+bVt−1,h (x, u ) . (H.9) This procedure is described in Algorithm 4. 
+
+Algorithm 4 Optimistic Reverse KL with Function Approximation  
+
+> 1:
+
+Input: Function class F, reference policy πref , bound B, horizon H, batch size m, number of rounds T , and parameters λ, β > 0.  
+
+> 2:
+
+Initialize L0(f ) = 0 for every f ∈ F . 
+
+> 3:
+
+for t = 1 , . . . , T do  
+
+> 4:
+
+Compute the regression estimate ¯ft−1 using (H.5).  
+
+> 5:
+
+Compute bt−1 and bft−1 using (H.6) and (H.7).  
+
+> 6:
+
+Set bVt−1,H +1 (x, y ) = 1 and compute the backward recursion (H.8).  
+
+> 7:
+
+Construct bπt using (H.9).  
+
+> 8:
+
+Receive contexts {xt,j }mj=1 according to the on-policy protocol and generate yt,j ∼ bπt(·| xt,j ).  
+
+> 9:
+
+Observe teacher feedback {lt,j,h }j∈[m], h ∈[H]. 
+
+> 10:
+
+Compute ℓt(f ) using (H.4) and update Lt(f ) = Lt−1(f ) + ℓt(f ) for every f ∈ F . 
+
+> 11:
+
+end for  
+
+> 12:
+
+Output: {bπt}Tt=1 .
+
+H.2 Theoretical Guarantee 
+
+Given Lemma H.3, we have the following guarantee on the regret of Algorithm 4. 
+
+Theorem H.4. Under Assumptions 5.3 and H.1, fix δ ∈ (0 , 1) and choose λ > 0 and 
+
+β ≥ 32 B2 log 2|F| 
+
+δ
+
+Then, with probability at least 1 − δ, Algorithm 4 satisfies Regret( T ) := 
+
+> T
+
+X
+
+> t=1
+
+Ex∼¯ρKL  bπt(·| x) π∗
+
+> R
+
+(·| x)
+
+≤ 4H2(4 β + λ) dim T (F; λ) + 16 H2B2 log 4
+
+δ .
+
+In particular, if we choose λ = B2 and β = 32 B2 log(2 |F| /δ ), we have Regret( T ) ≤ O
+
+
+
+B2H2 dim T (F; B2) log 2|F| 
+
+δ
+
+
+
+.
+
+56 Proof. Let Ft denote the history before round t. In particular, ¯ft−1, bt−1, and bπt are Ft-measurable. Applying Lemma H.3, we have with probability at least 1 − δ/ 2, the following inequality holds simultaneously for every t ∈ [T ] and z ∈ Z 
+
+0 ≤ bft−1(z) − f ∗(z) ≤ min {2bt−1(z), 2B}, (H.10) when β ≥ 32 B2 log(2 |F| /δ ). Let E be this high-probability event. For every t and z, define 
+
+ψt(z) := min {4bt−1(z)2, 4B2}. (H.11) Then we have 0 ≤ ψt(z) ≤ 4B2. On E, (H.10) further gives 
+
+ bft−1(z) − f ∗(z)2 ≤ ψt(z). (H.12) Fix a context x and a response y. Write 
+
+vt(x, y ) := 
+
+> H
+
+X
+
+> h=1
+
+h bft−1(h, x, y <h , a h) − f ∗(h, x, y <h , a h)
+
+i
+
+.
+
+On E, every summand is nonnegative, so vt(x, y ) ≥ 0. Recall that for y = ( a1, . . . , a H ), the backward propagation gives 
+
+bπt(y|x) = 
+
+> H
+
+Y
+
+> h=1
+
+e bft−1(h,x,y <h ,a h) bVt−1,h +1 (x, y ≤h)
+
+bVt−1,h (x, y <h )= exp   P Hh=1 bft−1(h, x, y <h , a h)bVt−1,1(x) ,
+
+where we used bVt−1,H +1 (x, y ) = 1. Similarly, the reverse target satisfies 
+
+π∗
+
+> R
+
+(y|x) = exp   P Hh=1 f ∗(h, x, y <h , a h)
+
+V1(x) ,
+
+where V1(x) = P 
+
+> y
+
+exp   P Hh=1 f ∗(h, x, y <h , a h). Taking the logarithm of their ratio therefore yields log bπt(y|x)
+
+π∗
+
+> R
+
+(y|x) =
+
+> H
+
+X
+
+> h=1
+
+ bft−1(h, x, y <h , a h) − f ∗(h, x, y <h , a h)
+
++ log V1(x) − log bVt−1,1(x)= vt(x, y ) + log V1(x)
+
+bVt−1,1(x) . (H.13) To express the ratio of normalizing constants as an expectation, expand the expectation over complete responses: 
+
+Ey∼bπt(·| x)
+
+e−vt(x,y )
+
+= X
+
+> y∈Y
+
+bπt(y|x)e−vt(x,y )
+
+57 = X
+
+> y∈Y
+
+exp   P Hh=1 bft−1(h, x, y <h , a h)bVt−1,1(x) exp 
+
+ HX
+
+> h=1
+
+f ∗(h, x, y <h , a h) − bft−1(h, x, y <h , a h)
+
+= 1
+
+bVt−1,1(x)
+
+X
+
+> y∈Y
+
+exp 
+
+ HX
+
+> h=1
+
+f ∗(h, x, y <h , a h)
+
+
+
+= V1(x)
+
+bVt−1,1(x) . (H.14) The third equality follows by cancellation of the bft−1 terms in the exponent. The last equality uses the definition of V1(x). Taking expectation over bπt(·| x) in (H.13) and considering (H.14), we have KL  bπt(·| x) π∗
+
+> R
+
+(·| x) = Ebπt [vt(x, y )] + log Ebπt [e−vt(x,y )]
+
+≤ Ebπt [vt(x, y )] + Ebπt [e−vt(x,y )] − 1
+
+≤ 12 Ebπt [vt(x, y )2]. (H.15) Here the first inequality uses log u ≤ u − 1 for u > 0, and the second uses e−v ≤ 1 − v + v2/2 for 
+
+v ≥ 0. All expectations in this display are conditional on x.By the Cauchy–Schwarz inequality and (H.12), 
+
+vt(x, y )2 ≤ H
+
+> H
+
+X
+
+> h=1
+
+ bft−1(h, x, y <h , a h) − f ∗(h, x, y <h , a h)2
+
+≤ H
+
+> H
+
+X
+
+> h=1
+
+ψt(h, x, y <h , a h).
+
+Consequently, on E,Regret( T ) ≤ H
+
+2
+
+> T
+
+X
+
+> t=1
+
+Ex∼¯ρ, y ∼bπt(·| x)
+
+ HX
+
+> h=1
+
+ψt(h, x, y <h , a h)
+
+
+
+. (H.16) Define 
+
+Xt := 1
+
+mH 
+
+> m
+
+X
+
+> j=1
+> H
+
+X
+
+> h=1
+
+ψt(zt,j,h ).
+
+Then Xt is Ft+1 -measurable and satisfies 0 ≤ Xt ≤ 4B2 almost surely. Under the on-policy protocol, each rollout has conditional marginal distribution 
+
+P xt,j = x, y t,j = y | F t
+
+ = 1
+
+I
+
+X
+
+> i∈I
+
+ρi(x)bπt(y|x)= ¯ ρ(x)bπt(y|x).
+
+Since ψt is determined before round t, this implies 
+
+E[Xt | F t] = 1
+
+H Ex∼¯ρ, y ∼bπt(·| x)
+
+ HX
+
+> h=1
+
+ψt(h, x, y <h , a h)
+
+
+
+. (H.17) 58 This identity uses only the marginal law of each rollout, not independence within the batch. Combining (H.16) and (H.17), we obtain, on E,Regret( T ) ≤ H2
+
+2
+
+> T
+
+X
+
+> t=1
+
+E[Xt | F t]. (H.18) Apply Lemma I.6 to {Xt}Tt=1 , with range bound 4 B2 and failure probability δ/ 2. With probability at least 1 − δ/ 2, 
+
+> T
+
+X
+
+> t=1
+
+E[Xt | F t] ≤ 2
+
+> T
+
+X
+
+> t=1
+
+Xt + 32 B2 log 4
+
+δ . (H.19) Taking a union bound, we conclude that, with probability at least 1 − δ,Regret( T ) ≤ H2
+
+> T
+
+X
+
+> t=1
+
+Xt + 16 H2B2 log 4
+
+δ . (H.20) Finally, by the definition of the bonus function, we have 
+
+ψt(z) = 4 min (4 β + λ)D2 
+
+> F
+
+(z; Z<t ), B 2 .
+
+Our choice of β ensures 4 β + λ ≥ B2. Therefore, 
+
+ψt(z) ≤ 4(4 β + λ) min 1, D 2 
+
+> F
+
+(z; Z<t ) . (H.21) Indeed, when D2 
+
+> F
+
+(z; Z<t ) ≤ 1, we use the first term in the minimum defining ψt. Otherwise, we use 
+
+ψt(z) ≤ 4B2 ≤ 4(4 β + λ). Summing (H.21) over the observed queries gives 
+
+> T
+
+X
+
+> t=1
+
+Xt =
+
+> T
+
+X
+
+> t=1
+
+1
+
+mH 
+
+> m
+
+X
+
+> j=1
+> H
+
+X
+
+> h=1
+
+ψt(zt,j,h )
+
+≤ 4(4 β + λ)
+
+> T
+
+X
+
+> t=1
+
+1
+
+mH 
+
+> m
+
+X
+
+> j=1
+> H
+
+X
+
+> h=1
+
+min 1, D 2 
+
+> F
+
+(zt,j,h ; Z<t )
+
+≤ 4(4 β + λ) dim T (F; λ).
+
+The last inequality follows from the definition of the generalized Eluder dimension, since the observed batches form a valid sequence of autoregressive trajectories. Substituting this inequality into (H.20) completes the proof of Theorem H.4. 
+
+H.3 Proof of Lemma H.3 
+
+Proof. Let Ft denote the history before round t. Fix f ∈ F , and define ∆t,j,h (f ) := f (zt,j,h ) − f ∗(zt,j,h ),ξt,j,h := lt,j,h − f ∗(zt,j,h ).
+
+59 The conditional-mean identity gives 
+
+E[ξt,j,h | F t, z t,j,h ] = 0 . (H.22) Moreover, conditioned on zt,j,h = z = ( h, x, u, a ), Assumption 5.3 implies 
+
+ξt,j,h ∈  log πref (a|x, u ) − B − f ∗(z), log πref (a|x, u ) + B − f ∗(z).
+
+We use the abbreviation ∆ := ∆ t,j,h (f ), ξ := ξt,j,h . Then, applying Assumption 5.3 to f ∗ and observing that it is an average over all the teachers, we have 
+
+E[ξ | F t, z t,j,h ] = 0 , |ξ| ≤ 2B. 
+
+Set η = 1 /(32 B2). We claim that 
+
+Eeη(2∆ ξ−∆2/2) | F t, z t,j,h 
+
+ ≤ 1. (H.23) In fact, if |∆| ≥ 8B, then 2∆ ξ − ∆2
+
+2 ≤ 4B|∆| − ∆2
+
+2 ≤ 0.
+
+Thus, (H.23) holds in this case. Otherwise, if |∆| < 8B, then 
+
+|2η∆ξ| ≤ 2η · 8B · 2B = 1 .
+
+Using eu ≤ 1 + u + u2 for |u| ≤ 1, we obtain 
+
+E[e2η∆ξ | F t, z t,j,h ] ≤ 1 + 2 η∆E[ξ | F t, z t,j,h ] + 4 η2∆2E[ξ2 | F t, z t,j,h ]
+
+≤ 1 + 16 η2B2∆2
+
+≤ exp(16 η2B2∆2)= exp( η∆2/2) .
+
+The second inequality uses the zero conditional mean and ξ2 ≤ 4B2. The third uses 1 + v ≤ ev, and the last equality follows from our choice of η. Multiplying both sides by e−η∆2/2 proves (H.23). To handle the dependence within a round, apply Jensen’s inequality to the exponential function: exp 
+
+ ηmH 
+
+> m
+
+X
+
+> j=1
+> H
+
+X
+
+> h=1
+
+
+
+2∆ t,j,h (f )ξt,j,h − 12 ∆t,j,h (f )2
+
+ 
+
+≤ 1
+
+mH 
+
+> m
+
+X
+
+> j=1
+> H
+
+X
+
+> h=1
+
+exp 
+
+
+
+η
+
+
+
+2∆ t,j,h (f )ξt,j,h − 12 ∆t,j,h (f )2
+
+ 
+
+.
+
+Taking conditional expectations given Ft and applying (H.23) to each summand gives 
+
+E
+
+
+
+exp 
+
+ ηmH 
+
+> m
+
+X
+
+> j=1
+> H
+
+X
+
+> h=1
+
+
+
+2∆ t,j,h (f )ξt,j,h − 12 ∆t,j,h (f )2
+
+ 
+
+Ft
+
+
+
+≤ 1. (H.24) 60 We do not condition on the entire batch or assume independence among its observations. Define M0(f ) = 1 and 
+
+Mt(f ) := exp 
+
+
+
+η
+
+> t
+
+X
+
+> s=1
+
+1
+
+mH 
+
+> m
+
+X
+
+> j=1
+> H
+
+X
+
+> h=1
+
+
+
+2∆ s,j,h (f )ξs,j,h − 12 ∆s,j,h (f )2
+
+ 
+
+.
+
+Equation (H.24) implies 
+
+E[Mt(f ) | F t] ≤ Mt−1(f ).
+
+Thus, {Mt(f )}Tt=0 is a nonnegative supermartingale. By Ville’s inequality (Lemma I.9), 
+
+P
+
+
+
+max  
+
+> 0≤t≤T
+
+Mt(f ) > |F| 
+
+δ
+
+
+
+≤ δ
+
+|F| .
+
+Taking a union bound over f ∈ F , we obtain an event E with P(E) ≥ 1 − δ on which, simultaneously for every f ∈ F and t ∈ { 0, . . . , T },
+
+> t
+
+X
+
+> s=1
+
+1
+
+mH 
+
+> m
+
+X
+
+> j=1
+> H
+
+X
+
+> h=1
+
+
+
+2∆ s,j,h (f )ξs,j,h − 12 ∆s,j,h (f )2
+
+
+
+≤ 1
+
+η log |F| 
+
+δ
+
+= 32 B2 log |F| 
+
+δ
+
+≤ β. (H.25) Expanding the difference of squared losses gives (f (zs,j,h ) − ls,j,h )2 − (f ∗(zs,j,h ) − ls,j,h )2 = ∆ s,j,h (f )2 − 2∆ s,j,h (f )ξs,j,h .
+
+Therefore, on E,
+
+Lt(f ) − Lt(f ∗) = 12
+
+> t
+
+X
+
+> s=1
+
+1
+
+mH 
+
+> m
+
+X
+
+> j=1
+> H
+
+X
+
+> h=1
+
+∆s,j,h (f )2
+
+−
+
+> t
+
+X
+
+> s=1
+
+1
+
+mH 
+
+> m
+
+X
+
+> j=1
+> H
+
+X
+
+> h=1
+
+
+
+2∆ s,j,h (f )ξs,j,h − 12 ∆s,j,h (f )2
+
+
+
+≥ 12
+
+> t
+
+X
+
+> s=1
+
+1
+
+mH 
+
+> m
+
+X
+
+> j=1
+> H
+
+X
+
+> h=1
+
+∆s,j,h (f )2 − β, (H.26) where the last inequality holds due to (H.25). It holds for any f ∈ F , so it also applies to ¯ft−1.Moreover, by (H.5) and the realizability assumption, we have 
+
+Lt−1( ¯ft−1) ≤ Lt−1(f ∗).
+
+Applying (H.26) at time t − 1 consequently gives 
+
+X
+
+> s<t
+
+1
+
+mH 
+
+> m
+
+X
+
+> j=1
+> H
+
+X
+
+> h=1
+
+ ¯ft−1(zs,j,h ) − f ∗(zs,j,h )2 ≤ 2β. (H.27) 61 Since both ¯ft−1 and f ∗ belong to F, the definition of D2 
+
+> F
+
+implies, for every z ∈ Z ,
+
+¯ft−1(z) − f ∗(z) 2
+
+≤ D2 
+
+> F
+
+(z; Z<t )
+
+
+
+λ + X
+
+> s<t
+
+1
+
+mH 
+
+> m
+
+X
+
+> j=1
+> H
+
+X
+
+> h=1
+
+ ¯ft−1(zs,j,h ) − f ∗(zs,j,h )2
+
+
+
+≤ (λ + 2 β)D2 
+
+> F
+
+(z; Z<t )
+
+≤ bt−1(z)2.
+
+Taking square roots proves the pointwise confidence bound. Finally, for z = ( h, x, u, a ), Assumption 5.3 and the definition of f ∗ give log πref (a|x, u ) − B ≤ f ∗(z) ≤ log πref (a|x, u ) + B. 
+
+On E, the confidence bound also gives ¯ft−1(z) + bt−1(z) ≥ f ∗(z).
+
+Therefore, bft−1(z) ≥ f ∗(z), which proves optimism. Moreover, 
+
+bft−1(z) − f ∗(z) = min  ¯ft−1(z) − f ∗(z) + bt−1(z), log πref (a|x, u ) + B − f ∗(z)
+
+≤ min {2bt−1(z), 2B}.
+
+This completes the proof of Lemma H.3. 
+
+# I Auxiliary Lemmas 
+
+I.1 Uniform Bernstein Concentration in Bakhtiari et al. (2026) 
+
+First, we list several key results from Bakhtiari et al. (2026) that are used in our analysis. To start with, we present several definitions. 
+
+Definition I.1 (CGF-like, Definition 4 Bakhtiari et al. 2026) . A twice differentiable function 
+
+ψ : [0 , λ max ) → R+ is called CGF-like if it is convex, non-negative, and satisfies ψ(0) = ψ′(0) = 0. 
+
+Definition I.2 (sub-ψ process, Definition 5 Bakhtiari et al. 2026) . Let {F t}t∈[T ] be a filtration, 
+
+ψ : [0 , λ max ) → R+ be a CGF-like function. Let {St}t∈[T ] be a real-valued stochastic process adapted to {F t}, {Vt}t∈[T ] be another process adapted to {F t} taking values in R+. We say that 
+
+{(St, V t)}t∈[T ] is a sub-ψ process if for all t ∈ [T ] and λ ∈ [0 , λ max ), there exists an F-adapted supermartingale {Lt(λ)}t∈[T ] such that 
+
+Mt(λ) := exp 
+
+
+
+λS t −
+
+> t
+
+X
+
+> s=1
+
+ψ(λ)Vs
+
+
+
+≤ Lt(λ), a.s. 
+
+Definition I.3 (Definition 6 Bakhtiari et al. 2026) . A random process {(St, V t)}t∈[T ] is sub-gamma with parameter v > 0 if it is sub-ψ with the CGF-like function ψ(λ) = λ2 
+
+> 2(1 −vλ )
+
+for some v > 0. 62 Lemma I.4 (Proposition 11 Bakhtiari et al. 2026) . Let {F t}t∈[T ] be a filtration and let ( Xt)t∈[T ]
+
+be a real-valued stochastic process adapted to F. Assume that there exists a constant b > 0 such that for all t ∈ [T ], 
+
+Xt ≤ E[Xt|F t−1] + b a.s. 
+
+Then, for 
+
+St =
+
+> t
+
+X
+
+> s=1
+
+(Xs − E[Xs|F s−1]) , Vt =
+
+> t
+
+X
+
+> s=1
+
+Var( Xs|F s−1),
+
+the process {(St, V t)}t∈[T ] is sub-gamma with parameter b/ 3. 
+
+Lemma I.5 (Theorem 10 Bakhtiari et al. 2026) . For any sub-gamma process {(St, V t)}t∈[T ] with parameter v > 0, and any ρ > 0, δ ∈ (0 , 1), with probability at least 1 − δ, we have for all t ∈ [T ], 
+
+St ≤ 4pVt log( Ht/δ ) + 11( v + ρ) log( Ht/δ ),
+
+where Ht = log(1 + Vt/ρ 2) + e.
+
+I.2 Other Auxiliary Lemmas 
+
+Lemma I.6 (Lemma B.3, Foster et al. 2024) . Let {Xt}t∈[T ] be a sequence of non-negative random variables adapted to a filtration {F t}t∈[T ]. Assume that 0 ≤ Xt ≤ R almost surely for all t ∈ [T ]and some constant R > 0. Then, for any δ ∈ (0 , 1) and all T ′ ≤ T , with probability at least 1 − δ,we have  
+
+> T′
+
+X
+
+> t=1
+
+E[Xt|F t−1] ≤ 2 
+
+> T′
+
+X
+
+> t=1
+
+Xt + 8 R log(2 /δ ), 
+
+> T′
+
+X
+
+> t=1
+
+Xt ≤ 32 
+
+> T′
+
+X
+
+> t=1
+
+E[Xt|F t−1] + 4 R log(2 /δ ).
+
+Lemma I.7. Let μf (·) ∝ exp( f (·)), μg(·) ∝ exp( g(·)) be two probability distributions. Then, KL( μf ∥μg) = Eμf [f − g] + log Eμf [exp( g − f )] .
+
+Proof. Let Zf = P 
+
+> x
+
+exp( f (x)), Zg = P 
+
+> x
+
+exp( g(x)) be the normalization constants. Then, 
+
+μf (x) = exp( f (x)) 
+
+Zf
+
+, μ g(x) = exp( g(x)) 
+
+Zg
+
+.
+
+The KL-divergence is equal to KL( μf ∥μg) = X
+
+> x
+
+μf (x) log μf (x)
+
+μg(x)= X
+
+> x
+
+μf (x)f (x) − g(x) + log( Zg/Z f )
+
+63 = Eμf [f − g] + log( Zg/Z f ).
+
+Moreover, 
+
+Zg/Z f =
+
+P 
+
+> x
+
+exp( g(x)) 
+
+P 
+
+> x
+
+exp( f (x)) = X
+
+> x
+
+exp( f (x)) 
+
+P 
+
+> y
+
+exp( f (y)) · exp( g(x) − f (x)) = Eμf [exp( g − f )] .
+
+Thus, we complete the proof. 
+
+Lemma I.8 (Stirling’s inequality) . Let Γ( ·) be the gamma function. For any s > 0, the following inequality holds 
+
+
+
+s − 12
+
+
+
+log s − s + 12 log(2 π) ≤ log Γ( s)
+
+≤
+
+
+
+s − 12
+
+
+
+log s − s + 12 log(2 π) + 112 s .
+
+Lemma I.9 (Ville’s inequality) . Let {Xt}Tt=0 be a non-negative supermartingale. Then, for any 
+
+v > 0, 
+
+P
+
+h
+
+max  
+
+> 0≤t≤T
+
+Xt ≥ v
+
+i
+
+≤ E[X0]
+
+v .
+
+Proof. Please refer to Durrett (2019). 
+
+# References 
+
+Agarwal, A. , Jin, Y. and Zhang, T. (2023). Vo q l: Towards optimal regret in model-free rl with nonlinear function approximation. In The Thirty Sixth Annual Conference on Learning Theory .PMLR. 
+
+Agarwal, R. , Vieillard, N. , Zhou, Y. , Stanczyk, P. , Ramos Garea, S. , Geist, M. and 
+
+Bachem, O. (2024). On-policy distillation of language models: Learning from self-generated mistakes. In International Conference on Learning Representations , vol. 2024. 
+
+Aminian, G. , Asadi, A. R. , Shenfeld, I. and Mroueh, Y. (2026). Kl-regularized rlhf with multiple reference models: Exact solutions and sample complexity. Advances in Neural Information Processing Systems 38 101117–101151. 
+
+Ayoub, A. , Jia, Z. , Szepesvari, C. , Wang, M. and Yang, L. (2020). Model-based reinforcement learning with value-targeted regression. In International Conference on Machine Learning . PMLR. 
+
+Bakhtiari, A. , Ayoub, A. , Robertson, S. , Janz, D. and Szepesv´ ari, C. (2026). Eluder dimension: localise it! arXiv preprint arXiv:2601.09825 .
+
+Chen, H. , Razin, N. , Narasimhan, K. and Chen, D. (2025). Retaining by doing: The role of on-policy data in mitigating forgetting. arXiv preprint arXiv:2510.18874 .64 Di, Q. , Zhao, H. , He, J. and Gu, Q. (2024). Pessimistic nonlinear least-squares value iteration for offline reinforcement learning. In International Conference on Learning Representations , vol. 2024. 
+
+Durrett, R. (2019). Probability: theory and examples , vol. 49. Cambridge university press. 
+
+Foster, D. J. , Block, A. and Misra, D. (2024). Is behavior cloning all you need? understanding horizon in imitation learning. Advances in Neural Information Processing Systems 37 120602– 120666. 
+
+Fu, Y. , Huang, H. , Jiang, K. , Liu, J. , Jiang, Z. , Zhu, Y. and Zhao, D. (2026). Revisiting on-policy distillation: Empirical failure modes and simple fixes. arXiv preprint arXiv:2603.25562 
+
+.
+
+Gu, Y. , Dong, L. , Wei, F. and Huang, M. (2024). Minillm: Knowledge distillation of large language models. In International Conference on Learning Representations , vol. 2024. 
+
+Hong, H. , Wang, Z. , Gu, Q. and Wang, H. (2026). Online kl-regularized reinforcement learning with function approximation under misspecification. arXiv preprint arXiv:2606.06053 .
+
+Hou, W. , Peng, S. , Wang, W. , Ruan, Z. , Zhang, Y. , Zhou, Z. , Gao, M. , Chen, Y. , Wang, K. , Yang, H. et al. (2026). Uni-opd: Unifying on-policy distillation with a dual-perspective recipe. arXiv preprint arXiv:2605.03677 .
+
+H¨ ubotter, J. , L¨ ubeck, F. , Behric, L. , Baumann, A. , Bagatella, M. , Marta, D. , Hakimi, I. , Shenfeld, I. , Buening, T. K. , Guestrin, C. et al. (2026). Reinforcement learning via self-distillation. arXiv preprint arXiv:2601.20802 .
+
+Jang, I. , Yeom, J. , Yeo, J. , Lim, H. and Kim, T. (2026). Stable on-policy distillation through adaptive target reformulation. In Findings of the Association for Computational Linguistics: ACL 2026 .
+
+Ji, K. , Di, Q. , Zhao, H. , Zhao, Q. and Gu, Q. (2026a). On the optimal sample complexity of offline multi-armed bandits with kl regularization. arXiv preprint arXiv:2605.02141 .
+
+Ji, K. , Zhao, Q. , Zhao, H. , Di, Q. and Gu, Q. (2026b). Near-optimal regret for kl-regularized multi-armed bandits. arXiv preprint arXiv:2603.02155 .
+
+Jin, H. , Luan, S. , Ni, T. , Lyu, S. , Rabusseau, G. , Rabbany, R. , Precup, D. and Hamdaqa, M. (2025). Rl fine-tuning heals ood forgetting in sft. arXiv preprint arXiv:2509.12235 .
+
+Jin, W. , Min, T. , Yang, Y. , Wei, D. , Zhou, Y. , Kadhe, S. R. , Baracaldo, N. and Lee, K. 
+
+(2026). Entropy-aware on-policy distillation of language models. arXiv preprint arXiv:2603.07079 
+
+.
+
+Ko, J. , Chen, T. , Kim, S. , Ding, T. , Liang, L. , Zharkov, I. and Yun, S.-Y. (2025). Distillm-2: A contrastive approach boosts the distillation of llms. arXiv preprint arXiv:2503.07067 .
+
+Ko, J. , Kim, S. , Chen, T. and Yun, S.-Y. (2024). Distillm: Towards streamlined distillation for large language models. arXiv preprint arXiv:2402.03898 .65 Krichevsky, R. and Trofimov, V. (1981). The performance of universal encoding. IEEE Transactions on Information Theory 27 199–207. 
+
+Li, Y. , Zuo, Y. , He, B. , Zhang, J. , Xiao, C. , Qian, C. , Yu, T. , Gao, H.-a. , Yang, W. , Liu, Z. et al. (2026). Rethinking on-policy distillation of large language models: Phenomenology, mechanism, and recipe. arXiv preprint arXiv:2604.13016 .
+
+Liu, Y. , Zhang, S. , Zhang, Y. and Gu, Q. (2026). Self-distilled policy gradient. arXiv preprint arXiv:2606.04036 .
+
+Lu, K. and Lab, T. M. (2025). On-policy distillation. Thinking Machines Lab: Connectionism 
+
+Https://thinkingmachines.ai/blog/on-policy-distillation. 
+
+Luo, F. , Chuang, Y.-N. , Wang, G. , Xu, Z. , Han, X. , Zhang, T. and Braverman, V. (2026). Demystifying opd: Length inflation and stabilization strategies for large language models. arXiv preprint arXiv:2604.08527 .
+
+Ma, W. , Wei, J. , Zhao, L. , Zhang, H. , Xiao, B. , Li, L. , Yang, Q. , Gao, B. , Wang, Y. , Li, R. et al. (2026a). Mopd: Multi-teacher on-policy distillation for capability integration in llm post-training. arXiv preprint arXiv:2606.30406 .
+
+Ma, Y. , Zhu, Z. , Jiang, M. and Xiao, C. (2026b). One student, many teachers: Multi-task on-policy distillation via soft-prompt privileged context. arXiv preprint arXiv:2607.18293 .
+
+Nayak, A. , Yang, T. , Yagan, O. , Joshi, G. and Chi, Y. (2025). Achieving logarithmic regret in kl-regularized zero-sum markov games. arXiv preprint arXiv:2510.13060 .
+
+Oh, M. , Song, S. , Choi, G. , Choi, Y. and Jo, Y. (2026). Kl for a kl: On-policy distillation with control variate baseline. arXiv preprint arXiv:2605.07865 .
+
+Rajaraman, N. , Han, Y. , Yang, L. , Liu, J. , Jiao, J. and Ramchandran, K. (2021). On the value of interaction and function approximation in imitation learning. Advances in Neural Information Processing Systems 34 1325–1336. 
+
+Rajaraman, N. , Yang, L. , Jiao, J. and Ramchandran, K. (2020). Toward the fundamental limits of imitation learning. Advances in Neural Information Processing Systems 33 2914–2924. 
+
+Ross, S. and Bagnell, D. (2010). Efficient reductions for imitation learning. In Proceedings of the thirteenth international conference on artificial intelligence and statistics . JMLR Workshop and Conference Proceedings. 
+
+Ross, S. , Gordon, G. and Bagnell, D. (2011). A reduction of imitation learning and structured prediction to no-regret online learning. In Proceedings of the fourteenth international conference on artificial intelligence and statistics . JMLR Workshop and Conference Proceedings. 
+
+Russo, D. and Van Roy, B. (2013). Eluder dimension and the sample complexity of optimistic exploration. Advances in Neural Information Processing Systems 26 .
+
+Shenfeld, I. , Damani, M. , H¨ ubotter, J. and Agrawal, P. (2026a). Self-distillation enables continual learning. arXiv preprint arXiv:2601.19897 .66 Shenfeld, I. , Pari, J. and Agrawal, P. (2026b). Rl’s razor: Why online reinforcement learning forgets less. In International Conference on Learning Representations , vol. 2026. 
+
+Song, M. and Zheng, M. (2026). A survey of on-policy distillation for large language models. 
+
+arXiv preprint arXiv:2604.00626 .
+
+Sriraman, V. , Liu, P. , Hsu, D. and Block, A. (2026). Behavior cloning is not all you need: The optimality of on-policy distillation for noisy expert feedback. arXiv preprint arXiv:2606.30923 .
+
+Syed, U. and Schapire, R. (2010). A reduction from apprenticeship learning to classification. 
+
+Advances in neural information processing systems 23 .
+
+Viano, L. , Moulin, A. , Huang, A. , Cevher, V. , Amortila, P. and Foster, D. J. (2026). When does on-policy interaction help? representational tradeoffs in value-based imitation learning. 
+
+arXiv preprint arXiv:2607.29617 .
+
+Wang, R. , Salakhutdinov, R. R. and Yang, L. (2020). Reinforcement learning with general value function approximation: Provably efficient approach via bounded eluder dimension. Advances in Neural Information Processing Systems 33 6123–6135. 
+
+Wang, R. , Wang, H. , Chen, Y. , Xue, B. , Fang, T. , Yu, W. and Wong, K.-F. (2026). Demys-tifying on-policy distillation: Roles, pathologies, and regulations. arXiv preprint arXiv:2607.13399 
+
+.
+
+Wu, D. , Shi, C. , Yang, J. and Shen, C. (2026). Greedy sampling is provably efficient for rlhf. 
+
+Advances in Neural Information Processing Systems 38 108198–108232. 
+
+Wu, Y. , Thareja, R. , Vepakomma, P. and Orabona, F. (2025). Offline and online kl-regularized rlhf under differential privacy. arXiv preprint arXiv:2510.13512 .
+
+Xiao, B. , Xia, B. , Yang, B. , Gao, B. , Shen, B. , Zhang, C. , He, C. , Lou, C. , Luo, F. , Wang, G. et al. (2026). Mimo-v2-flash technical report. arXiv preprint arXiv:2601.02780 .
+
+Xie, Z. , Zhang, L. L. , Xie, Z. and Yang, M. (2026). Trust region policy distillation. arXiv preprint arXiv:2607.04751 .
+
+Xin, H. , Zhao, A. , Sun, Y. , Li, J. , Shen, X. and Xiong, H. (2026). Escaping the kl agreement trap in on-policy distillation. arXiv preprint arXiv:2606.09471 .
+
+Xing, X. , Wang, H. , Gao, B. , Li, Z. and Tang, Y. (2026). Trust region on-policy distillation. 
+
+arXiv preprint arXiv:2606.01249 .
+
+Xu, W. , Han, R. , Wang, Z. , Le, L. , Madeka, D. , Li, L. , Wang, W. , Agarwal, R. , Lee, C.-Y. and Pfister, T. (2025). Speculative knowledge distillation: Bridging the teacher-student gap through interleaved sampling. In International Conference on Learning Representations , vol. 2025. 
+
+Yang, A. , Li, A. , Yang, B. , Zhang, B. , Hui, B. , Zheng, B. , Yu, B. , Gao, C. , Huang, C. ,
+
+Lv, C. et al. (2025). Qwen3 technical report. arXiv preprint arXiv:2505.09388 .67 Ye, T. , Dong, L. , Wu, X. , Huang, S. and Wei, F. (2026). On-policy context distillation for language models. arXiv preprint arXiv:2602.12275 .
+
+Zeng, A. , Lv, X. , Hou, Z. , Du, Z. , Zheng, Q. , Chen, B. , Yin, D. , Ge, C. , Huang, C. , Xie, C. et al. (2026). Glm-5: from vibe coding to agentic engineering. arXiv preprint arXiv:2602.15763 
+
+.
+
+Zhang, D. , Yang, Z. , Janghorbani, S. , Han, J. , Ressler II, A. , Qian, Q. , Lyng, G. D. ,
+
+Batra, S. S. and Tillman, R. E. (2026). Fast and effective on-policy distillation from reasoning prefixes. In Findings of the Association for Computational Linguistics: ACL 2026 .
+
+Zhao, A. , Tong, J. , Fan, Y. , Nie, P. , Li, W. and Shen, X. (2026a). Poweropd: Stabilizing on-policy distillation with bounded power transformation. arXiv preprint arXiv:2606.17199 .
+
+Zhao, H. , He, J. and Gu, Q. (2024). A nearly optimal and low-switching algorithm for reinforcement learning with general function approximation. Advances in Neural Information Processing Systems 
+
+37 94684–94735. 
+
+Zhao, H. , Ye, C. , Gu, Q. and Zhang, T. (2026b). Sharp analysis for kl-regularized contextual bandits and rlhf. Advances in Neural Information Processing Systems 38 107964–108002. 
+
+Zhao, H. , Ye, C. , Xiong, W. , Gu, Q. and Zhang, T. (2025). Logarithmic regret for online kl-regularized reinforcement learning. arXiv preprint arXiv:2502.07460 .
+
+Zhao, Q. , Ji, K. , Zhao, H. and Gu, Q. (2026c). Fast rates for offline contextual bandits with forward-kl regularization under single-policy concentrability. arXiv preprint arXiv:2605.09214 .
+
+Zhao, Q. , Ji, K. , Zhao, H. , Zhang, T. and Gu, Q. (2026d). Towards a sharp analysis of offline policy learning for f -divergence-regularized contextual bandits. In International Conference on Learning Representations , vol. 2026. 
+
+Zhao, S. , Xie, Z. , Liu, M. , Huang, J. , Pang, G. , Chen, F. and Grover, A. (2026e). Self-distilled reasoner: On-policy self-distillation for large language models. arXiv preprint arXiv:2601.18734 .
+
+Zheng, B. , Ma, X. , Liang, Y. , Ruan, J. , Fu, X. , Lin, K. , Zhu, B. , Zeng, K. and Cai, X. 
+
+(2026). Scope: Signal-calibrated on-policy distillation enhancement with dual-path adaptive weighting. arXiv preprint arXiv:2604.10688 .
+
+Zhong, Z. , Yan, H. , Li, J. , He, J. , Zhang, T. and Li, H. (2026). Vla-opd: Bridging offline sft and online rl for vision-language-action models via on-policy distillation. arXiv preprint arXiv:2603.26666 .
+
+Zhu, W. , Xie, R. , Wang, R. and Liu, P. (2026). Hybrid policy distillation for llms. arXiv preprint arXiv:2604.20244 .
+
+Ziheng, Z. , Li, J. , Tang, H. , Wu, Y. N. and Terzopoulos, D. (2026). Less is more: Early stopping rollout for on-policy distillation. arXiv preprint arXiv:2605.27028 .68

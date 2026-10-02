@@ -1,0 +1,1676 @@
+Title: REVO: Rollout-Efficient Off-Policy Distillation via Variance-Guided Reuse
+
+URL Source: https://arxiv.org/pdf/2609.37500v1
+
+Published Time: Wed, 30 Sep 2026 01:50:27 GMT
+
+Number of Pages: 26
+
+Markdown Content:
+# REVO: Rollout-Efficient Off-Policy Distillation via Variance-Guided Reuse 
+
+Yuxiao Yang 1, Shangzhe Li 1, Tianrun Yu 2, Kaixiang Zhao 2, Taylor W. Killian 2, Weitong Zhang 11University of North Carolina at Chapel Hill , 2Brigham Young University 
+
+On-policy distillation (OPD) trains language models using dense token-level teacher supervision on student-generated trajectories. However, its reliance on frequently refreshed student rollouts often incurs substantial generation cost. We introduce REVO, an off-policy distillation framework that improves rollout efficiency by reusing each student rollout for multi-step learner updates. REVO addresses prefix-level and current-token policy mismatch through stabilized prefix weighting and one-step resampling from the current student, which enables repeated updates without regenerating full trajectories. To prioritize informative token positions within reused rollouts, REVO uses the variance of the student-teacher log-probability ratio to quantify the remaining token-level learning signal and guide repeated optimization. Across multiple student–teacher scales, REVO with only 50 rollout iterations matches or exceeds OPD baselines trained for 200 iterations on both in-domain and cross-domain reasoning benchmarks. 
+
+Project Page: https://github.com/UNCSciML/REVO 
+
+# 1 Introduction 
+
+Learning from self-generated rollouts has emerged as a promising approach to language model post-training. Among these approaches, on-policy distillation (OPD) (Agarwal et al., 2024; Lu and Lab, 2025; Gu et al., 2024; Ko et al., 2025) leverages dense token-level supervision by querying a teacher model on student-generated prefixes. In particular, OPD aligns the student’s next-token distribution with the teacher’s at these prefixes by minimizing the token-level reverse-KL objective Ea∼Pθ (·| ct)[log Pθ (a|ct)  
+
+> PT(a|ct)
+
+], where ct denotes a student-generated prefix and Pθ and PT denote the student and teacher policies, respectively (Lu and Lab, 2025; Li et al., 2026b). Despite this favorable optimization structure, OPD remains expensive because of the cost of collecting student generations. Although it often reaches strong performance within a few hundred iterations, each iteration requires a fresh batch of student rollouts, so even a relatively short training run can involve thousands of full autoregressive generations. Prior work has shown that rollout generation can dominate the wall-clock cost of OPD training (Ziheng et al., 2026). Reusing trajectories through off-policy optimization therefore provides a natural way to amortize this cost by performing multiple learner updates on existing student-generated contexts. However, effective off-policy distillation introduces challenges in both training stability and the quality of the learning signal extracted from reused data, as detailed below. First, as the student evolves during training, the distributions of stored prefixes and their sampled tokens can diverge from those induced by the current policy, biasing naive data reuse. We distinguish two sources of this distribution shift: prefix mismatch and current-token mismatch . Correcting prefix mismatch with standard importance sampling requires multiplying token likelihood ratios along the prefix, which can produce highly variable weights and unstable updates for long trajectories. Current-token mismatch arises from retaining tokens sampled by an earlier student (Zhang et al., 2026; Kang et al., 2026). Unlike the prefix, these tokens can be resampled from the current student at the stored prefix without regenerating the trajectory. Second, rollout reuse makes the strength of the remaining distillation signal particularly important. As observed by Jin et al. (2026) and Li et al. (2026a), the strength of this signal varies across token positions. Repeatedly revisiting the same prefixes can therefore devote additional computation to positions with little remaining learning signal. Effective off-policy updates should prioritize informative token positions while limiting the influence of sampling noise. 1arXiv:2609.37500v1 [cs.LG] 28 Sep 2026 1 One-step resampling Reuse for N updates 
+
+Rollout policy Po
+
+x ⋯ yt−1 yt ⋯
+
+Rollout batch 
+
+ct 
+
+> Student
+
+Pθ 
+
+> Teacher
+
+PT    
+
+> A= log Pθ− log PT
+
+at(1) At(1) 
+
+at(2) At(2) 
+
+at(K) At(K)   
+
+> ⋮⋮
+> 3
+
+Variance-guided priorities   
+
+> RKL variance Êtŵt
+> Êtδ
+
+wt
+
+Prefix correction 
+
+G<t     
+
+> Weighted RKL gradient
+> 𝐺 !" 𝑤 "
+> 𝐾 $
+> #$% &
+> 𝐴 "
+> (k) 𝛻 'log 𝑃 '𝑎 "
+> (k) | 𝑐 "
+> 2
+> Êt
+> Êt= Var
+> k[At(k) ]
+> AtRenorm
+
+Figure 1 Overview of REVO. One-step resampling refreshes token-level teacher supervision at stored prefixes, while stabilized prefix weights and variance-guided token priorities support repeated updates. 
+
+Figure 2 Rollout efficiency of REVO. For Qwen3-1.7B Base, REVO at 50 training steps surpasses stan-dard OPD at 200 steps, measured by mean Avg@16 over AIME24, AIME25, and AMC23. 
+
+Motivated by these challenges, we propose REVO, a rollout-efficient off-policy distillation framework that performs multiple learner updates on each student roll-out under dense token-level teacher supervision, as out-lined in Figure 1. REVO combines two complementary components: stabilizing updates on historical student rollouts and adaptively prioritizing their remaining dis-tillation signal. Specifically, REVO introduces one-step resampling to draw fresh tokens from the current stu-dent at stored prefixes, removing the need for conditional current-token importance weighting. It further stabi-lizes off-policy updates with a geometrically normalized, capped prefix weight (Zheng et al., 2025). In parallel, REVO leverages the same resampled tokens for variance-guided token prioritization . We estimate the variance of the student and teacher log probability ratio and use it to assign greater weight to positions with stronger remaining learning signal and more reliable finite sample gradient estimates. Under a local realizability condition, we show that this variance equals the inner product between the ordinary and natural gradients of the local reverse-KL objective, connecting it to first-order natural-gradient progress. Empirically, this statistic is strongly associated with the signal-to-noise ratio of finite-sample logit-gradient estimates. Together, these components enable current-policy token supervision at reused off-policy prefixes and couple the refreshed supervision with adaptive prioritization, without additional model evaluations for variance estimation. Our contributions are threefold: 
+
+• We develop a rollout-reuse framework that separates prefix mismatch from current-token mismatch. Specifi-cally, we propose one-step resampling, which draws fresh tokens to mitigate the distributional shift, while stabilized prefix weighting supports repeated updates on stored trajectories. 
+
+• We introduce bounded token reweighting based on the local relative-entropy variance, which describes the variance of the log-probability ratio between the student and teacher models. A Fisher-geometric analysis connects this statistic to local natural-gradient progress, and finite-sample diagnostics support its use for prioritizing informative token-level updates during rollout reuse. 
+
+• Empirically, REVO trained with only 50 rollout iterations matches or exceeds OPD baselines trained for 200 iterations across three student–teacher scales and a range of in-domain and cross-domain reasoning benchmarks; ablations further isolate the contribution of each component. 22 Related Work 
+
+## 2.1 Knowledge Distillation and On-Policy Distillation 
+
+Classical knowledge distillation trains a student on fixed data using supervision from a stronger teacher (Hinton et al., 2015; Agarwal et al., 2024). On-policy distillation instead queries the teacher on student-generated prefixes, providing dense supervision on states visited by the current student policy (Agarwal et al., 2024; Team et al., 2026; DeepSeek-AI, 2026; Yang et al., 2025). Recent OPD methods commonly optimize token-level reverse KL (Lu and Lab, 2025; Li et al., 2026b). MiniLLM (Gu et al., 2024) studies the corresponding sequence-level objective, while other methods use forward KL (Zhao et al., 2026; Jin et al., 2026). AsyncOPD (Kang et al., 2026) studies policy staleness in asynchronous rollout and learner pipelines, with a focus on systems throughput. Recently, using the model itself as a teacher with privileged information has also emerged as a promising direction (Zhao et al., 2026; Yang et al., 2026a,b). However, performing multiple off-policy learner updates on each rollout batch has received less attention in OPD. 
+
+## 2.2 Off-Policy Optimization in RLVR 
+
+LLM reinforcement learning is predominantly on-policy, with each round of optimization using fresh rollouts from the current or a recent policy. This keeps the training distribution well aligned but makes generation a major cost. Recent work shows that stale trajectories can be reused when the resulting distribution shift is properly controlled (Arnal et al., 2026; Zheng et al., 2026). Token-level importance ratios correct only the sampled action at a fixed prefix, while exact trajectory-level ratios account for the full distribution shift but can suffer from rapidly growing variance with sequence length. This has motivated stabilized alternatives such as sequence-level geometric ratios (Zheng et al., 2025) and cumulative token importance sampling (Zhang et al., 2026). These methods are developed for RLVR, where supervision is tied to the reward of the stored trajectory and optimization remains anchored to its sampled actions. Distillation offers additional flexibility because the teacher can score arbitrary actions at a stored prefix. We exploit this property by resampling the current token from the current student and retaining only a prefix-level correction. 
+
+## 2.3 Learning-Signal Prioritization 
+
+A broad line of reinforcement learning research allocates training effort according to the estimated learning value of individual samples or tasks. Prioritized experience replay uses temporal-difference error as a proxy for learning progress (Schaul et al., 2016; Lahire et al., 2022), while curriculum and level replay methods prioritize tasks based on estimated learning potential or progress (Jiang et al., 2021; Portelas et al., 2020). Related ideas have recently appeared in RLVR for language models. DAPO (Yu et al., 2025) filters prompt groups with zero reward variance, while Dr. GRPO (Liu et al., 2025) removes within-group reward standard deviation normalization. LILO (Foster et al., 2025) more explicitly characterizes within-prompt reward variance as learnability . For binary rewards, this quantity reduces to p(1 − p) and becomes small for prompts that are consistently solved or consistently failed. We consider learning-signal prioritization at the token level under reverse-KL distillation. The remaining distillation signal can vary substantially across token positions, especially when stored prefixes are reused for multiple learner updates. We use relative-entropy variance, which we refer to as RKL variance , to quantify this token-level signal and prioritize positions during rollout reuse. We develop its optimization interpretation in Section 4.2. 
+
+# 3 Preliminaries 
+
+On-policy distillation. Let ct = ( x, y <t ) denote the context at position t, and let Pθ(· | ct) and PT (· | ct)denote the student and teacher next-token distributions. Token-level on-policy distillation minimizes the reverse KL divergence LOPD (ct) = DKL (Pθ (· | ct)∥PT (· | ct)). Define the token-level reverse-KL signal as 
+
+Aθ (ct, a ) = log Pθ (a|ct)  
+
+> PT(a|ct)
+
+. When the context is clear, we abbreviate At(a) := Aθ (ct, a ). The local gradient is 
+
+∇θ LOPD (ct) = Ea∼Pθ (·| ct) [Aθ (ct, a )∇θ log Pθ (a | ct)] ,
+
+3where the additional score-function term vanishes in expectation. Computing this expectation over the full vocabulary is expensive for large language models. Sampled-token OPD (Lu and Lab, 2025) instead uses the rollout token at = yt ∼ Pθ(· | ct) at each visited context, yielding an unbiased gradient estimator. We use this formulation throughout our experiments. Top-k approximations (Li et al., 2026b) restrict the expectation to high-probability tokens and introduce truncation bias. In our experiments, Top-k OPD does not outperform sampled-token OPD (Figure 2), consistent with recent empirical findings (Team et al., 2026). 
+
+Off-policy reverse-KL distillation. Under rollout reuse, trajectories are generated by a rollout policy 
+
+Po, while optimization is performed under the current student Pθ. Let do(ct) and dθ(ct) denote the prefix distributions induced by the two policies. Let gon  
+
+> t
+
+denote the expected sampled-token OPD gradient under 
+
+ct ∼ dθ and at ∼ Pθ (· | ct). To express this gradient using trajectories generated by Po, define the cumulative importance ratio 
+
+Wt = dθ (ct)Pθ (at | ct)
+
+do(ct)Po(at | ct) = Y
+
+> j≤t
+
+Pθ (aj | cj )
+
+Po(aj | cj ) , (1) where the prompt distribution is shared by the two policies. A change of measure gives 
+
+gon  
+
+> t
+
+= Ect∼do, a t∼Po(·| ct) [WtAθ (ct, a t)∇θ log Pθ (at | ct)] .
+
+The exact correction Wt multiplies likelihood ratios along the trajectory, which can produce highly variable weights for long sequences. We address this instability in the next section. 
+
+# 4 Method 
+
+## 4.1 Stabilizing Off-Policy RKL Distillation 
+
+Directly applying the cumulative importance ratio in Equation (1) is poorly suited to long LLM trajectories. Writing Wt = W<t rt, where W<t = dθ(ct)/d o(ct) corrects the stored prefix distribution and rt = Pθ(at |
+
+ct)/P o(at | ct) corrects the current-token distribution, reveals two distinct sources of mismatch. We treat these two terms differently. The current token can be resampled from the latest student policy at a stored prefix, while refreshing the prefix itself would require generating a new trajectory. We therefore remove the current-token ratio through resampling and replace the cumulative prefix ratio with a stabilized surrogate. 
+
+One-step resampling from the current policy. Conditioned on a stored prefix ct, the current-token importance ratio can be removed exactly by a change of measure: 
+
+Eat∼Po(·| ct) [rtAt(at)∇θ log Pθ (at | ct)] = Eat∼Pθ (·| ct) [At(at)∇θ log Pθ (at | ct)] . (2) We therefore draw a(1)  
+
+> t
+
+, . . . , a (K)
+
+> t
+> i.i.d.
+
+∼ Pθ(· | ct) at every learner update and use their average to obtain an unbiased estimate of the conditional reverse-KL gradient. We write A(k) 
+
+> t
+
+:= At(a(k) 
+
+> t
+
+) for the reverse-KL signal of the k-th candidate. This requires no additional autoregressive rollout because the stored prefix remains unchanged. The teacher can score all resampled tokens at the same prefix. 
+
+Stabilizing the prefix correction. The prefix mismatch cannot be removed in the same way, since sampling a new prefix from the current student would require regenerating the preceding trajectory. The exact prefix ratio accumulates token likelihood ratios along the stored prefix and can become highly variable for long contexts. We therefore replace it with a geometrically normalized correction, motivated by the stabilization used in Zheng et al. (2025): 
+
+G<t = min 
+
+n
+
+exp 
+
+ 1
+
+> t−1
+
+P 
+
+> i<t
+
+log Pθ (ai|ci)
+
+> Po(ai|ci)
+
+
+
+, C 
+
+o
+
+, (3) with G<1 = 1, where C bounds the correction to keep updates stable. Below the cap, G<t = W 1/(t−1)  
+
+> <t
+
+reflects the average policy shift along the stored prefix instead of growing multiplicatively with prefix length, giving a 4stabilized surrogate rather than an exact importance correction. Unlike GSPO, which constructs a ratio over the full generated response, our weight is prefix-dependent and only uses the policy mismatch accumulated before position t.
+
+Stabilized training objective. Combining one-step resampling with the stabilized prefix correction gives the practical surrogate used by REVO: 
+
+bLK,G t = 1
+
+> K
+
+PKk=1 sg 
+
+h
+
+G<t A(k)
+
+> t
+
+i
+
+log Pθ (a(k) 
+
+> t
+
+| ct), (4) where a(k) 
+
+> t
+
+∼ Pθ (· | ct). The correction weight and reverse-KL signal are treated as constants in the stop-gradient surrogate. This objective removes direct importance weighting of the current token while retaining a stable correction for the mismatch of the reused prefix. 
+
+## 4.2 Variance-Guided Token Prioritization 
+
+In Section 4.1, the current token is resampled at every learner update, but the stored prefixes remain fixed for all N updates. Refreshing them would require new rollouts, which is the cost reuse is intended to avoid. The prefix weight G<t stabilizes updates under policy shift, but it does not indicate how much the student can still learn from the teacher at each prefix. A prefix can be fully on-policy yet provide little learning signal if the student already matches the teacher there. Given the uneven learning signals across token positions (Jin et al., 2026; Li et al., 2026a), repeatedly revisiting the same prefixes can spend additional computation on positions with little left to contribute. We therefore complement off-policy stabilization with adaptive prioritization of the remaining token-level learning signal. 
+
+RKL variance and the usefulness of reused supervision. For a stored prefix ct, let pt(a) = Pθ(a | ct)and qt(a) = PT (a | ct), so that At(a) = log pt(a) 
+
+> qt(a)
+
+. We measure its variation across candidate next tokens using the local relative-entropy variance , Et = Var a∼pt [At(a)], which we call the RKL variance . This statistic depends on both the teacher and the current student and can be estimated from the same tokens used for one-step resampling.    
+
+> Figure 3High- versus low-RKL-variance up-dates under REVO for Qwen3-1.7B Base →4B (δ= 0 .005). Accuracy is mean Avg@16 on AIME24, AIME25, and AMC23.
+
+We first examine whether RKL variance distinguishes token positions that contribute useful supervision during rollout reuse. Figure 3 compares training with updates restricted to positions above or below a fixed RKL-variance threshold. The high-variance subset yields sustained performance gains, whereas the low-variance subset provides little improvement. This separation supports using RKL variance to prioritize positions during rollout reuse. Our practical rule retains both groups with positive weights. We next examine the reliability of the corresponding gradient estimates. 
+
+RKL variance as a proxy for gradient reliability. 
+
+Let zt = zθ(ct) denote the student logits at ct, let ut =
+
+∇zt DKL (pt∥qt) be the exact logit gradient, and let but
+
+be its unbiased K-sample estimate from one-step resam-pling. We define the gradient signal-to-noise ratio (SNR) as Γt = ∥ut∥22/σ 2 
+
+> t
+
+, where σ2 
+
+> t
+
+= E∥but − ut∥22. The two variances measure different quantities: Et captures log-ratio variation across actions, whereas σ2 
+
+> t
+
+measures sampling noise in the gradient estimator. Figure 4 shows a strong positive rank correlation of 0 .93 between exact Et and the SNR of the K = 16 resampling estimator across 1280 stored prefixes. Higher RKL-variance positions are associated with more reliable logit-gradient estimates in this diagnostic, consistent with their greater training utility in Figure 3. These quantities are computed offline from full-vocabulary student and teacher distributions (Section B.1). This association motivates using RKL variance as a proxy for relative gradient reliability without computing full-vocabulary gradient moments during training. 5Figure 4 RKL variance and gradient reliabil-ity across 1,280 stored prefixes. Exact Et is strongly rank-correlated with the logit-space gra-dient SNR of the K = 16 resampling estimator, with Spearman’s ρ = 0 .93. 
+
+Variance-aware weighted reverse-KL minimization. 
+
+Gradient reliability provides a principle for allocating update weights. The following proposition characterizes the optimal deterministic scaling of the logit-gradient estimator but under a smoothness-based bound. 
+
+Proposition 4.1 (SNR-guided local update scaling) . Fix a stored prefix ct and consider the local reverse-KL objective as a function of the student logits, 
+
+Lt(zt) = DKL (softmax( zt)∥qt).
+
+Let β > 0 be a common smoothness upper bound over the stored prefixes under consideration, and suppose Lt is β-smooth. Let ut = ∇zt Lt(zt) and let but be an unbiased estimator with 
+
+σ2 
+
+> t
+
+= E∥but − ut∥22 ∈ (0 , ∞). Define 
+
+Γt = ∥ut∥22
+
+σ2
+
+> t
+
+.
+
+For any step size η > 0 and deterministic weight w ≥ 0,
+
+ELt(zt − ηw but) ≤ L t(zt) − ηw ∥ut∥22 + βη 2w2
+
+2
+
+ ∥ut∥22 + σ2
+
+> t
+
+.
+
+The right-hand side is uniquely minimized over w ≥ 0 at 
+
+w⋆t = 1
+
+βη 
+
+Γt
+
+1 + Γ t
+
+. (5) 
+
+For fixed β and η, w⋆t increases monotonically with Γt and approaches 1/(βη ) as Γt → ∞ .
+
+The proof is given in Section A.2. Proposition 4.1 provides an oracle local criterion under which the preferred scale increases with gradient reliability and saturates at high SNR. Together with the strong rank association between Et and Γ t, this motivates using RKL variance to construct bounded token priorities. During training, we estimate Et from the K resampled tokens using the unbiased sample variance, 
+
+bEKt = 1
+
+> K−1
+
+PKk=1 
+
+ A(k) 
+
+> t
+
+− 1
+
+> K
+
+PKj=1 A(j)
+
+> t
+
+2. (6) These estimates span several orders of magnitude and exhibit a long right tail; finite sampling can also produce zero estimated variance at positions with nonzero underlying signal (Section B.2). We therefore use a threshold 
+
+δ ≥ 0 to recover a coarse priority ordering with bounded weights for both groups: 
+
+bwt = τ − 1
+
+n bEKt ≤ δ
+
+o
+
+, τ ∈ [1 /2, 1) . (7) Positions above the threshold receive weight τ , while the remaining positions retain weight 1 − τ . Normalizing these weights to have unit mean over all valid token positions in the stored batch gives wt. For τ > 1/2, this rule emphasizes the higher-variance group while retaining supervision at every valid position. When τ = 1 /2, it recovers uniform weighting. Combining these priorities with Equation (4) yields the adaptive weighted surrogate 
+
+bLK,G,w t = 1
+
+K
+
+> K
+
+X
+
+> k=1
+
+sg 
+
+h
+
+G<t wt A(k)
+
+> t
+
+i
+
+log Pθ (a(k) 
+
+> t
+
+| ct). (8) We average this surrogate over valid positions and treat the weights and reverse-KL signals as constants during differentiation. Samples and priorities are refreshed at every learner update, allowing the weighting to adapt to the evolving student without new trajectories or additional model evaluations for variance estimation. The complete procedure is given in Section B.4. We further test continuous variants of this weighting, using 
+
+qbEKt
+
+and a saturating transformation of bEKt in place of the two-level rule. Both underperform the two-level rule (Table 3), supporting this design choice. 6Interpretation through local optimization dynamics. We finally examine what RKL variance measures in local optimization. At a fixed prefix, the score function has zero mean, so only the centered log-ratio 
+
+At − Ept [At] contributes to the exact gradient. The following proposition relates this variation to progress under conditional Fisher geometry. 
+
+Proposition 4.2 (Fisher-geometric interpretation of RKL variance) . Fix a prefix ct, and let gt = ∇θ DKL (pt∥qt).Define ψt(a) = ∇θ log pt(a), the conditional Fisher matrix Ft = Ea∼pt [ψt(a)ψt(a)⊤], and the natural gradient 
+
+nt = F † 
+
+> t
+
+gt, where † denotes the Moore–Penrose pseudoinverse. If the model can locally realize the centered log-ratio correction at ct, then 
+
+⟨gt, n t⟩ = g⊤ 
+
+> t
+
+F † 
+
+> t
+
+gt = Et.
+
+The precise realizability condition and proof are given in Section A.1. 
+
+Under this condition, Et gives the first-order decrease per unit step along the negative natural-gradient direction. Thus, Et measures the local optimization signal remaining at a prefix, while Figure 4 relates it to the reliability of the finite-sample gradient estimate. Together, these properties motivate refreshing variance-guided priorities throughout rollout reuse. 
+
+# 5 Experiments 
+
+## 5.1 Experimental Setup 
+
+Models and benchmarks. We conduct experiments on the Qwen3 model family (Yang et al., 2025). Specifically, we initialize Qwen3-0.6B-Base, Qwen3-1.7B-Base, and Qwen3-4B-Base as student models, and use Qwen3-1.7B, Qwen3-4B, and Qwen3-8B, respectively, as teachers. We use DAPO-Math-17K (Yu et al., 2025) as the training dataset. To evaluate the performance of REVO, we primarily consider mathematical reasoning benchmarks, including AIME24, AIME25, AMC23, MATH-500, OlympiadBench, and Minerva (Zhang and Math-AI, 2024, 2025; Mathematical Association of America, 2025; Lewkowycz et al., 2022; He et al., 2024). For smaller benchmarks, namely AIME24, AIME25, and AMC23, we report Avg@16, while for the larger benchmarks we report Avg@4. We further evaluate all methods on benchmarks beyond mathematical reasoning to assess cross-domain generalization, including GPQA@4, HumanEval@4, and MMLU-Redux@1 (Rein et al., 2023; Chen et al., 2021; Gema et al., 2024). 
+
+Baselines. We mainly compare REVO against sampled-token OPD (Lu and Lab, 2025) (implemented following Li et al. (2026b)), EOPD (Jin et al., 2026), and FiRe (Li et al., 2026a). We train REVO for 50 rollout steps, performing 10 learner updates per step. We compare against the baselines under both the same rollout budget (50 steps) and a larger training budget of 200 steps. 
+
+Implementation details. Each rollout step uses 8 prompts with 4 responses per prompt. We preserve the original ordering of the training data without shuffling. For the geometric-mean prefix correction, we set the upper clipping bound to C = 4, and use K = 16 candidates for one-step resampling. For RKL-variance-guided reweighting, we set the threshold to δ = 0 .005 and τ = 0 .75. We disable the teacher’s thinking mode and use a maximum sequence length of 8192 tokens during training. For evaluation, we use a maximum generation budget of 8192 tokens, with temperature 0 .7 and top-p sampling with p = 0 .95. Detailed configurations are provided in Section C.1, and additional results and ablations in Sections B and C. 
+
+## 5.2 Main Results 
+
+We report the main results in Tables 1 and 2. REVO consistently outperforms other OPD variants under the same rollout budget and surpasses baselines trained with a 4 × larger budget. This pattern extends beyond Qwen3, with REVO at 50 rollout iterations outperforming 200-iteration baselines on Llama 3.2 and Gemma 3 7Table 1 Results across three student–teacher scales. AIME24, AIME25, and AMC23 use Avg@16; MATH-500, OlympiadBench, and Minerva use Avg@4. Mean is the average across the six benchmarks. Best results within each scale are bold; blue shading highlights REVO. Green/red subscripts indicate gains/losses in percentage points relative to OPD at Step 50 within the same scale. 
+
+Avg@16 Avg@4 Method Step AIME24 AIME25 AMC23 MATH-500 OlympiadBench Minerva Mean Student: 0.6B Base Teacher: 1.7B 
+
+Base 0 0.0 0.0 1.4 3.3 1.7 2.3 1.5 OPD 50 0.8 1.0 18.4 45.2 14.8 11.0 15.2 OPD 200 2.1 1.0 23.3 48.4 17.9 10.0 17.1 EOPD 50 1.5 0.6 18.8 45.0 13.3 10.7 15.0 EOPD 200 1.9 0.6 24.7 47.4 17.6 11.8 17.3 FiRe 50 1.2 0.6 22.8 45.1 15.0 10.7 15.9 FiRe 200 2.1 1.2 26.2 47.6 17.5 10.7 17.6 
+
+REVO 50 2.1 +1.3 0.8 −0.2 29.8 +11.4 49.0 +3.8 18.2 +3.4 12.5 +1.5 18.7 +3.5 
+
+Student: 1.7B Base Teacher: 4B 
+
+Base 0 0.4 1.3 13.8 18.8 5.5 6.7 7.8 OPD 50 6.5 4.2 34.7 64.3 26.7 17.4 25.6 OPD 200 8.3 6.5 35.6 66.9 28.8 17.4 27.3 EOPD 50 6.9 3.5 32.7 59.3 24.1 16.0 23.8 EOPD 200 9.2 5.2 36.7 67.3 29.2 15.3 27.2 FiRe 50 5.4 4.1 36.2 63.1 26.5 18.5 25.6 FiRe 200 7.2 5.6 35.0 66.6 28.4 16.9 26.6 OPD(U10) 50 7.5 4.7 32.8 62.6 27.1 17.3 25.3 
+
+REVO 50 10.0 +3.5 7.3 +3.1 41.6 +6.9 69.0 +4.7 29.7 +3.0 19.9 +2.5 29.6 +4.0 
+
+Student: 4B Base Teacher: 8B 
+
+Base 0 10.4 7.7 35.3 41.0 23.7 6.7 20.8 OPD 50 14.8 16.5 55.9 78.2 40.1 26.7 38.7 OPD 200 16.3 17.3 57.8 78.8 41.5 22.9 39.1 EOPD 50 16.3 14.2 53.9 78.5 41.1 24.9 38.2 EOPD 200 16.7 16.0 56.1 79.5 43.7 23.2 39.2 FiRe 50 14.7 13.5 51.7 77.4 41.0 26.4 37.5 FiRe 200 18.7 15.8 56.5 78.9 40.3 22.2 38.7 
+
+REVO 50 18.1 +3.3 17.5 +1.0 58.0 +2.1 80.4 +2.2 45.1 +5.0 29.0 +2.3 41.4 +2.7 
+
+(Section B.3). These results demonstrate improved rollout efficiency. Wall-clock comparisons and larger-batch OPD results are provided in Sections C.5 and C.6. We further compare REVO with a multi-update baseline, OPD(U10), which directly applies the standard OPD objective for 10 learner updates per rollout step. This matches both the rollout budget and number of learner updates. On the 1.7B student with 50 rollout steps, OPD(U10) performs substantially worse than REVO and provides no clear improvement over standard OPD under the same rollout budget. This shows that the gains of REVO do not come simply from more learner updates, highlighting the importance of accounting for off-policy reuse. 
+
+## 5.3 Ablation Study 
+
+We further isolate the contribution of each component in Table 3. Repeating learner updates on stored rollouts without off-policy correction provides essentially no improvement over standard OPD, with Avg@16 remaining at 15.0 compared with 15.1. We then compare two alternative corrections for the current token. PPO-style clipped importance sampling improves performance to 16.7, while one-step resampling performs better at 17.8. Starting from the one-step resampling variant, adding prefix correction further improves performance to 18.2. On top of one-step resampling and prefix correction, we compare three RKL-variance weighting rules. The continuous 
+
+qbEKt and saturating bEKt /( bEKt + c) rules with c = 0 .25 achieve 18.7 and 18.6, respectively, both outperforming uniform weighting. The bounded two-level rule performs best at 19.6. This suggests that the 8Table 2 Cross-domain evaluation across three student–teacher scales. All experiments distill a larger post-trained teacher into a smaller Qwen3 Base student. REVO is evaluated at Step 50, while OPD, EOPD, and FiRe are evaluated at Step 200. Mean is the unweighted average across the three benchmarks. Best results within each scale are bold; blue shading highlights REVO.                                                                  
+
+> Student: 0.6B Base Teacher: 1.7B Student: 1.7B Base Teacher: 4B Student: 4B Base Teacher: 8B Benchmark REVO OPD EOPD FiRe REVO OPD EOPD FiRe REVO OPD EOPD FiRe GPQA@4 20.2 13.8 18.1 13.3 27.3 17.5 20.8 16.8 40.0 38.5 37.7 38.8 HumanEval@4 32.6 30.8 29.7 31.6 54.3 51.2 52.3 49.2 77.9 75.8 77.0 75.2 MMLU-Redux@1 48.0 46.9 46.9 45.0 65.2 63.2 63.8 62.1 79.6 79.0 80.1 79.5
+> Mean 33.6 30.5 31.6 29.9 48.9 44.0 45.6 42.7 65.8 64.4 64.9 64.5
+
+Table 3 Ablation study using a Qwen3-1.7B Base student distilled from a Qwen3-4B teacher. Results are reported at Step 50 as Avg@16 over AIME24, AIME25, and AMC23. PPO-style clipped IS and one-step resampling are alter-native current-token corrections. Prefix correction and RKL-variance weighting are added to the one-step resam-pling variant. 
+
+Method Avg@16 
+
+OPD 15.1 OPD(U10) 15.0 OPD(U10) + PPO-Style Clipped IS 16.7 OPD(U10) + One-Step Resampling 17.8 + Prefix Correction 18.2 
+
+RKL-variance reweighting 
+
++
+
+qbEKt weighting 18.7 + bEKt /( bEKt + 0 .25) 18.6 + Two-Level Weighting (REVO) 19.6 
+
+Figure 5 Effect of the number of learner updates per rollout batch. Increasing the reuse rate accelerates early learning, while both configurations eventually reach similar performance. 
+
+relative ordering induced by RKL variance is more useful than its raw magnitude, supporting its use as a relative priority signal rather than directly determining the update magnitude. Additional analysis of the empirical RKL-variance distribution is provided in Section B.2. Implementation details for the alternative weighting rules are given in Section C.1. Further ablations on hyperparameter sensitivity and alternative prioritization signals are provided in Sections C.3 and C.4, respectively, to evaluate the robustness of the weighting rule and the choice of prioritization signal. 
+
+Effect of the number of updates. Our default configuration applies 10 learner updates to each rollout batch. We further increase the reuse rate to 50 updates per batch (U50) to study whether more aggressive off-policy optimization can further improve rollout efficiency. As shown in Figure 5, increasing the number of updates substantially accelerates early learning. U50 reaches strong performance within only a few rollout iterations, showing that REVO remains effective under more aggressive rollout reuse. The two configurations eventually converge to a similar performance level, and U50 provides no improvement in final accuracy despite requiring 5 × more learner updates per rollout batch. Additional reuse therefore mainly trades learner computation for fewer rollouts. We use U10 as the default setting for a better balance between rollout efficiency and optimization cost, while U50 can reduce the number of required rollout iterations when generation is the primary bottleneck. 
+
+# 6 Conclusion 
+
+In this work, we propose REVO, a practical framework for off-policy reverse-KL distillation with repeated rollout reuse. Starting from the standard OPD objective, we derive the corresponding off-policy formulation and introduce stabilized prefix-level correction together with current-policy one-step resampling to make 9multi-update training practical. We further introduce RKL variance as a token-level measure of remaining reverse-KL learning signal and use it to allocate optimization effort more effectively across reused prefixes. Extensive experiments across multiple student and teacher scales demonstrate that REVO enables substantially more rollout-efficient distillation, matching or outperforming OPD baselines trained with 4 × more rollout iterations. Overall, our results suggest that effective rollout reuse benefits from both off-policy stabilization and adaptive allocation of optimization effort across token positions. 
+
+# Ethics Statement 
+
+This work studies the distillation of student language models from stronger teacher models. All experiments use publicly available open-source models, datasets, and evaluation benchmarks. The study does not involve human subjects, private user data, or deployment in high-stakes settings. We do not identify ethical concerns specific to this study beyond those generally associated with training and evaluating language models. 
+
+# Reproducibility Statement 
+
+We provide the models, benchmarks, and baselines used in our experiments in Section 5.1. Implementation details and hyperparameters are reported in Section C.1, and the complete training procedure is summarized in Algorithm 1. We also include anonymized code in the supplementary material to facilitate reproduction of our results. 
+
+# References 
+
+R. Agarwal, N. Vieillard, Y. Zhou, P. Stanczyk, S. R. Garea, M. Geist, and O. Bachem. On-policy distillation of language models: Learning from self-generated mistakes. In The Twelfth International Conference on Learning Representations ,2024. URL https://openreview.net/forum?id=3zKtaqxLhW .C. Arnal, V. Cabannes, T. Cohen, J. Kempe, and R. Munos. Efficient rl training for llms with experience replay, 2026. URL https://arxiv.org/abs/2604.08706 .M. Chen, J. Tworek, H. Jun, Q. Yuan, H. P. de Oliveira Pinto, J. Kaplan, H. Edwards, Y. Burda, N. Joseph, G. Brockman, A. Ray, R. Puri, G. Krueger, M. Petrov, H. Khlaaf, G. Sastry, P. Mishkin, B. Chan, S. Gray, N. Ryder, M. Pavlov, A. Power, L. Kaiser, M. Bavarian, C. Winter, P. Tillet, F. P. Such, D. Cummings, M. Plappert, F. Chantzis, E. Barnes, A. Herbert-Voss, W. H. Guss, A. Nichol, A. Paino, N. Tezak, J. Tang, I. Babuschkin, S. Balaji, S. Jain, W. Saunders, C. Hesse, A. N. Carr, J. Leike, J. Achiam, V. Misra, E. Morikawa, A. Radford, M. Knight, M. Brundage, M. Murati, K. Mayer, P. Welinder, B. McGrew, D. Amodei, S. McCandlish, I. Sutskever, and W. Zaremba. Evaluating large language models trained on code, 2021. DeepSeek-AI. Deepseek-v4: Towards highly efficient million-token context intelligence, 2026. T. Foster, A. Sims, J. Forkel, and J. Foerster. Lilo: Learning to reason at the frontier of learnability. In D. Belgrave, C. Zhang, H. Lin, R. Pascanu, P. Koniusz, M. Ghassemi, and N. Chen, editors, Advances in Neural Information Processing Systems , volume 38, Main Conference, pages 48941–48974. Curran Asso-ciates, Inc., 2025. doi: 10.52202/085713-1634. URL https://proceedings.neurips.cc/paper files/paper/2025/file/ 45d5823950cab9a88e10c6e8dbff351c-Paper-Conference.pdf .A. P. Gema, J. O. J. Leang, G. Hong, A. Devoto, A. C. M. Mancino, R. Saxena, X. He, Y. Zhao, X. Du, M. R. G. Madani, C. Barale, R. McHardy, J. Harris, J. Kaddour, E. van Krieken, and P. Minervini. Are we done with mmlu?, 2024. Y. Gu, L. Dong, F. Wei, and M. Huang. MiniLLM: Knowledge distillation of large language models. In The Twelfth International Conference on Learning Representations , 2024. URL https://openreview.net/forum?id=5h0qf7IBZZ .C. He, R. Luo, Y. Bai, S. Hu, Z. L. Thai, J. Shen, J. Hu, X. Han, Y. Huang, Y. Zhang, J. Liu, L. Qi, Z. Liu, and M. Sun. Olympiadbench: A challenging benchmark for promoting agi with olympiad-level bilingual multimodal scientific problems, 2024. URL https://arxiv.org/abs/2402.14008 .G. Hinton, O. Vinyals, and J. Dean. Distilling the knowledge in a neural network, 2015. URL https://arxiv.org/abs/ 1503.02531 .
+
+10 M. Jiang, E. Grefenstette, and T. Rockt¨ aschel. Prioritized level replay. In M. Meila and T. Zhang, editors, Proceedings of the 38th International Conference on Machine Learning , volume 139 of Proceedings of Machine Learning Research ,pages 4940–4950. PMLR, 18–24 Jul 2021. URL https://proceedings.mlr.press/v139/jiang21b.html .W. Jin, T. Min, Y. Yang, D. Wei, Y. Zhou, S. R. Kadhe, N. Baracaldo, and K. Lee. Entropy-aware on-policy distillation of language models, 2026. URL https://arxiv.org/abs/2603.07079 .W. Kang, K. Galim, S. Oh, M. Kang, S. Park, D. Kim, M. Lee, M. Kim, R. Tiwari, Y. Zeng, H. I. Koo, and K. Lee. Asyncopd: How stale can on-policy distillation be?, 2026. URL https://arxiv.org/abs/2606.24143 .J. Ko, T. Chen, S. Kim, T. Ding, L. Liang, I. Zharkov, and S.-Y. Yun. DistiLLM-2: A contrastive approach boosts the distillation of LLMs. In Forty-second International Conference on Machine Learning , 2025. URL 
+
+https://openreview.net/forum?id=rc65N9xIrY .T. Lahire, M. Geist, and E. Rachelson. Large batch experience replay. In K. Chaudhuri, S. Jegelka, L. Song, C. Szepesvari, G. Niu, and S. Sabato, editors, Proceedings of the 39th International Conference on Machine Learning ,volume 162 of Proceedings of Machine Learning Research , pages 11790–11813. PMLR, 17–23 Jul 2022. URL 
+
+https://proceedings.mlr.press/v162/lahire22a.html .A. Lewkowycz, A. Andreassen, D. Dohan, E. Dyer, H. Michalewski, V. Ramasesh, A. Slone, C. Anil, I. Schlag, T. Gutman-Solo, Y. Wu, B. Neyshabur, G. Gur-Ari, and V. Misra. Solving quantitative reasoning problems with language models. In S. Koyejo, S. Mohamed, A. Agarwal, D. Belgrave, K. Cho, and A. Oh, editors, Advances in Neural Information Processing Systems , volume 35, pages 3843–3857. Curran Associates, Inc., 2022. doi: 10.52202/068431-0278. URL https: //proceedings.neurips.cc/paper files/paper/2022/file/18abbeef8cfe9203fdf9053c9c4fe191-Paper-Conference.pdf .Y. Li, L. Zheng, Y. Yu, W. Zhou, X. Zhong, X. Hu, J. Jin, H. Yuan, and T. Feng. Filter, then reweight: Rethinking optimization granularity in on-policy distillation, 2026a. URL https://arxiv.org/abs/2606.02684 .Y. Li, Y. Zuo, B. He, J. Zhang, C. Xiao, C. Qian, T. Yu, H. ang Gao, W. Yang, Z. Liu, and N. Ding. Rethinking on-policy distillation of large language models: Phenomenology, mechanism, and recipe, 2026b. URL https://arxiv. org/abs/2604.13016 .Z. Liu, C. Chen, W. Li, P. Qi, T. Pang, C. Du, W. S. Lee, and M. Lin. Understanding r1-zero-like training: A critical perspective. In Conference on Language Modeling (COLM) , 2025. K. Lu and T. M. Lab. On-policy distillation. Thinking Machines Lab: Connectionism , 2025. doi: 10.64434/tml.20251026. https://thinkingmachines.ai/blog/on-policy-distillation. Mathematical Association of America. American mathematics competitions, 2025. Accessed: 2025-09-13. R. Portelas, C. Colas, K. Hofmann, and P.-Y. Oudeyer. Teacher algorithms for curriculum learning of deep rl in continuously parameterized environments. In L. P. Kaelbling, D. Kragic, and K. Sugiura, editors, Proceedings of the Conference on Robot Learning , volume 100 of Proceedings of Machine Learning Research , pages 835–853. PMLR, 30 Oct–01 Nov 2020. URL https://proceedings.mlr.press/v100/portelas20a.html .D. Rein, B. L. Hou, A. C. Stickland, J. Petty, R. Y. Pang, J. Dirani, J. Michael, and S. R. Bowman. Gpqa: Agraduate-level google-proof q&a benchmark, 2023. URL https://arxiv.org/abs/2311.12022 .T. Schaul, J. Quan, I. Antonoglou, and D. Silver. Prioritized experience replay, 2016. URL https://arxiv.org/abs/1511. 05952 .K. Team, T. Bai, Y. Bai, Y. Bao, M. C., J. Cai, X. Cai, P. Cao, Y. Cao, Z. Chai, Y. Charles, H. S. Che, G. Chen, G. Chen, G. Chen, H. Chen, J. Chen, J. Chen, J. Chen, K. Chen, P. Chen, R. Chen, W. Chen, X. Chen, Y. Chen, Y. Chen, Y. Chen, Y. Chen, Y. Chen, Y. Chen, Y. Chen, Z. Chen, D. Cheng, Y. Cheng, J. Cui, J. Cui, A. Dai, J. Deng, H. Ding, R. Ding, S. Ding, M. Dong, M. Dong, Y. Dong, Y. Dong, A. Du, C. Du, D. Du, J. Du, Y. Du, Y. Fan, J. Feng, Q. Feng, Y. Feng, K. Fu, Q. Fu, F. Gao, H. Gao, J. Gao, T. Gao, W. Gao, S. Geng, J. Gong, L. Gong, S. Gong, X. Gong, Q. Gu, Y. Gu, S. Guan, H. Guo, S. Guo, X. Guo, Z. Guo, B. Hao, W. Hao, X. Hao, D. He, H. He, L. He, Q. He, W. He, X. He, X. He, Y. He, Y. He, C. Hong, T. Hong, H. Hu, J. Hu, R. Hu, W. Hu, Y. Hu, Z. Hu, L. Hua, J. Huang, K. Huang, R. Huang, S. Huang, W. Huang, Y. Huang, Z. Huang, Z. Huang, Y. Hui, C. Jia, Y. Jiang, Z. Jiang, Z. Jiang, W. Jin, X. Jin, Y. Jing, H. Kong, G. Lai, A. Li, C. Li, C. Li, C. Li, F. Li, G. Li, H. Li, J. Li, J. Li, L. Li, L. Li, L. Li, W. Li, W. Li, X. Li, Y. Li, Y. Li, Y. Li, Y. Li, Z. Li, Z. Li, Z. Li, Z. Li, Z. Li, J. Lin, X. Lin, Y. Lin, Z. Lin, Z. Lin, B. Liu, B. Liu, C. Liu, L. Liu, S. Liu, S. Liu, S. Liu, T. Liu, W. Liu, Y. Liu, Y. Liu, Y. Liu, Y. Liu, Z. Liu, Z. Liu, E. Lu, H. Lu, L. Lu, T. Lu, Z. Lu, A. Luo, G. Luo, J. Luo, Y. Luo, B. Lyu, W. Lyu, S. Mao, Y. Mei, X. Men, M. Ni, Y. Niu, S. Pan, S. Peng, Z. Qi, R. Qin, Z. Qin, Z. Qin, H. Qiu, J. Qiu, J. Qiu, B. Qu, Y. Qu, Z. Shang, Y. Shao, H. Shen, J. Shi, J. Shi, L. Shi, S. Shi, W. Siu, P. Song, X. Song, J. Su, Y. Su, Z. Su, L. Sui, J. Sun, J. Sun, S. Sun, S. Sun, T. Sun, Y. Sun, Y. Tai, C. Tang, H. Tang, S. Tang, Z. Tang, C. Tian, R. Tian, Y. Tian, W. Tu, C. Wang, C. Wang, C. Wang, D. Wang, F. Wang, H. Wang, H. Wang, H. Wang, 
+
+11 H. Wang, H. Wang, H. Wang, J. Wang, J. Wang, J. Wang, J. Wang, L. Wang, S. Wang, S. Wang, S. Wang, S. Wang, S. Wang, T. Wang, W. Wang, X. Wang, X. Wang, X. Wang, X. Wang, Y. Wang, Y. Wang, Y. Wang, Y. Wang, Y. Wang, Y. Wang, Y. Wang, Y. Wang, Z. Wang, Z. Wang, Z. Wang, Z. Wang, Z. Wang, Z. Wang, C. Wei, M. Wei, S. Wei, Z. Wen, F. Wu, H. Wu, R. Wu, W. Wu, X. Wu, Y. Wu, Y. Wu, Y. Wu, Z. Wu, X. Xian, C. Xiang, Y. Xiang, B. Xiao, C. Xiao, X. Xiao, J. Xie, X. Xie, Y. Xie, Z. Xie, B. Xing, Y. Xiong, B. Xu, B. Xu, J. Xu, J. Xu, J. Xu, J. Xu, L. H. Xu, Q. Xu, S. Xu, S. Xu, T. Xu, T. Xu, W. Xu, X. Xu, Y. Xu, Y. Xu, Y. Xu, Z. Xu, H. Xue, J. Yan, Y. Yan, F. Yang, G. Yang, H. Yang, J. Yang, R. Yang, W. Yang, X. Yang, X. Yang, Y. Yang, Y. Yang, Y. Yang, Y. Yang, Z. Yang, Z. Yang, Z. Yang, Z. Yang, H. Yao, D. Ye, H. Ye, W. Ye, Z. Ye, B. Yin, H. Yin, X. Yin, C. Yu, H. Yu, L. Yu, S. Yu, S. Yu, T. Yu, E. Yuan, M. Yuan, T. Yue, W. Yue, Y. Yue, D. Zha, H. Zhan, B. H. Zhang, D. Zhang, F. Zhang, H. Zhang, H. Zhang, H. Zhang, J. Zhang, J. Zhang, J. Zhang, K. Zhang, M. Zhang, P. Zhang, Q. Zhang, R. Zhang, R. Zhang, S. Zhang, S. Zhang, X. Zhang, X. Zhang, Y. Zhang, Y. Zhang, Y. Zhang, Y. Zhang, Y. Zhang, Y. Zhang, Y. Zhang, Y. Zhang, Y. Zhang, Y. Zhang, Z. Zhang, Z. Zhang, B. Zhao, C. Zhao, F. Zhao, J. Zhao, J. Zhao, S. Zhao, W. Zhao, X. Zhao, X. Zhao, Y. Zhao, Z. Zhao, H. Zheng, H. Zheng, R. Zheng, S. Zheng, T. Zheng, H. Zhong, L. Zhong, L. Zhong, M. Zhou, Q. Zhou, R. Zhou, R. Zhou, X. Zhou, Y. Zhou, Z. Zhou, J. Zhu, L. Zhu, X. Zhu, Y. Zhu, Y. Zhu, Z. Zhu, C. Zhuang, W. Zhuang, and X. Zu. Kimi k3: Open frontier intelligence, 2026. URL https://arxiv.org/abs/2607.24653 .A. Yang, A. Li, B. Yang, B. Zhang, B. Hui, B. Zheng, B. Yu, C. Gao, C. Huang, C. Lv, C. Zheng, D. Liu, F. Zhou, F. Huang, F. Hu, H. Ge, H. Wei, H. Lin, J. Tang, J. Yang, J. Tu, J. Zhang, J. Yang, J. Yang, J. Zhou, J. Zhou, J. Lin, K. Dang, K. Bao, K. Yang, L. Yu, L. Deng, M. Li, M. Xue, M. Li, P. Zhang, P. Wang, Q. Zhu, R. Men, R. Gao, S. Liu, S. Luo, T. Li, T. Tang, W. Yin, X. Ren, X. Wang, X. Zhang, X. Ren, Y. Fan, Y. Su, Y. Zhang, Y. Zhang, Y. Wan, Y. Liu, Z. Wang, Z. Cui, Z. Zhang, Z. Zhou, and Z. Qiu. Qwen3 technical report, 2025. URL 
+
+https://arxiv.org/abs/2505.09388 .C. Yang, C. Qin, Q. Si, M. Chen, N. Gu, D. Yao, Z. Lin, W. Wang, J. Wang, and N. Duan. Self-distilled rlvr, 2026a. URL https://arxiv.org/abs/2604.03128 .Y. Yang, X. Wang, and W. Zhang. Ogls-sd: On-policy self-distillation with outcome-guided logit steering for llm reasoning, 2026b. URL https://arxiv.org/abs/2605.12400 .Y. Yang, T. Yu, S. Li, K. Zhao, X. Zhang, C. Bansal, H. Yao, T. W. Killian, and W. Zhang. When eos tokens disagree: Understanding length inflation in on-policy distillation, 2026c. URL https://arxiv.org/abs/2609.20511 .Q. Yu, Z. Zhang, R. Zhu, Y. Yuan, X. Zuo, Y. Yue, W. Dai, T. Fan, G. Liu, L. Liu, X. Liu, H. Lin, Z. Lin, B. Ma, G. Sheng, Y. Tong, C. Zhang, M. Zhang, W. Zhang, H. Zhu, J. Zhu, J. Chen, J. Chen, C. Wang, H. Yu, Y. Song, X. Wei, H. Zhou, J. Liu, W.-Y. Ma, Y.-Q. Zhang, L. Yan, M. Qiao, Y. Wu, and M. Wang. Dapo: An open-source llm reinforcement learning system at scale, 2025. URL https://arxiv.org/abs/2503.14476 .Y. Zhang and T. Math-AI. American invitational mathematics examination (aime) 2024, 2024. Y. Zhang and T. Math-AI. American invitational mathematics examination (aime) 2025, 2025. Y. Zhang, C. Ye, S. Jin, C. Yu, W. Xiong, S. Sahu, and N. Jiang. Rethinking importance sampling in llm policy optimization: A cumulative token perspective, 2026. URL https://arxiv.org/abs/2605.07331 .S. Zhao, Z. Xie, M. Liu, J. Huang, G. Pang, F. Chen, and A. Grover. Self-distilled reasoner: On-policy self-distillation for large language models, 2026. URL https://arxiv.org/abs/2601.18734 .C. Zheng, S. Liu, M. Li, X.-H. Chen, B. Yu, C. Gao, K. Dang, Y. Liu, R. Men, A. Yang, J. Zhou, and J. Lin. Group sequence policy optimization, 2025. URL https://arxiv.org/abs/2507.18071 .H. Zheng, J. Zhao, and B. Chen. Prosperity before collapse: How far can off-policy rl reach with stale data on llms? In C. Vondrick, B. Hariharan, C. Raffel, L. Pinto, D. Yang, and A. Faust, editors, International Conference on Learning Representations , volume 2026, pages 82657–82679, 2026. URL https://proceedings.iclr.cc/paper files/paper/2026/ file/8590b946e4f0c2b1262cb5b047924653-Paper-Conference.pdf .Z. Ziheng, J. Li, H. Tang, Y. N. Wu, and D. Terzopoulos. Less is more: Early stopping rollout for on-policy distillation, 2026. URL https://arxiv.org/abs/2605.27028 .
+
+12 A Mathematical Proofs 
+
+## A.1 Proof of the OPD–NPG Gradient Identity 
+
+We first introduce the notation and establish the lemmas needed for Proposition 4.2. In what follows, we write 
+
+s for a fixed prefix ct and fix a parameter value θ ∈ Rd. Let zθ (s) ∈ RV denote the student logits over a finite vocabulary V, with |V| = V , and let 
+
+ps(a) = Pθ (a | s), qs(a) = PT (a | s), ps = softmax( zθ (s)) .
+
+We assume that the teacher distribution qs is fixed, both distributions have full support, and the logits are twice continuously differentiable in a neighborhood of θ.The local OPD objective is 
+
+Ls(θ) = DKL (ps∥qs) = X
+
+> a∈V
+
+ps(a) log ps(a)
+
+qs(a) . (9) Define the log-ratio signal, its mean, and its centered version as 
+
+As(a) = log ps(a) − log qs(a), ¯As = Ea∼ps [As(a)] = Ls(θ), Xs(a) = As(a) − ¯As.
+
+We also use As, X s ∈ RV to denote the vectors containing these action-wise values. By construction, 
+
+p⊤ 
+
+> s
+
+Xs = X
+
+> a∈V
+
+ps(a)Xs(a) = 0 . (10) The local relative-entropy variance is 
+
+Es = Var a∼ps [As(a)] = X
+
+> a∈V
+
+ps(a)Xs(a)2. (11) Define the logit Jacobian and categorical Fisher matrix by 
+
+Js = ∂z θ (s)
+
+∂θ ∈ RV ×d, Gs = Diag( ps) − psp⊤ 
+
+> s
+
+∈ RV ×V . (12) Define the score vector 
+
+ψs(a) := ∇θ log ps(a) ∈ Rd, (13) and the corresponding conditional Fisher matrix 
+
+Fs := Ea∼ps
+
+ψs(a)ψs(a)⊤ ∈ Rd×d. (14) All expectations in this subsection are taken at the fixed prefix s. For any matrix M , M † denotes its Moore–Penrose pseudoinverse. 
+
+Lemma 1 (Local OPD gradient) . The parameter gradient of the local OPD objective satisfies 
+
+gs := ∇θ Ls(θ) = J⊤ 
+
+> s
+
+GsXs. (15) 
+
+Proof. For the softmax distribution, 
+
+∂ log ps(a)
+
+∂z s(j) = 1{a = j} − ps(j).
+
+Therefore, by the chain rule, 
+
+ψs(a) = J⊤ 
+
+> s
+
+(ea − ps), (16) where ea ∈ RV is the one-hot vector corresponding to action a.13 The score has zero expectation: 
+
+X
+
+> a
+
+ps(a)ψs(a) = X
+
+> a
+
+ps(a)∇θ log ps(a)= X
+
+> a
+
+∇θ ps(a)= ∇θ
+
+X
+
+> a
+
+ps(a) = 0 . (17) Differentiating Ls(θ) = P 
+
+> a
+
+ps(a)As(a) gives 
+
+gs = X
+
+> a
+
+As(a)∇θ ps(a) + X
+
+> a
+
+ps(a)∇θ As(a). (18) Because the teacher is fixed, ∇θ As(a) = ψs(a), so the second term vanishes by the zero-mean score identity. Using ∇θ ps(a) = ps(a)ψs(a) in the first term gives 
+
+gs = X
+
+> a
+
+ps(a)As(a)ψs(a)= X
+
+> a
+
+ps(a) Xs(a) + ¯As
+
+ψs(a)= X
+
+> a
+
+ps(a)Xs(a)ψs(a), (19) where the constant term vanishes again by the zero-mean score identity. Substituting ψs(a) = J⊤ 
+
+> s
+
+(ea − ps), we obtain 
+
+gs = X
+
+> a
+
+ps(a)Xs(a)J⊤ 
+
+> s
+
+(ea − ps)= J⊤
+
+> s
+
+"X
+
+> a
+
+ps(a)Xs(a)ea − ps
+
+X
+
+> a
+
+ps(a)Xs(a)
+
+#
+
+= J⊤
+
+> s
+
+Diag( ps)Xs − ps(p⊤ 
+
+> s
+
+Xs)
+
+= J⊤
+
+> s
+
+Diag( ps) − psp⊤
+
+> s
+
+ Xs
+
+= J⊤ 
+
+> s
+
+GsXs. (20) 
+
+Lemma 2 (Parameter-space natural gradient) . The conditional parameter Fisher satisfies 
+
+Fs = J⊤ 
+
+> s
+
+GsJs. (21) 
+
+The parameter-space natural gradient of Ls at the fixed prefix is 
+
+ns = F † 
+
+> s
+
+gs = ( J⊤ 
+
+> s
+
+GsJs)†J⊤ 
+
+> s
+
+GsXs. (22) 
+
+Here ns denotes the natural gradient without a learning-rate factor; the corresponding descent direction is −ns.Proof. By the definition of Fs and ψs(a) = J⊤ 
+
+> s
+
+(ea − ps), 
+
+Fs = X
+
+> a
+
+ps(a)ψs(a)ψs(a)⊤
+
+= J⊤
+
+> s
+
+"X
+
+> a
+
+ps(a)( ea − ps)( ea − ps)⊤
+
+#
+
+Js. (23) 14 The matrix inside the brackets is 
+
+X
+
+> a
+
+ps(a)( ea − ps)( ea − ps)⊤
+
+= X
+
+> a
+
+ps(a)eae⊤ 
+
+> a
+
+− X
+
+> a
+
+ps(a)ea
+
+!
+
+p⊤
+
+> s
+
+− ps
+
+X
+
+> a
+
+ps(a)ea
+
+!⊤
+
++ X
+
+> a
+
+ps(a)
+
+!
+
+psp⊤
+
+> s
+
+= Diag( ps) − psp⊤
+
+> s
+
+= Gs. (24) Hence, 
+
+Fs = J⊤ 
+
+> s
+
+GsJs. (25) By definition, the parameter-space natural gradient is 
+
+ns := F † 
+
+> s
+
+gs, (26) where the Moore–Penrose pseudoinverse allows for a possibly singular conditional Fisher matrix. Using 
+
+Fs = J⊤ 
+
+> s
+
+GsJs and gs = J⊤ 
+
+> s
+
+GsXs, we obtain 
+
+ns = ( J⊤ 
+
+> s
+
+GsJs)†J⊤ 
+
+> s
+
+GsXs. (27) 
+
+Lemma 3 (Fisher–Jacobian projection) . Let 
+
+Bs := G1/2 
+
+> s
+
+Js, ys := G1/2 
+
+> s
+
+Xs. (28) 
+
+Then 
+
+X⊤ 
+
+> s
+
+GsJs(J⊤ 
+
+> s
+
+GsJs)†J⊤ 
+
+> s
+
+GsXs
+
+= PRange( Bs)ys 
+
+> 22
+
+≤ ∥ ys∥22 = X⊤ 
+
+> s
+
+GsXs, (29) 
+
+where PRange( Bs) denotes the orthogonal projector onto Range( Bs).Equality holds if and only if 
+
+G1/2 
+
+> s
+
+Xs ∈ Range( G1/2 
+
+> s
+
+Js). (30) 
+
+Proof. Since J⊤ 
+
+> s
+
+GsJs = B⊤ 
+
+> s
+
+Bs and J⊤ 
+
+> s
+
+GsXs = B⊤ 
+
+> s
+
+ys,
+
+X⊤ 
+
+> s
+
+GsJs(J⊤ 
+
+> s
+
+GsJs)†J⊤ 
+
+> s
+
+GsXs
+
+= y⊤ 
+
+> s
+
+Bs(B⊤ 
+
+> s
+
+Bs)†B⊤ 
+
+> s
+
+ys
+
+= y⊤ 
+
+> s
+
+PRange( Bs)ys
+
+= PRange( Bs)ys 
+
+> 22
+
+. (31) The middle matrix is the orthogonal projector onto Range( Bs). Indeed, if Bs = UrΣr V ⊤ 
+
+> r
+
+is a compact SVD, then 
+
+Bs(B⊤ 
+
+> s
+
+Bs)†B⊤ 
+
+> s
+
+= Ur U ⊤ 
+
+> r
+
+= PRange( Bs).
+
+An orthogonal projection cannot increase the Euclidean norm, giving the inequality. Equality holds exactly when ys ∈ Range( Bs). We now prove a more general statement that includes Proposition 4.2 as the locally realizable case. 15 Proposition A.1 (OPD–NPG gradient pairing) . Fix a prefix s, and let 
+
+gs = ∇θ Ls(θ), ns = F † 
+
+> s
+
+gs
+
+denote the ordinary OPD parameter gradient and its parameter-space natural gradient, respectively. Then 
+
+⟨gs, n s⟩ = PRange( G1/2 
+
+> sJs)
+
+G1/2 
+
+> s
+
+Xs
+
+> 22
+
+≤ Es. (32) 
+
+Moreover, equality holds if and only if 
+
+G1/2 
+
+> s
+
+Xs ∈ Range( G1/2 
+
+> s
+
+Js). (33) 
+
+In particular, under this local realizability condition, 
+
+⟨gs, n s⟩ = Es. (34) 
+
+Proof. By Lemmas 1 and 2, 
+
+⟨gs, n s⟩ = g⊤ 
+
+> s
+
+F † 
+
+> s
+
+gs
+
+= X⊤ 
+
+> s
+
+GsJs(J⊤ 
+
+> s
+
+GsJs)†J⊤ 
+
+> s
+
+GsXs. (35) Applying Lemma 3 gives 
+
+⟨gs, n s⟩ = PRange( G1/2 
+
+> sJs)
+
+G1/2 
+
+> s
+
+Xs
+
+> 22
+
+≤ ∥ G1/2 
+
+> s
+
+Xs∥22. (36) The upper bound is 
+
+∥G1/2 
+
+> s
+
+Xs∥22 = X⊤ 
+
+> s
+
+GsXs
+
+= X⊤
+
+> s
+
+Diag( ps) − psp⊤
+
+> s
+
+ Xs
+
+= X
+
+> a
+
+ps(a)Xs(a)2 − (p⊤ 
+
+> s
+
+Xs)2
+
+= X
+
+> a
+
+ps(a)Xs(a)2
+
+= Var a∼ps [As(a)] = Es, (37) where p⊤ 
+
+> s
+
+Xs = 0 by construction. Finally, by Lemma 3, the projection preserves the full norm if and only if 
+
+G1/2 
+
+> s
+
+Xs ∈ Range( G1/2 
+
+> s
+
+Js).
+
+Under this condition, ⟨gs, n s⟩ = Es, which proves Proposition A.1. 
+
+Equal Fisher budget interpretation. Proposition 4.2 also characterizes the first-order progress available under a fixed local change in the student policy. Consider max 
+
+> ∆∈Rd
+
+−g⊤ 
+
+> s
+
+∆ subject to 12 ∆⊤Fs∆ ≤ ϵ. 
+
+Let Bs = G1/2 
+
+> s
+
+Js and ys = G1/2 
+
+> s
+
+Xs. From the definitions above, 
+
+Fs = B⊤ 
+
+> s
+
+Bs, gs = B⊤ 
+
+> s
+
+ys.
+
+Hence gs ∈ Range( B⊤ 
+
+> s
+
+) = Range( Fs). Directions in Null( Fs) neither consume Fisher budget nor change the first-order objective. 16 Since gs ∈ Range( Fs), 
+
+−g⊤ 
+
+> s
+
+∆ = −
+
+
+
+F †/2 
+
+> s
+
+gs
+
+⊤ 
+
+F 1/2 
+
+> s
+
+∆
+
+
+
+(38) 
+
+≤
+
+q
+
+g⊤ 
+
+> s
+
+F † 
+
+> s
+
+gs
+
+p∆⊤Fs∆ (39) 
+
+≤
+
+q
+
+2ϵ g ⊤ 
+
+> s
+
+F † 
+
+> s
+
+gs. (40) For gs̸ = 0, the bound is attained by ∆⋆s = −
+
+s 2ϵg⊤ 
+
+> s
+
+F † 
+
+> s
+
+gs
+
+F † 
+
+> s
+
+gs,
+
+which satisfies 12 ∆⋆⊤ 
+
+> s
+
+Fs∆⋆s = ϵ. Therefore, max 12 ∆⊤Fs∆≤ϵ
+
+−g⊤ 
+
+> s
+
+∆ = 
+
+q
+
+2ϵ g ⊤ 
+
+> s
+
+F † 
+
+> s
+
+gs.
+
+Under the local realizability condition of Proposition 4.2, g⊤ 
+
+> s
+
+F † 
+
+> s
+
+gs = Es, giving max 12 ∆⊤Fs∆≤ϵ
+
+−g⊤ 
+
+> s
+
+∆ = p2ϵE s.
+
+When Es = 0, the maximum first-order reduction is zero. 
+
+## A.2 Proof of Proposition 4.1 
+
+Proposition (SNR-guided local update scaling) . Fix a stored prefix ct and consider the local reverse-KL objective as a function of the student logits, 
+
+Lt(zt) = DKL (softmax( zt)∥qt).
+
+Let ut = ∇zt Lt(zt), and let but = ut+ξt be an unbiased estimator of ut, where E[ξt] = 0 and 0 < E∥ξt∥22 = σ2 
+
+> t
+
+< ∞.Define the local gradient signal-to-noise ratio, as in Section 4.2, as 
+
+Γt = ∥ut∥22
+
+E∥ξt∥22
+
+. (41) 
+
+Let β > 0 be a common smoothness upper bound over the stored prefixes under consideration, and suppose Lt is 
+
+β-smooth. Let η > 0. For a deterministic weight w and the scalar-rescaled update 
+
+∆t(w) = −ηw but, w ≥ 0,
+
+the expected smoothness upper bound is minimized at 
+
+w⋆t = 1
+
+βη 
+
+Γt
+
+1 + Γ t
+
+. (42) 
+
+For fixed β and η, w⋆t is monotonically increasing and saturating in the gradient SNR. Proof. Let Lt denote the local reverse-KL objective, with 
+
+ut = ∇zt Lt(zt).
+
+By β-smoothness, 
+
+Lt(zt + ∆ t(w)) ≤ L t(zt) + ⟨ut, ∆t(w)⟩ + β
+
+2 ∥∆t(w)∥22. (43) 17 Substituting ∆ t(w) = −ηw but and taking expectations gives 
+
+E [Lt(zt + ∆ t(w))] ≤ L t(zt) − ηw E [⟨ut, but⟩]+ βη 2w2
+
+2 E∥but∥22. (44) Since but = ut + ξt and E[ξt] = 0, 
+
+E [⟨ut, but⟩] = ∥ut∥22,
+
+and 
+
+E∥but∥22 = E∥ut + ξt∥22
+
+= ∥ut∥22 + 2 ⟨ut, E[ξt]⟩ + E∥ξt∥22
+
+= ∥ut∥22 + E∥ξt∥22. (45) Therefore, 
+
+E [Lt(zt + ∆ t(w))] ≤ L t(zt) − ηw ∥ut∥22
+
++ βη 2w2
+
+2
+
+ ∥ut∥22 + E∥ξt∥22
+
+ . (46) The w-dependent part of the upper bound is 
+
+ϕt(w) = −ηw ∥ut∥22 + βη 2w2
+
+2
+
+ ∥ut∥22 + E∥ξt∥22
+
+ .
+
+Differentiating gives 
+
+ϕ′
+
+> t
+
+(w) = −η∥ut∥22 + βη 2w  ∥ut∥22 + E∥ξt∥22
+
+ .
+
+Setting ϕ′
+
+> t
+
+(w) = 0 yields 
+
+w⋆t = 1
+
+βη 
+
+∥ut∥22
+
+∥ut∥22 + E∥ξt∥22
+
+= 1
+
+βη 
+
+Γt
+
+1 + Γ t
+
+. (47) The quadratic is strictly convex, so this stationary point is the unique minimizer over w ≥ 0. Finally, Γ /(1 + Γ) is monotonically increasing for Γ ≥ 0 and converges to 1 as Γ → ∞ . Hence the oracle scale saturates at 1/(βη ). 
+
+# B Additional Results and Analyses 
+
+## B.1 RKL Variance and Gradient Reliability 
+
+Proposition 4.1 motivates increasing but bounded priority as a function of logit-gradient reliability. We next examine whether RKL variance provides a practical surrogate for this reliability. For a stored prefix ct, let pt, qt, and At be defined as in Section 4.2. The logit gradient in Proposition 4.1 has the closed form 
+
+ut = ∇zt DKL (pt∥qt) = Ea∼pt [At(a)( ea − pt)] , (48) where zt = zθ (ct) and ea is the one-hot vector associated with action a.Let but denote the unbiased K-sample estimator corresponding to one-step resampling. Conditioned on the current model and prefix, its SNR, as defined in Section 4.2, is Γt = ∥ut∥22
+
+σ2
+
+> t
+
+, σ2 
+
+> t
+
+:= tr Cov( but). (49) 18 Figure 6 Offline diagnostic of RKL variance and finite-sample gradient reliability. We collect 1280 student-visited prefix states and store the full-vocabulary student and teacher conditional distributions, from which the RKL variance, squared logit-gradient signal, and sampling variance of the K=16 one-step resampling estimator are computed offline. Left: RKL variance is strongly rank-correlated with gradient SNR ( ρ = 0 .93), with the approximate scaling Γt ∝ E1.12            
+
+> t.Right: the squared gradient signal scales approximately as ∥ut∥22∝E2.06
+> t, while the estimator variance scales as σ2
+> t∝E0.94
+> t.
+
+To make this diagnostic tractable, we perform it offline on a small subset of stored prefixes rather than as part of training. Specifically, we collect 1280 student-visited prefix states, evaluate and store the full-vocabulary student and teacher conditional distributions, and then compute Et, the logit-gradient signal, and the sampling variance offline. As shown in Figure 6, exact RKL variance Et exhibits a strong positive rank correlation with Γ t across the evaluated prefixes. Higher-RKL-variance positions therefore tend to provide more reliable finite-sample gradient estimates, making the ordering induced by Et broadly consistent with the reliability ordering favored by Proposition 4.1. The signal–noise decomposition helps explain this association. Toward lower RKL variance, the squared gradient signal decreases more rapidly than the estimator variance. Although both quantities become smaller, their ratio also decreases. Thus, low-Et positions exhibit not only weaker population-level optimization signal, as characterized by Proposition 4.2, but also lower relative reliability under finite-K estimation. Although Et is strongly correlated with gradient SNR, this relationship does not provide a calibrated numerical mapping between the two quantities. As illustrated by the empirical distribution of bEKt (Section B.2), its magnitude varies substantially across positions and training updates. Directly substituting Et into the oracle weighting function would therefore require an additional choice of calibration. During training, we estimate RKL variance with bEKt using the same candidate tokens and reverse-KL signals already available from one-step resampling, requiring no additional model evaluations. We use this estimate to recover a coarse priority ordering rather than treating its raw magnitude as a calibrated reliability score. 
+
+Implications for bounded priorities. The oracle rule in Equation (5) suggests two qualitative properties for practical prioritization: priority should increase with gradient reliability, while its amplification should remain bounded. Combined with the observed RKL-variance–SNR association, this motivates our bounded two-level rule in Equation (7). The rule preserves the coarse priority ordering suggested by Et while avoiding direct dependence on its potentially unstable magnitude. We additionally retain nonzero weight on the low-variance group because a small finite-K estimate does not imply that the underlying local learning signal is exactly zero. 
+
+Remark (Logit-space reliability) . The reliability diagnostic is evaluated in logit space at each fixed prefix. Let 
+
+19 Figure 7 Distribution of the one-step resampling RKL-variance estimator bEKt . A substantial fraction of positions have zero or near-zero estimated variance, while the nonzero values span several orders of mag-nitude and exhibit a long right tail. The inset reports the probability mass at exactly zero and in (0 , 10 −8). 
+
+Jt = ∂z t/∂θ denote the logit Jacobian. The corresponding parameter-space gradient and estimation error satisfy 
+
+gt = J⊤ 
+
+> t
+
+ut, bgt − gt = J⊤ 
+
+> t
+
+(but − ut).
+
+Thus, with Σt = Cov( but), the parameter-space sampling variance is 
+
+E∥bgt − gt∥22 = tr  JtJ⊤ 
+
+> t
+
+Σt
+
+ ,
+
+and therefore additionally depends on the local full-model Jacobian geometry. We use logit space because Et, ut, and the sampling variance of the K-sample estimator are determined entirely by the student and teacher next-token distributions at the fixed prefix and can therefore be computed exactly from the stored full-vocabulary distributions. Computing the corresponding parameter-space moments additionally requires full-model Jacobian information at each prefix and is substantially more expensive. The smoothness argument of Proposition 4.1 also applies in parameter space, yielding the same increasing and saturating form with 
+
+Γθt = ∥gt∥22
+
+tr( JtJ⊤ 
+
+> t
+
+Σt)
+
+and the corresponding parameter-space smoothness constant. 
+
+## B.2 Distribution of Estimated RKL Variance 
+
+We examine the empirical distribution of the one-step resampling RKL-variance estimator bEKt . As shown in Figure 7, the distribution contains substantial mass at zero and near zero. This behavior is partly a finite-sample effect: bEKt = 0 whenever the K sampled candidates yield identical reverse-KL signals, which can occur frequently for peaked next-token distributions and finite K. Therefore, a zero estimated RKL variance does not necessarily imply that the exact Et is zero. Among nonzero estimates, bEKt spans several orders of magnitude and exhibits a pronounced right tail. Directly using its raw magnitude as a continuous optimization weight can therefore make the update overly sensitive to a small number of extreme estimates. We instead use a bounded two-level weighting rule, which preserves the coarse distinction between positions with weaker and stronger remaining optimization signal while limiting sensitivity to extreme variance estimates. 
+
+## B.3 Additional Model Families 
+
+We further evaluate REVO on Llama 3.2 and Gemma 3 to examine whether its rollout efficiency gains extend beyond Qwen3. For Llama, we use Llama-3.2-3B as the base student and Llama-3.2-3B-Instruct as the teacher. 20 Table 4 Evaluation on additional model families. AMC23, MATH-500, and MMLU-Redux are evaluated with Avg@16, Avg@4, and Avg@1, respectively. REVO is evaluated at Step 50, while all other methods are evaluated at Step 200. The highest score in each column is shown in bold.                                      
+
+> Llama 3.2 3B Gemma 3 4B Method AMC23 MATH-500 MMLU-Redux AMC23 MATH-500 MMLU-Redux
+> Base 0.3 0.3 6.3 0.3 0.5 11.5 Sampled-Token OPD 1.9 3.4 12.5 13.4 34.7 53.4 EOPD 1.1 2.4 6.7 12.8 33.9 27.1 FiRe 1.7 2.6 9.2 12.5 33.1 48.6 REVO 6.4 8.9 28.3 16.9 37.7 54.1
+
+For Gemma, we use gemma-3-4b-pt as the base student and gemma-3-4b-it as the teacher. Evaluations on AIME24 and AIME25 yield accuracies close to zero for these model pairs and provide limited separation between methods. We therefore focus on AMC23 and MATH-500 for mathematical reasoning and MMLU-Redux for cross-domain evaluation. As shown in Table 4, REVO achieves the highest accuracy on all three reported benchmarks for both model families, outperforming sampled-token OPD, EOPD, and FiRe. Notably, REVO uses only 50 rollout iterations, while all other methods are trained for 200 iterations. These results show that the benefits of REVO extend beyond Qwen3 and remain effective across different model families. 
+
+Chat template and answer format. For each model family, we use the chat template associated with the corresponding teacher checkpoint for both training and evaluation. Across all families, we use the same boxed-answer format, where each prompt instructs the model to place the final answer in \boxed {} . The same template and answer format are used consistently for training and evaluation. 
+
+## B.4 Complete Training Procedure 
+
+We present the complete training procedure of REVO in Algorithm 1. The algorithm combines stabilized prefix correction, one-step resampling from the current policy, and reweighting guided by RKL variance with weights normalized to have mean one. Following Equation (4), the correction weights and reverse-KL signals are treated as constants in the stop-gradient surrogate. In Algorithm 1, we add a batch index i to all per-position quantities, writing ci,t for the prefix of response i at position t and A(k) 
+
+> i,t
+
+:= Ai,t (a(k) 
+
+> i,t
+
+). 
+
+## B.5 One-Step Resampling in OPD 
+
+We further isolate the effect of one-step resampling in OPD without rollout reuse. Each training iteration uses freshly generated student rollouts, so there is no policy staleness from repeated off-policy updates. Under the usual rollout setting with T = 1 and top-p = 1, rollout tokens are sampled directly from the student distribution defining the reverse-KL objective. In this case, one-step resampling mainly improves the finite-sample conditional gradient estimate by averaging multiple current-policy samples. We also generate training rollouts using the evaluation sampling setting, T = 0 .7 and top-p = 0 .95. This changes the rollout-token distribution while leaving the reverse-KL objective unchanged. As shown in Figure 8, sampled-token OPD degrades substantially under this altered sampling distribution, while one-step resampling largely preserves the performance obtained with T = 1 and top-p = 1. These results show two effects of one-step resampling in OPD. It improves finite-sample gradient estimation when rollout tokens are sampled directly from the student distribution, and it additionally corrects current-token mismatch when the rollout sampling distribution is altered. Under rollout reuse, the same resampling step addresses current-token mismatch caused by the student moving away from the behavior policy, while prefix correction separately accounts for the shift in stored prefixes. 21 Algorithm 1 Training procedure for REVO 
+
+Require: Student policy Pθ , teacher PT , prompt dataset D
+
+Require: Inner updates N , resampling size K, prefix cap C, RKL-variance threshold δ, weighting coefficient τ 
+
+> 1:
+
+for each rollout iteration do  
+
+> 2:
+
+Freeze the behavior policy Po ← Pθ 
+
+> 3:
+
+Sample prompts from D and generate rollout batch B using Po 
+
+> 4:
+
+Store behavior log-probabilities for all generated tokens  
+
+> 5:
+
+for n = 1 , . . . , N do  
+
+> 6:
+
+Evaluate the current student and teacher on all stored prefixes in B 
+
+> 7:
+
+for each valid position ( i, t ) ∈ M B do  
+
+> 8:
+
+Compute the prefix correction Gi,<t using Equation (3), with Gi,< 1 = 1  
+
+> 9:
+
+Sample 
+
+a(1)  
+
+> i,t
+
+, . . . , a (K)
+
+> i,t
+> i.i.d.
+
+∼ Pθ (· | ci,t ) 
+
+> 10:
+
+Compute the token-level reverse-KL signals A(k) 
+
+> i,t
+
+= log Pθ(a(k) 
+
+> i,t
+
+| ci,t ) − log PT (a(k) 
+
+> i,t
+
+| ci,t ) for 
+
+k = 1 , . . . , K  
+
+> 11:
+
+Estimate the local RKL variance bEKi,t using Equation (6)  
+
+> 12:
+
+Compute the raw RKL-variance weight bwi,t using Equation (7)  
+
+> 13:
+
+end for  
+
+> 14:
+
+Normalize weights over valid positions 
+
+wi,t = bwi,t  
+
+> 1
+> |M B|
+
+P 
+
+> (j,u )∈M B
+
+bwj,u  
+
+> 15:
+
+Construct the reweighted resampling objective 
+
+bL = 1
+
+|M B|
+
+X
+
+> (i,t )∈M B
+
+1
+
+K
+
+> K
+
+X
+
+> k=1
+
+sg 
+
+h
+
+Gi,<t wi,t A(k)
+
+> i,t
+
+i
+
+log Pθ
+
+
+
+a(k) 
+
+> i,t
+
+| ci,t 
+
+ 
+
+> 16:
+
+Update 
+
+θ ← θ − η∇θ bL 
+
+> 17:
+
+end for  
+
+> 18:
+
+end for 
+
+22 Figure 8 One-step resampling in OPD without rollout reuse. (a) Rollouts use T = 1, top-p = 1.      
+
+> (b) Rollouts use the evaluation setting T= 0 .7, top-
+> p= 0 .95. Resampling gives a modest gain in (a) and substantially mitigates the degradation in (b). Results are Avg@16 over AIME24, AIME25, and AMC23.
+
+# C Experimental Details and Ablations 
+
+## C.1 Implementation Details 
+
+We provide the implementation details of REVO in this section. All experiments are conducted on 4 × NVIDIA A100-SXM4-80GB GPUs. We use the DAPO-Math-17K dataset and convert the prompts to the boxed template. The same prompt template is used for evaluation to ensure consistency between training and evaluation. Our codebase builds on the implementation of Li et al. (2026b), and we apply the EOS-alignment method of Yang et al. (2026c) to address termination-token mismatch for all methods in this paper, including the baselines. We summarize the main implementation choices and hyperparameters in Table 5. Unless otherwise specified, all experiments use the same configuration. We set the prefix cap to C = 4 only as a numerical safeguard against rare extreme likelihood ratios. 
+
+Ablation details. We provide additional implementation details for the alternative correction and weighting rules evaluated in Table 3. 
+
+PPO-style clipped importance sampling. As an alternative current-token correction, we use the behavior policy that generated each rollout as Po and form the token importance ratio 
+
+rt(θ) = Pθ (at | ct)
+
+Po(at | ct) .
+
+We apply a dual-clipped PPO surrogate to the same token-level reverse-KL signal used by OPD, with clipping interval [0 .8, 1.2] and dual-clip constant cdual = 3 applied to positive reverse-KL signals, which correspond to negative advantages under the PPO convention. This baseline corrects only the current-token ratio and does not use prefix correction. 23 Table 5 Implementation details and hyperparameters used in the main experiments.                                      
+
+> Category Hyperparameter Setting
+> Method Candidate samples K16 RKL-variance threshold δ0.005 Reweighting coefficient τ0.75 Weight normalization Mean 1 over valid tokens Prefix-ratio cap C4Training Training data DAPO-Math-17K Data order Sequential ( shuffle=False )Outer training steps 50 Prompts per step 8Responses per prompt 4Inner updates per rollout 10 Maximum model/token length 8,192 Student rollout sampling temperature = 1 .0, top-p= 1 .0Teacher temperature 1.0 Optimizer AdamW Learning rate 1×10 −6
+> Weight decay 0.01 Gradient clipping 1.0 Precision FP32 Thinking mode Disabled Evaluation Temperature 0.7 Top-p0.95 Maximum new tokens 8,192 Prompt template Boxed answer Compute GPUs 4×NVIDIA A100-SXM4-80GB FSDP world size 4Tensor parallel size 1
+
+Alternative RKL-variance weighting. For the 
+
+p bEK variant, we directly use 
+
+qbEKt as the token weight and normalize the weights to have mean one over valid positions, without additional clipping. For the SNR-inspired saturating rule bEKt /( bEKt + c), we use c = 0 .25. This value approximately matches the median of the mean RKL variance across training iterations in the default run. In comparison, c = 1 is poorly matched to the observed scale because most values of bEKt are substantially smaller than one. 
+
+## C.2 Prompt Template 
+
+We use the following user prompt across all model families for both training and evaluation. For each family, it is formatted using the chat template associated with the corresponding teacher. 
+
+–problem˝ Please reason step by step, and put your final answer within “boxed–˝. 
+
+## C.3 Hyperparameter Validation 
+
+We further evaluate the sensitivity of REVO to the hyperparameters used for RKL-variance reweighting. Experiments are conducted with a Qwen3-1.7B Base student distilled from a Qwen3-4B teacher. We vary the RKL-variance threshold δ and the reweighting coefficient τ , and report Avg@16 over AIME24, AIME25, and AMC23. As shown in Table 7, REVO remains effective across a range of hyperparameter choices. Increasing τ from 0.6 to moderate values of 0 .7 and 0 .75 improves performance, while increasing it further to 0 .8 leads to some 24 Table 7 Hyperparameter sensitivity of RKL-variance reweighting for a Qwen3-1.7B Base student distilled from a Qwen3-4B teacher. Results are Avg@16 over AIME24, AIME25, and AMC23. † denotes the default configuration.                                         
+
+> Varying τ(δ= 0 .005) Varying δ(τ= 0 .75)
+> τAvg@16 δAvg@16
+> 0.60 18.8 0.001 19.3 0.70 19.7 0.005 †19.6
+> 0.75 †19.6 0.050 18.7 0.80 19.1 0.200 18.9
+> Table 8 Comparison of token-level prioritization signals for a Qwen3-1.7B Base student distilled from a Qwen3-4B teacher. The high-weight fraction is the fraction of valid token positions assigned weight τbefore normalization during training. Results are Avg@16 over AIME24, AIME25, and AMC23. Prioritization signal Threshold High-weight fraction Avg@16 Uniform weighting ––18.2 Sampled KL 0.02 34.0% 17.3 Sampled entropy 0.27 32.6% 16.5 RKL variance (REVO) 0.005 32.8% 19.6
+
+degradation. This suggests that overly aggressive prioritization can concentrate optimization too strongly on the high-variance positions. Performance is also relatively robust to the RKL-variance threshold δ. The default value δ = 0 .005 achieves the best result among the tested settings, while substantially different thresholds remain competitive. We further ablate the number of candidate tokens K used for one-step resampling. To isolate its effect, we disable the other components of REVO and vary only K. Results are shown in Table 6.            
+
+> Table 6 Effect of the resampling size Kfor a Qwen3-1.7B Base student distilled from a Qwen3-4B teacher, evaluated with Avg@16 over AIME24, AIME25, and AMC23, with other REVO components disabled.
+> K1416 64 Avg@16 17.6 17.8 17.8 18.1
+
+Performance improves slightly as K increases, from 17.6 at K = 1 to 18.1 at K = 64, while remaining stable across the intermediate choices. This indicates that one-step resampling is not highly sensitive to K, with larger sample sizes providing diminishing gains. 
+
+## C.4 Alternative Prioritization Signals 
+
+We compare RKL variance with two alternative signals computed from the same K candidate tokens used for one-step resampling: sampled KL, ¯AKt = 1
+
+> K
+
+P 
+
+> k
+
+A(k) 
+
+> t
+
+, and sampled student entropy, bHt = − 1
+
+> K
+
+P 
+
+> k
+
+log pt(a(k) 
+
+> t
+
+). Because the three signals have different numerical scales, a shared threshold would not give a fair comparison. We therefore use signal-specific thresholds chosen so that each signal assigns the higher weight to approximately the same fraction of positions as the default δ = 0 .005 of REVO, which is roughly one third. For each alternative signal, we first use a pilot run to estimate a threshold that matches this fraction, and then fix this threshold throughout the full training run. This gives thresholds of 0 .02 for sampled KL and 0 .27 for sampled student entropy. During full training, the resulting fractions of positions receiving the higher weight are close to one third for all three signals (Table 8). All other components, including the weighting coefficient and weight normalization, are unchanged. We use a Qwen3-1.7B Base student distilled from a Qwen3-4B teacher. As shown in Table 8, RKL variance achieves the highest accuracy, while both alternative signals perform worse than uniform weighting despite nearly matched high-weight fractions. Sampled KL measures the average log probability ratio between the student and teacher, while student entropy depends only on the student distribution. RKL variance instead measures variation in this log ratio across candidate tokens, capturing the centered signal that contributes to the local reverse KL gradient. 25 Table 9 Per-step wall-clock breakdown of REVO with 10 learner updates per rollout batch (U10), measured using a Qwen3-1.7B Base student and Qwen3-4B teacher on 4 × NVIDIA A100-SXM4-80GB GPUs.                                         
+
+> Component Time (s) Share
+> Student rollout 128.7 32.4% Initial student/teacher scoring 15.5 3.9% 9 additional student log-prob evaluations 52.1 13.1% 9 additional teacher scoring passes 33.8 8.5% 9 additional resampling signal constructions ( K= 16) 14.2 3.6% 10 actor forward/backward/update passes 100.0 25.2% Data movement, synchronization, and scheduling 52.5 13.2%
+> Total 396.7 100% Table 10 Effect of rollout batch size for OPD with a Qwen3-1.7B Base student distilled from a Qwen3-4B teacher. Relative rollout budget is normalized to the default REVO setting. Results are Avg@16 over AIME24, AIME25, and AMC23. Method Rollout iterations Prompts per iteration Relative rollout budget Avg@16 REVO 50 81×19.6
+> OPD 200 84×16.8 OPD 200 16 8×17.5 OPD 200 32 16 ×18.4
+
+## C.5 Wall-Clock Time 
+
+We further report the wall-clock efficiency of REVO using Qwen3-1.7B Base as the student and Qwen3-4B as the teacher. On 4 × NVIDIA A100-SXM4-80GB GPUs, training REVO for 50 steps takes approximately 5.5 hours, whereas training standard OPD for 200 steps takes approximately 10 hours. As shown in Table 1, REVO substantially outperforms OPD under the same 50-step rollout budget and also surpasses OPD trained for 200 steps, demonstrating improved performance together with lower wall-clock cost. We further profile the per-step runtime of REVO in Table 9. Even with 10 learner updates per rollout batch, student rollout generation remains the largest single component at 32.4% of the step. The additional updates add scoring and optimization cost, but each of them reuses the rollout rather than paying for autoregressive generation again. For comparison, a standard OPD step consists only of the rollout, one scoring pass, and one actor update, so generation accounts for roughly 70% of its wall-clock time. The breakdown makes the trade-off of REVO explicit: learner-side computation is spent to extract more optimization progress from each generated rollout, and the share of time spent generating drops from about 70% to about 32%. 
+
+## C.6 Effect of Rollout Batch Size 
+
+We further examine whether increasing the rollout batch size improves OPD. We increase the number of prompts per iteration from 8 to 16 and 32 and train each configuration for 200 rollout iterations. Relative rollout budget is normalized to the default REVO setting, which uses 8 prompts per iteration for 50 rollout iterations. As shown in Table 10, increasing the rollout batch size steadily improves OPD. However, even with a 16 ×
+
+relative rollout budget, OPD remains below REVO trained with the default rollout budget. 26

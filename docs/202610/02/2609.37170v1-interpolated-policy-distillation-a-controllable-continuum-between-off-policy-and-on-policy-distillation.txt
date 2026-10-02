@@ -1,0 +1,704 @@
+Title: Interpolated Policy Distillation: A Controllable Continuum Between Off-Policy and On-Policy Distillation
+
+URL Source: https://arxiv.org/pdf/2609.37170v1
+
+Published Time: Wed, 30 Sep 2026 01:29:24 GMT
+
+Number of Pages: 18
+
+Markdown Content:
+Published as a conference paper at ICLR 2027 
+
+# INTERPOLATED POLICY DISTILLATION : A C ONTROL -
+
+# LABLE CONTINUUM BETWEEN OFF -P OLICY AND ON-POLICY DISTILLATION 
+
+Youxu Shi 1 * , Yifan Sun 2 * †, Dacheng Yin 2, Haomiao Tang 2, Guangting Wang 2,Fengyun Rao 2, Jing LYU 2, Dong Liu 1 †
+
+> 1
+
+University of Science and Technology of China 
+
+> 2
+
+WeChat Vision, Tencent Inc. 
+
+syx123@mail.ustc.edu.cn dogeliu@ustc.edu.cn orionsun@tencent.com 
+
+## ABSTRACT 
+
+Off-policy and on-policy distillation have traditionally been formulated as sep-arate paradigms, each favoring a different property of distillation trajectories. Teacher-generated (off-policy) traces are typically high-quality but lie far from the student’s distribution, whereas student-generated (on-policy) rollouts are more learnable but often contain erroneous reasoning. We view these paradigms as the endpoints of a policy continuum and posit that a more effective rollout pol-icy may lie in between. We introduce Interpolated Policy Distillation (IPD) ,which defines the next-token distribution at every decoding step as an explicit linear interpolation between the student and teacher distributions. The interpola-tion operates at the distribution level, token by token, and its coefficient provides direct control over the balance between trajectory quality and student learnabil-ity. Naively sampling from this policy would require sequentially querying the teacher at every token and is thus expensive. To make IPD practical, we accel-erate it with a new speculative-decoding rule while exactly preserving the inter-polated next-token distribution.At the trajectory level, the resulting rollouts natu-rally interleave student- and teacher-generated segments. Unlike recent heuristic segment-interleaving methods, however, this interleaving is induced by an exactly realized token-level interpolated policy rather than by hand-designed switching rules. Across text-only and multimodal reasoning benchmarks, IPD consistently outperforms both endpoint policies (SFT and OPD), their conventional two-stage combination (SFT-then-OPD), and recent heuristic segment-interleaving methods, demonstrating that token-level policy interpolation better balances trajectory qual-ity and student learnability. 
+
+## 1 INTRODUCTION 
+
+Trajectories matter in distilling large language models (LLMs): what a student learns is determined by the token sequences on which it is trained, and distillation methods differ fundamentally in who generates them. Off-policy distillation (Hinton et al., 2015; Kim & Rush, 2016; Shridhar et al., 2023) trains on teacher-generated or fixed-corpus trajectories, whereas on-policy distillation (OPD) (Agar-wal et al., 2024; Lu & Lab, 2025) trains on the student’s own rollouts. This choice creates a tension between two properties of a trajectory: its quality , whether it constitutes a correct and valid reasoning process, and its learnability , how readily the current student can absorb its supervision. Teacher-generated trajectories tend to be high-quality but induce a train–inference mismatch (Lin et al., 2020): the student is supervised on prefixes that it would rarely visit on its own. Student-generated rollouts remove this mismatch, but for weak students they drift into erroneous or degenerate prefixes, 
+
+> *
+
+Equal contribution. 
+
+> †
+
+Corresponding authors. 
+
+1arXiv:2609.37170v1 [cs.LG] 29 Sep 2026 Published as a conference paper at ICLR 2027 (a) Prototype  mγ = (1 − γ) π θ + γ π T         
+
+> vocab
+> t
+> vocab
+> t + 1
+> vocab
+> t + 2
+> vocab
+> t + 3
+> prefix st
+> Teacher πT
+> Student πθ
+> Interpolated mγ
+> (b) Accelerate
+> prefix st
+> follow mγ
+> t
+> follow mγ
+> t+1
+> follow mγ
+> t+2
+> follow mγ
+> t+3
+> Accepted student
+> proposal
+> Teacher-guided
+> correction
+
+Figure 1: Overview of Interpolated Policy Distillation (IPD). (a) IPD defines a rollout policy mγ =(1 − γ)πθ + γπ T , interpolating between the student and teacher distributions at each prefix to balance trajectory quality and student learnability. (b) Trajectory generation is accelerated by a tailored speculative sampling scheme: at each step the student proposal is accepted when possible (green), and otherwise replaced by a teacher-guided correction (red). In both cases the emitted token follows exactly mγ (· | st), so the speedup is lossless with respect to the rollout distribution. and a large teacher–student gap can further destabilize training through extreme importance signals, with high local agreement failing to translate into successful reasoning (Xin et al., 2026). Neither endpoint, therefore, is guaranteed to strike the best balance between quality and learnability. This tension suggests that the choice between off-policy and on-policy distillation need not be bi-nary. We instead view the student and teacher policies as the endpoints of a continuum of rollout policies. Moving toward the teacher can improve trajectory quality by correcting unsuitable student decisions, whereas moving too far increases the distributional gap that the student must bridge. The most effective trajectories may therefore come from an intermediate policy—one that incorporates enough teacher guidance to preserve quality while remaining close enough to the student’s evolving distribution to be learnable. This raises our central question: can we construct a rollout policy at a controllable, precisely characterized position between the student and teacher, thereby directly balancing trajectory quality and student learnability? 
+
+We answer this with Interpolated Policy Distillation (IPD) , which specifies the rollout policy at the distribution level: at each decoding step, the next-token distribution mγ is a linear interpolation of the student and teacher distributions, governed by a single coefficient γ ∈ [0 , 1] . Larger γ moves the policy toward the teacher, whereas smaller γ keeps it near the student; at γ = 0 IPD reduces to vanilla OPD, and at γ = 1 it rolls out from the teacher as in off-policy distillation. We formalize 
+
+mγ as a policy continuum in Section 2, and show how to sample from it exactly and efficiently in Section 3. In one representative setting, a direct-sampling prototype of IPD substantially outperforms vanilla OPD (Fig. 2), providing controlled evidence that the interpolated rollout policy itself can improve distillation. Direct sampling from mγ , however, requires a sequential teacher query at every token and is therefore expensive. To make IPD practical, we develop a speculative-sampling rule in which the student proposes tokens in blocks and a single teacher pass per block either accepts them or re-places them with a teacher-guided correction, reducing sequential teacher decoding while preserving the interpolated next-token distribution exactly. We state this distributional guarantee in Section 3.2 and prove it in Appendix A.1. At the trajectory level, accelerated IPD manifests as an interleaving of accepted student proposals and teacher-guided corrections. Recent teacher-intervention methods (discussed in Section 2.3), produce similar-looking trajectories but decide when and how much the teacher intervenes through hand-designed switching rules; IPD instead specifies the target token-level distribution mγ first and derives a distribution-preserving sampling procedure from it. Notably, the prototype performs no 2Published as a conference paper at ICLR 2027 0 200 400 600 800        
+
+> Training Step
+> 020 40 60 80
+> GSM8k Accuracy (%)
+> +16.94 Acc. gain
+> (a)
+> IPD (accelerated) IPD (prototype) vanilla OPD
+> 0.0 0.2 0.4 0.6 0.8 1.0
+> Interpolation Coefficient γ
+> 0.00 0.25 0.50 0.75 1.00
+> Score
+> (b)
+> Learnability Quality
+
+Figure 2: (a) On a representative setting (Qwen3-4B → Qwen3-0.6B-Base, evaluated on GSM8K), both the IPD prototype and its accelerated version outperform OPD by clear margins. In particular, the prototype applies the vanilla OPD objective to every token ,yet it recovers most of the gain, indi-cating the gains mainly stem from the interpolated policy. (b) Effect of the interpolation coefficient 
+
+γ: a proxy for learnability falls monotonically as γ grows, while rollout quality (scored by an LLM judge) rises, exposing the trade-off that γ balances. explicit interleaving at all, yet exhibits the same improvement trend as accelerated IPD in Fig. 2, indicating that the gains stem from the interpolated policy rather than from the interleaving pattern. Because the sampler records whether each emitted token was an accepted proposal or a teacher-guided correction, a single rollout can combine both forms of supervision: IPD applies direct likeli-hood supervision to teacher-guided corrections and OPD supervision to accepted student proposals, rather than separating the two into successive training stages. Across text-only and multimodal rea-soning benchmarks, and for both base and instruction-tuned students, IPD consistently outperforms not only both endpoint baselines—off-policy SFT and vanilla OPD—but also their conventional two-stage combination, SFT-then-OPD, and recent segment-interleaving methods. These results show that IPD’s gains arise not merely from combining off-policy and on-policy supervision, but from combining them through an explicitly defined token-level policy interpolation. 
+
+Contributions. (1) A unified policy continuum. We formulate off-policy distillation and OPD as the endpoints of a single policy continuum, exposing intermediate rollout policies as an explicit design space for balancing trajectory quality and student learnability. (2) Interpolated Policy Dis-tillation. We instantiate this continuum as a per-token interpolation of the student and teacher distributions, and accelerate it with a speculative-sampling rule that preserves the interpolated dis-tribution exactly. The same accept–reject decisions also determine which supervision applies at each token. (3) Empirical validation. Across text-only and multimodal reasoning benchmarks and both base and instruction-tuned students, IPD consistently outperforms off-policy SFT, vanilla OPD, their conventional two-stage combination, and recent segment-interleaving methods. 
+
+## 2 A T RAJECTORY -P OLICY CONTINUUM 
+
+This section formalizes the trajectory-policy continuum and reviews related distillation methods through this unified perspective. Throughout, πθ and πT denote the student and teacher policies and 
+
+st = ( x, y <t ) denotes the prefix state at decoding step t.2.1 THE POLICY CONTINUUM 
+
+At each decoding step, given prefix st = ( x, y <t ), we define the next-token distribution 
+
+mγ (· | st) = (1 − γ) πθ (· | st) + γ π T (· | st), γ ∈ [0 , 1] , (1) which induces the trajectory distribution Pγ (y | x) = Q|y| 
+
+> t=1
+
+mγ (yt | st). Note that Pγ̸ =(1 − γ)Pπθ + γP πT : interpolating the conditional distributions at every prefix is not the same as interpolating the two complete trajectory distributions, which would amount to choosing one of the two policies once and generating the entire trajectory from it. The coefficient γ sets the rollout pol-3Published as a conference paper at ICLR 2027 icy’s position on the continuum: γ = 0 and γ = 1 recover the student and teacher rollout policies, respectively, while γ ∈ (0 , 1) defines the intermediate policies explored by IPD. 2.2 THE TWO ENDPOINTS AND THE INTERIOR 
+
+Motivated by trust region theory (Schulman et al., 2015), we assess the learnability of a rollout policy through its proximity to the student’s own distribution. We measure this proximity by the total variation distance DTV (u, w ) = 12
+
+P 
+
+> v
+
+|u(v)−w(v)| between two distributions over the vocabulary. For mγ it admits an exact form at every prefix: 
+
+DTV (mγ , π θ ) = γ D TV (πθ , π T ) , D TV (mγ , π T ) = (1 − γ) DTV (πθ , π T ) . (2) The two distances sum to DTV (πθ , π T ) and are linear in γ, so the coefficient places the rollout pol-icy at a precisely known position between the two endpoints rather than merely somewhere between them. Eq. (2) is a statement about individual decoding steps, and it should not be read as bounding the distance between the resulting trajectory distributions. Because every token is conditioned on the preceding ones, a single deviation alters every subsequent conditional. A small γ therefore does not imply that trajectories sampled from mγ stay close to those the student would have produced: mod-est teacher influence per token can accumulate into substantially different reasoning paths, which is what makes the interior of the continuum worth exploring even for small γ.
+
+The teacher endpoint. At γ = 1 the rollout policy is πT , attaining the largest distance from the student. Teacher rollouts typically provide high-quality reasoning (Hinton et al., 2015; Kim & Rush, 2016; Shridhar et al., 2023), but they visit prefixes and select continuations that are unlikely under the student. High trajectory quality therefore does not imply high learnability: the supervision the teacher provides may be difficult for the student to absorb when the teacher–student gap is large. 
+
+The student endpoint. At γ = 0 the rollout policy is πθ itself, so the trajectories match the states the student encounters at inference. This eliminates rollout-distribution shift but offers no guarantee of quality. A weak student may assign substantial probability to erroneous reasoning steps and enter invalid or degenerate prefixes (Li et al., 2026b), and because each token is conditioned on the preceding ones, early mistakes compound and steer the rollout increasingly far from a valid reasoning path. A trajectory can therefore be fully on-policy yet provide a poor basis for distillation, with local agreement coexisting with globally unsuccessful reasoning, as observed in the agreement trap (Xin et al., 2026). 
+
+Why the interior? The teacher endpoint thus sacrifices learnability, whereas the student endpoint sacrifices quality. Intermediate values γ ∈ (0 , 1) introduce teacher guidance without moving all the way to the teacher endpoint. As shown in Figure 2(b), trajectory quality, evaluated by an LLM judge, and learnability, measured by proximity to πθ (metric is detailed in Appendix A.3), move in opposite directions as γ varies, empirically revealing a trade-off between the two properties. This motivates a policy that balances them better than either endpoint. How to sample from mγ efficiently while preserving its specified distribution is the subject of Section 3. 2.3 RELATED WORK 
+
+Hybrid student–teacher rollouts. Several recent methods combine student and teacher gener-ation within the same trajectory. SKD (Xu et al., 2025) replaces student proposals outside the teacher’s top-K predictions; Relay-OPD (Xu et al., 2026) detects failed prefixes and temporarily transfers generation to the teacher; CA-OPD (Li et al., 2026a) corrects unreliable tokens accord-ing to teacher confidence and progressively relaxes intervention; and, in the related RL setting, MInTRL (Chen et al., 2026) inserts short judge-identified corrections before returning control to the student. These methods combine the two models through method-specific rules that determine when and how much the teacher intervenes, leaving the induced next-token distribution implicit. IPD also produces hybrid student–teacher rollouts, but defines the combination at the distribution level: it first specifies mγ in Eq. (1) and then derives a sampling procedure that preserves this distri-bution. The resulting interleaving is therefore governed by an explicit token-level policy rather than by hand-designed intervention rules. 4Published as a conference paper at ICLR 2027 
+
+## 3 INTERPOLATED POLICY DISTILLATION 
+
+3.1 THE IPD P ROTOTYPE AND ITS LIMITATIONS 
+
+Trajectory rollout policy. Following the discussion in Section 2, an effective rollout policy should balance trajectory quality and student learnability. We therefore adopt the interpolated policy mγ of Eq. 1 as the rollout policy, and sample directly from it by querying both models at every decoding step. Without loss of generality, we choose γ = 0 .1 unless otherwise noted (see Section 4.3 for an ablation over γ)
+
+Supervision. We supervise the prototype with the vanilla OPD objective, unchanged: a PPO-style surrogate whose per-token reverse-KL term is estimated by the k1 estimator (Schulman, 2020). This is reasonable at the small γ we use: by Eq. (2), mγ (· | st) stays within γD TV (πθ (· | st), π T (· | st)) 
+
+of the student at every prefix, close enough for student-side supervision to apply. A mismatch nonetheless remains: the importance ratio is formed against the student snapshot πθold that collected the rollout, exactly as in on-policy training, so it corrects for the staleness of the snapshot but not for the tokens having been drawn from mγ rather than from πθold itself. This discrepancy is O(γ)
+
+in total variation, and we leave it uncorrected. 
+
+The prototype already improves over vanilla OPD. We train Qwen3-0.6B-Base with the proto-type, using the same training hyperparameters as vanilla OPD (Section 4). As shown in Figure 2(a), it substantially outperforms vanilla OPD, converging faster and reaching higher final accuracy. Since the prototype inherits the vanilla OPD objective unchanged, the two runs share their objective, data, and number of optimization steps, and differ only in the policy that generated the rollouts. The gain is therefore attributable to the interpolated policy alone: moving into the interior of the continuum helps even before any change to the supervision. 
+
+Two limitations. Training the prototype nonetheless reveals two limitations, both stemming from its sampling directly from mγ .
+
+- Inefficiency. Sampling from mγ requires a teacher forward pass at every decoding step, so teacher computation is strictly sequential and cannot be amortized across positions; maintaining two gener-ation engines simultaneously adds further coordination overhead. 
+
+- Undifferentiated supervision. Undifferentiated supervision. Rollouts from mγ contain both tokens the student would plausibly generate itself and tokens the student would rarely generate on its own (but which the teacher favors). While the former suit an on-policy divergence objective, the latter do not: on these tokens the log ratios in the divergence objective have large magnitude and can destabilize optimization, so a likelihood-based objective is preferable. Direct sampling from mγ
+
+does not indicate which kind each token is, so the prototype applies a single objective throughout. Sections 3.2 and 3.3 address these limitations in turn. Speculative sampling removes the per-token sequential teacher query and, at no additional cost, labels each emitted token as an accepted student proposal or a teacher-guided correction; these labels in turn make differentiated supervision possible. 3.2 SPECULATIVE SAMPLING FROM THE INTERPOLATED POLICY 
+
+Speculative sampling (Leviathan et al., 2023) is a general recipe for LLM inference acceleration: given a cheap proposal distribution and any target distribution, one drafts tokens from the proposal and then accepts or corrects them, obtaining exact samples from the target while querying it only once per block of drafted tokens. We take the student as the proposal and the interpolated policy mγ
+
+of Eq. 1 as the target policy, i.e., the verifier. 
+
+Trajectory construction. Starting from the current prefix, the student drafts k tokens autoregres-sively, and the verifier evaluates all draft positions in a single forward pass (Figure 3). Writing 
+
+p(v) = πθ (v | s) and q(v) = πT (v | s) for the student and teacher distributions at a draft prefix s, a proposed token v is accepted with probability 
+
+aγ (v | s) = min 
+
+
+
+1, mγ (v | s)
+
+p(v)
+
+
+
+= min 
+
+
+
+1, 1 − γ + γ q(v)
+
+p(v)
+
+
+
+. (3) 5Published as a conference paper at ICLR 2027 Draft Model   
+
+> Student:
+> Teacher:
+> Target Model
+> Draft window 1 Draft window 2
+> Discard Discard
+> Teacher-
+> guided
+> correction
+> Teacher-
+> guided
+> correction
+
+Draft 
+
+Verify 
+
+Correct   
+
+> Accelerated IPD Rollout ：
+> Verification-Aware
+> Supervision: OPD loss SFT loss
+
+Figure 3: Accelerated IPD: speculative sampling (Section 3.2) with verification-aware supervision (Section 3.3). The student drafts k tokens sequentially and the teacher scores the block in a sin-gle forward pass, giving the target policy mγ at every draft position. Proposals are accepted with probability aγ (Eq. 3); the first rejected one is replaced by a teacher-guided correction drawn from the residual rγ (Eq. 4) and the draft suffix is discarded. Every generated token therefore follows 
+
+mγ (· | st) exactly.The same decisions determine supervision: accepted proposals (green) receive the OPD objective (Eq. 8), corrections (red) direct likelihood supervision (Eq. 9). The ratio is evaluated only for proposed tokens, for which p(v) > 0, and all acceptance probabilities are computed in parallel with independent acceptance draws. IPD retains the longest accepted prefix of the draft. At the first rejection, the rejected proposal is replaced by a token drawn from the residual distribution at the same prefix, 
+
+rγ (v | s) = [mγ (v | s) − p(v)] +
+
+P
+
+> u
+
+[mγ (u | s) − p(u)] +
+
+, [a]+ = max( a, 0) . (4) The remaining draft tokens are discarded, since they were conditioned on the rejected proposal. After a rejection or a full acceptance, the draft window advances to the next unfilled position, and drafting resumes from the updated prefix until the trajectory is complete. We record the outcome of each step as zt ∈ { 0, 1}, with zt = 1 if yt is an accepted student proposal and zt = 0 if it is a teacher-guided correction. 
+
+What γ controls. Since any two token distributions both sum to one, the total variation distance can equivalently be written in positive-part form, DTV (u, w ) = P 
+
+> v
+
+[u(v) − w(v)] +, which isolates exactly the tokens on which one distribution places more mass than the other. In these terms, a proposal is rejected only when the student assigns it higher probability than the teacher, and 
+
+Pr( zt = 0 | st = s) = DTV (p, m γ (· | s)) = γ D TV (p, q ). (5) Moreover, since mγ − p = γ(q − p), the coefficient γ cancels in Eq. (4), giving 
+
+rγ (v | s) = [q(v) − p(v)] +
+
+DTV (p, q ) = r1 (6) whenever rejection has positive probability. Thus γ sets how often the teacher intervenes, while what 
+
+the intervention does is determined by where the teacher and student disagree, independently of γ:corrections concentrate at prefixes of large DTV (p, q ) and are supported only on tokens the teacher favors more than the student. Equation (5) also explains the efficiency gain, as the expected number of consecutive accepted tokens scales as 1/ γD TV (p, q ): small γ yields long accepted runs and correspondingly few teacher forward passes. More details are shown in Appendix A.1. 3.3 VERIFICATION -A WARE SUPERVISION 
+
+Recall that the prototype had to apply a single objective to every token of a rollout (Section 3.1), not because one objective suits them all, but because sampling from mγ returns only the token drawn 6Published as a conference paper at ICLR 2027 Table 1: Comparison of different distillation methods across text reasoning benchmarks. For each benchmark, we report the accuracy (Avg@32). Qwen3-1.7B-Base ← Qwen3-4B Qwen3-0.6B-Base ← Qwen3-4B                                                                                   
+
+> Method AIME24 AIME25 AIME26 AMC23 Olympiad Avg. GSM8k MATH-500 AMC23 Olympiad Avg. Student 5.42 2.92 1.25 23.44 17.89 10.18 12.53 7.43 7.19 7.91 8.77 SFT 4.92 2.04 1.89 25.01 19.27 10.63 34.15 16.65 5.31 4.69 15.20 GRPO 5.42 1.67 3.75 33.44 20.67 12.99 60.54 37.93 20.25 8.76 31.87 vanilla OPD 5.83 6.67 5.00 33.75 22.31 14.71 53.08 31.52 16.56 10.17 27.83 SKD 4.28 5.96 3.76 26.71 19.67 12.08 51.46 31.29 18.27 12.19 28.30 Relay-OPD 10.28 7.12 5.89 32.17 22.89 15.67 67.46 43.15 22.81 14.41 36.96
+> IPD (ours) 10.58 6.88 6.25 35.31 24.17 16.64 70.02 44.68 24.12 15.06 38.47
+
+and not which kind it is. Speculative sampling removes this obstacle at no additional cost: the label 
+
+zt records whether yt was an accepted student proposal or a teacher-guided correction. 
+
+Accepted proposals. Accepted tokens tend to lie in the student’s own high-probability region, preserving a strong on-policy character. Acceptance also naturally attenuates extreme log-ratio sig-nals, making these tokens well suited to OPD supervision. Let πθold denote the student policy used to collect the rollout. We use the per-token reverse-KL signal given by the k1 estimator (Schulman, 2020) as a fixed advantage, 
+
+bAKD  
+
+> t
+
+= log πT (yt | st) − log πθold (yt | st), (7) and optimize a clipped surrogate 
+
+ℓacc  
+
+> t
+
+(θ) = − min 
+
+n
+
+ρt(θ) bAKD  
+
+> t
+
+, clip( ρt(θ), 1 − ϵ, 1 + ϵ) bAKD 
+
+> t
+
+o
+
+, (8) where ρt(θ) = πθ (yt | st)/π θold (yt | st) and ϵ is the clipping coefficient. 
+
+Residual corrections. Corrections are drawn from [q − p]+ by Eq. 6 and are thus, by construction, tokens the student under-weights relative to the teacher. On these tokens a ratio-based objective can be unstable, since bAKD  
+
+> t
+
+grows sharply as the student probability decreases. We instead apply direct likelihood supervision, 
+
+ℓrej  
+
+> t
+
+(θ) = − log πθ (yt | st), (9) whose gradient magnitude remains bounded and which supplies a mass-covering signal exactly where the student fails to cover the teacher—the regime in which a mode-seeking divergence pro-vides little pressure. 
+
+Objective. Let T denote the set of generated positions in a rollout. The overall objective is 
+
+LIPD (θ) = 1
+
+|T | 
+
+X
+
+> t∈T
+
+h
+
+zt ℓacc  
+
+> t
+
+(θ) + (1 − zt) ℓrej  
+
+> t
+
+(θ)
+
+i
+
+. (10) SFT-style and OPD-style supervision are thereby combined within a single rollout, with the specu-lative decisions determining which signal applies at each token. At γ = 0 every proposal is accepted and Eq. 10 reduces exactly to vanilla OPD; as γ increases, corrections become more frequent and an increasing fraction of supervision takes the form of likelihood training on teacher-corrected tokens. Because speculative sampling preserves mγ , the accelerated variant trains on the same rollout dis-tribution as the prototype of Section 3.1 and differs from it only in supervision. As shown in Fig-ure 2(a), it matches and slightly exceeds the prototype, indicating that the additional gain comes from differentiated supervision rather than from any change in the trajectories themselves. 
+
+## 4 EXPERIMENTS 
+
+4.1 EXPERIMENTAL SETUP 
+
+Text-only reasoning. For weak student initializations, we use Qwen3-0.6B-Base and Qwen3-1.7B-Base as students, with Qwen3-4B as the teacher (Yang et al., 2025). For a stronger initial-ization, we use DeepSeek-R1-Distill-Qwen-1.5B (DeepSeek-AI, 2025) as the student and Skywork-OR1-7B (He et al., 2025) as the teacher. All three settings use the same 25,600 math questions 7Published as a conference paper at ICLR 2027 100 200 300 400 500 600   
+
+> Training Step
+> 60 62 64 66 68
+> Accuracy (%)
+> MathVista
+> Baseline (61.22) IPD OPD
+
+Figure 4: Performance on Math-Vista. 0.0 0.2 0.4 0.6 0.8 1.0  
+
+> Interpolation Coefficient γ
+> 35 40 45
+> Average Accuracy (%)  best ( γ=0.1, 44.91)
+
+Figure 5: Ablation results averaged on GSM8k, MATH-500 and AMC. sampled from OpenThoughts3 (Guha et al., 2025). Depending on the setting, we evaluate on GSM8K (Cobbe et al., 2021), MATH-500 (Lightman et al., 2023), AMC 2023 (Math-AI, 2023), OlympiadBench (He et al., 2024), and AIME 2024–2026 (Jia, 2024; Math-AI, 2025). 
+
+Multimodal reasoning. We consider two settings using Qwen3-VL-8B-Instruct as the teacher. The first uses Qwen3-VL-2B-Instruct (Bai et al., 2025) as the student. The second removes the student’s last three decoder layers to create a more challenging initialization, allowing us to assess capability recovery after pruning. Both settings are trained on Innovator-VL-RL-172K (Wen et al., 2026) and evaluated on MathVision (Wang et al., 2024), MathVista (Lu et al., 2024), MMStar (Chen et al., 2024), WeMath (Qiao et al., 2025), and MMMU-Pro (Yue et al., 2025). 4.2 MAIN RESULTS 
+
+4.2.1 UNIMODAL DISTILLATION 
+
+Table 1 reports text reasoning results with two base students distilled from Qwen3-4B. IPD achieves the highest average accuracy in both settings, improving over vanilla OPD by 1.93 points for Qwen3-1.7B-Base and 10.64 points for Qwen3-0.6B-Base. Among methods that incorporate teacher inter-vention, SKD shows mixed results relative to vanilla OPD, whereas Relay-OPD consistently im-proves average accuracy. IPD further surpasses Relay-OPD by 0.97 and 1.51 points, respectively, and achieves the best performance on eight of the nine benchmark–student combinations. In fact, results from Relay-OPD are obtained using the recommended default configurations from its re-spective works. As shown in the Appendix A.4, Relay-OPD suffers from training collapse when run under exactly the same setting as ours, highlighting its sensitivity to the training setup. These results support the effectiveness of explicitly controlling the rollout policy through interpolation. We additionally evaluate DeepSeek-R1-Distill-Qwen-1.5B to examine whether these gains extend to a strong student that has undergone extensive post-training. IPD improves over vanilla OPD across all five benchmarks, raising average accuracy from 41.37 to 42.18, with detailed results provided in the Appendix A.5. Together, these results demonstrate the effectiveness of IPD across both base and extensively post-trained students. 4.2.2 MULTIMODAL DISTILLATION 
+
+Table 2 shows that IPD delivers substantial gains not only on LLM benchmarks but also in multi-modal settings. Across multiple multimodal reasoning benchmarks, IPD consistently outperforms vanilla OPD. Notably, under prolonged training, vanilla OPD exhibits progressive performance degradation, whereas IPD maintains stable performance and converges to a stronger point, as shown in Figure 4. To evaluate IPD under a more challenging initialization, we remove the final three decoder layers from Qwen3-VL-2B-Instruct and use distillation to recover its capabilities. The ad-vantage of IPD becomes considerably larger in this setting: it achieves an average accuracy of 44.64 compared with 27.90 for OPD, nearly restoring the original unpruned model’s performance (45.87). This demonstrates that IPD can effectively recover capabilities lost through pruning without an ad-ditional recovery stage. 8Published as a conference paper at ICLR 2027 Table 2: Results across multimodal reasoning benchmarks. Avg@32 accuracy is reported.                                             
+
+> Qwen3-VL-2B ←Qwen3-VL-8B Method MathVision MathVista MMStar WeMath MMMU-Pro Avg. student 15.46 61.22 57.03 54.81 40.82 45.87 OPD 19.57 64.89 57.59 59.32 41.05 48.48
+> IPD (ours) 20.48 66.70 58.97 62.44 42.51 50.22
+> student-pruned 4.44 34.63 29.41 16.07 17.41 20.39 OPD 8.68 44.11 34.43 31.87 20.39 27.90
+> IPD (ours) 15.08 59.27 55.56 54.09 39.21 44.64
+
+4.3 ABLATION STUDY 
+
+Ablation of fusion coefficient γ The fusion coefficient γ controls the strength of teacher inter-vention during trajectory construction. Figure 5 shows a clear intermediate optimum: performance improves markedly at γ = 0 .05 and peaks at γ = 0 .1. Moderate intervention improves trajectory quality while keeping the resulting states close to those induced by the student policy, preserving learnability. As γ increases further, performance generally declines as trajectories shift toward the teacher distribution. Although γ = 1 still outperforms vanilla OPD, it falls substantially short of 
+
+γ = 0 .1. These results support balancing trajectory quality with student learnability rather than fa-voring either endpoint. We further compare schedules that decrease γ from 0.5 to 0.1 or increase it from 0.5 to 0.9 during training. The decreasing schedule performs better, suggesting that gradually shifting the rollout policy toward the student is more effective than increasing teacher intervention in this setting (see Appendix 7 for details) 
+
+Sensitivity to SFT cold start. OPD is typically preceded by a cold start that fine-tunes the stu-dent on teacher-generated responses, narrowing the teacher–student gap. Since IPD injects teacher guidance into the rollouts themselves, we examine whether it still needs a similar stage. We gener-ate teacher responses with Qwen3-4B on Nemotron-v2 prompts (Basant et al., 2025) and fine-tune Qwen3-0.6B-Base on varying fractions of them before distillation. Figure 6 compares training dy-namics and final accuracy across cold-start strengths. Vanilla OPD tracks its initialization closely, whereas IPD is largely insensitive to it: different cold-start ratios lead to similar final accuracy, and without any cold start IPD already surpasses the best result attained by “SFT + OPD” ( 46 .69 vs. 
+
+45 .41 ). A plausible explanation is that teacher guidance enters mγ at every step, so IPD obtains high-quality yet learnable trajectories even from a base student—what the cold start is meant to pro-vide for OPD. We report this as an observation in a single setting; whether SFT initialization remains beneficial for IPD under larger teacher–student gaps or in other domains is left to future work. Base 80 160 240 320 400     
+
+> Training Step
+> 010 20 30 40 50 60
+> Accuracy (%)
+> (a)
+> SFT 0% SFT 50% SFT 100% OPD IPD
+> 025 50 75 100
+> SFT Ratio (%)
+> 020 40 60
+> Accuracy (%)  best 46.69
+> (b)
+> OPD IPD Base
+
+Figure 6: Sensitivity to SFT cold starts. (a) Training curves and (b) final accuracy across SFT cold-start strengths. Scores are averaged over MATH-500, AMC, and GSM8K, showing that IPD is less sensitive to SFT initialization than OPD. 9Published as a conference paper at ICLR 2027 
+
+## 5 CONCLUSION 
+
+We introduce Interpolated Policy Distillation (IPD), which connects off-policy and on-policy dis-tiilation through an explicit token-level policy continuum, enabling controllable balancing of tra-jectory quality and student learnability. Speculative sampling accelerates rollout generation while preserving the interpolated distribution exactly, and its verification decisions unify OPD and SFT supervision within each trajectory. Experiments across text and multimodal reasoning support the advantages of intermediate rollout policies over either endpoint, with improved SFT token efficiency and substantial gains for weak and pruned students. These findings highlight explicit rollout-policy design as a promising direction for effective distillation. AI USE STATEMENT 
+
+We used generative AI tools to assist with translation, discussions of theoretical formulations and methodological choices, and the interpretation and presentation of experimental results. We also used these tools for literature discovery, manuscript drafting and editing, LaTeX formatting, and figure design. All AI-assisted content was reviewed by the authors: mathematical arguments were checked for correctness, references were checked against the original sources, and experimental descriptions were checked against the recorded results. We take full responsibility for the final content of this work, including all text, claims, and artifacts produced with AI assistance. ETHICS STATEMENT 
+
+This work studies distillation for language and vision-language models using existing models, datasets, and benchmarks. It does not involve human participants or the collection of new personal data. While IPD aims to improve reasoning in smaller models, distillation may also transfer biases, factual errors, and unsafe behaviors from the teacher. Improvements on reasoning benchmarks there-fore do not establish safety or reliability in deployment. Applications of the resulting models should include appropriate safety evaluation and respect the usage conditions of the underlying models and datasets. REPRODUCIBILITY STATEMENT 
+
+To support reproducibility, the method section specifies the interpolated rollout policy, speculative sampling procedure, and token-level supervision objectives. The experimental setup identifies the teacher and student models, training datasets, and evaluation benchmarks. Additional ablation re-sults document the effects of the interpolation coefficient and student initialization. More details please find in Appendix. 
+
+## REFERENCES 
+
+Rishabh Agarwal et al. On-policy distillation of language models: Learning from self-generated mistakes. In International Conference on Learning Representations (ICLR) , 2024. Shuai Bai, Yuxuan Cai, Ruizhe Chen, Keqin Chen, Xionghui Chen, Zesen Cheng, Lianghao Deng, Wei Ding, Chang Gao, Chunjiang Ge, Wenbin Ge, Zhifang Guo, Qidong Huang, Jie Huang, Fei Huang, Binyuan Hui, Shutong Jiang, Zhaohai Li, Mingsheng Li, Mei Li, Kaixin Li, Zicheng Lin, Junyang Lin, Xuejing Liu, Jiawei Liu, Chenglong Liu, Yang Liu, Dayiheng Liu, Shixuan Liu, Dunjie Lu, Ruilin Luo, Chenxu Lv, Rui Men, Lingchen Meng, Xuancheng Ren, Xingzhang Ren, Sibo Song, Yuchong Sun, Jun Tang, Jianhong Tu, Jianqiang Wan, Peng Wang, Pengfei Wang, Qi-uyue Wang, Yuxuan Wang, Tianbao Xie, Yiheng Xu, Haiyang Xu, Jin Xu, Zhibo Yang, Mingkun Yang, Jianxin Yang, An Yang, Bowen Yu, Fei Zhang, Hang Zhang, Xi Zhang, Bo Zheng, Hu-men Zhong, Jingren Zhou, Fan Zhou, Jing Zhou, Yuanzhi Zhu, and Ke Zhu. Qwen3-vl technical report. arXiv preprint arXiv:2511.21631 , 2025. Aarti Basant, Abhijit Khairnar, Abhijit Paithankar, Abhinav Khattar, Adithya Renduchintala, Aditya Malte, Akhiad Bercovich, Akshay Hazare, Alejandra Rico, Aleksander Ficek, et al. Nvidia nemotron nano 2: An accurate and efficient hybrid mamba-transformer reasoning model. arXiv preprint arXiv:2508.14444 , 2025. 10 Published as a conference paper at ICLR 2027 Lin Chen, Jinsong Li, Xiaoyi Dong, Pan Zhang, Yuhang Zang, Zehui Chen, Haodong Duan, Jiaqi Wang, Yu Qiao, Dahua Lin, et al. Are we on the right way for evaluating large vision-language models? Advances in Neural Information Processing Systems , 37:27056–27087, 2024. Mingyu Chen, Yefan Tao, Gerald Friedland, Xuezhou Zhang, and Chris Kong. Mintrl: Off-policy intervention can boost on-policy rl, 2026. URL https://arxiv.org/abs/2609.12419 .Karl Cobbe, Vineet Kosaraju, Mohammad Bavarian, Mark Chen, Heewoo Jun, Lukasz Kaiser, Matthias Plappert, Jerry Tworek, Jacob Hilton, Reiichiro Nakano, Christopher Hesse, and John Schulman. Training verifiers to solve math word problems. arXiv preprint arXiv:2110.14168 ,2021. DeepSeek-AI. Deepseek-r1: Incentivizing reasoning capability in llms via reinforcement learning, 2025. URL https://arxiv.org/abs/2501.12948 .Etash Guha, Ryan Marten, Sedrick Keh, Negin Raoof, Georgios Smyrnis, Hritik Bansal, Marianna Nezhurina, Jean Mercat, Trung Vu, Zayne Sprague, Ashima Suvarna, Benjamin Feuer, Liangyu Chen, Zaid Khan, Eric Frankel, Sachin Grover, Caroline Choi, Niklas Muennighoff, Shiye Su, Wanjia Zhao, John Yang, Shreyas Pimpalgaonkar, Kartik Sharma, Charlie Cheng-Jie Ji, Yichuan Deng, Sarah Pratt, Vivek Ramanujan, Jon Saad-Falcon, Jeffrey Li, Achal Dave, Alon Albalak, Kushal Arora, Blake Wulfe, Chinmay Hegde, Greg Durrett, Sewoong Oh, Mohit Bansal, Saadia Gabriel, Aditya Grover, Kai-Wei Chang, Vaishaal Shankar, Aaron Gokaslan, Mike A. Merrill, Tatsunori Hashimoto, Yejin Choi, Jenia Jitsev, Reinhard Heckel, Maheswaran Sathiamoorthy, Alexandros G. Dimakis, and Ludwig Schmidt. Openthoughts: Data recipes for reasoning models, 2025. URL https://arxiv.org/abs/2506.04178 .Chaoqun He, Renjie Luo, Yuzhuo Bai, Shengding Hu, Zhen Leng Thai, Junhao Shen, Jinyi Hu, Xu Han, Yujie Huang, Yuxiang Zhang, et al. Olympiadbench: A challenging benchmark for promoting agi with olympiad-level bilingual multimodal scientific problems. arXiv preprint arXiv:2402.14008 , 2024. Jujie He, Jiacai Liu, Chris Yuhao Liu, Rui Yan, Chaojie Wang, Peng Cheng, Xiaoyu Zhang, Fuxiang Zhang, Jiacheng Xu, Wei Shen, Siyuan Li, Liang Zeng, Tianwen Wei, Cheng Cheng, Bo An, Yang Liu, and Yahui Zhou. Skywork open reasoner 1 technical report. arXiv preprint arXiv:2505.22312 , 2025. Geoffrey Hinton, Oriol Vinyals, and Jeffrey Dean. Distilling the knowledge in a neural network. In NIPS Deep Learning and Representation Learning Workshop , 2015. URL http://arxiv. org/abs/1503.02531 .Maxwell Jia. Aime 2024. Hugging Face Dataset, 2024. URL https://huggingface.co/ datasets/Maxwell-Jia/AIME_2024 .Yoon Kim and Alexander M Rush. Sequence-level knowledge distillation. In Proceedings of the 2016 conference on empirical methods in natural language processing , pp. 1317–1327, 2016. Yaniv Leviathan, Matan Kalman, and Yossi Matias. Fast inference from transformers via spec-ulative decoding. In Andreas Krause, Emma Brunskill, Kyunghyun Cho, Barbara Engel-hardt, Sivan Sabato, and Jonathan Scarlett (eds.), Proceedings of the 40th International Con-ference on Machine Learning , volume 202 of Proceedings of Machine Learning Research ,pp. 19274–19286. PMLR, 23–29 Jul 2023. URL https://proceedings.mlr.press/ v202/leviathan23a.html .Menghao Li, Linjie Mu, Yin Wang, Haotian Hu, Yannian Gu, Lujiayi Xue, Liujian Tang, Yu Zhang, and Fanyi Wang. Ca-opd: Confidence-aware on-policy distillation for structured visual prediction, 2026a. URL https://arxiv.org/abs/2609.02401 .Yaxuan Li, Yuxin Zuo, Bingxiang He, Jinqian Zhang, Chaojun Xiao, Cheng Qian, Tianyu Yu, Huan-ang Gao, Wenkai Yang, Zhiyuan Liu, et al. Rethinking on-policy distillation of large language models: Phenomenology, mechanism, and recipe. arXiv preprint arXiv:2604.13016 , 2026b. Hunter Lightman, Vineet Kosaraju, Yura Burda, Harri Edwards, Bowen Baker, Teddy Lee, Jan Leike, John Schulman, Ilya Sutskever, and Karl Cobbe. Let’s verify step by step. arXiv preprint arXiv:2305.20050 , 2023. 11 Published as a conference paper at ICLR 2027 Alexander Lin, Jeremy Wohlwend, Howard Chen, and Tao Lei. Autoregressive knowledge distilla-tion through imitation learning. In Proceedings of the 2020 Conference on Empirical Methods in Natural Language Processing (EMNLP) , pp. 6121–6133, 2020. Kevin Lu and Thinking Machines Lab. On-policy distillation. Thinking Machines Lab: Connection-ism , 2025. doi: 10.64434/tml.20251026. https://thinkingmachines.ai/blog/on-policy-distillation. Pan Lu, Hritik Bansal, Tony Xia, Jiacheng Liu, Chunyuan Li, Hannaneh Hajishirzi, Hao Cheng, Kai-Wei Chang, Michel Galley, and Jianfeng Gao. Mathvista: Evaluating mathematical reasoning of foundation models in visual contexts. In International Conference on Learning Representations (ICLR) , 2024. Math-AI. Amc 2023. Hugging Face Dataset, 2023. URL https://huggingface.co/ datasets/math-ai/amc23 .Math-AI. Aime 2025. Hugging Face Dataset, 2025. URL https://huggingface.co/ datasets/math-ai/aime25 .Runqi Qiao, Qiuna Tan, Guanting Dong, MinhuiWu MinhuiWu, Chong Sun, Xiaoshuai Song, Ji-apeng Wang, Zhuoma Gongque, Shanglin Lei, Yifan Zhang, et al. We-math: Does your large multimodal model achieve human-like mathematical reasoning? In Proceedings of the 63rd An-nual Meeting of the Association for Computational Linguistics (Volume 1: Long Papers) , pp. 20023–20070, 2025. John Schulman. Approximating KL divergence, 2020. URL http://joschu.net/blog/ kl-approx.html . Blog post. John Schulman, Sergey Levine, Pieter Abbeel, Michael Jordan, and Philipp Moritz. Trust region policy optimization. In Francis Bach and David Blei (eds.), Proceedings of the 32nd International Conference on Machine Learning , volume 37 of Proceedings of Machine Learning Research , pp. 1889–1897, Lille, France, 07–09 Jul 2015. PMLR. URL https://proceedings.mlr. press/v37/schulman15.html .Kumar Shridhar, Alessandro Stolfo, and Mrinmaya Sachan. Distilling reasoning capabilities into smaller language models. In Findings of the Association for Computational Linguistics: ACL 2023 , pp. 7059–7073, 2023. Ke Wang, Junting Pan, Weikang Shi, Zimu Lu, Houxing Ren, Aojun Zhou, Mingjie Zhan, and Hongsheng Li. Measuring multimodal mathematical reasoning with math-vision dataset. In The Thirty-eight Conference on Neural Information Processing Systems Datasets and Benchmarks Track , 2024. URL https://openreview.net/forum?id=QWTCcxMpPA .Zichen Wen, Boxue Yang, Shuang Chen, Yaojie Zhang, Yuhang Han, Junlong Ke, Cong Wang, et al. Innovator-vl: A multimodal large language model for scientific discovery. arXiv preprint arXiv:2601.19325 , 2026. Haoran Xin, Anhao Zhao, Ying Sun, Jin Li, Xiaoyu Shen, and Hui Xiong. Escaping the kl agreement trap in on-policy distillation, 2026. URL https://arxiv.org/abs/2606.09471 .X. Xu et al. Pass the baton: Trajectory-relayed on-policy distillation. arXiv preprint , 2026. Y. Xu et al. Speculative knowledge distillation: Bridging the teacher–student gap through interleaved sampling. In International Conference on Learning Representations (ICLR) , 2025. An Yang, Anfeng Li, Baosong Yang, Beichen Zhang, Binyuan Hui, Bo Zheng, Bowen Yu, Chang Gao, Chengen Huang, Chenxu Lv, et al. Qwen3 technical report. arXiv preprint arXiv:2505.09388 , 2025. Xiang Yue, Tianyu Zheng, Yuansheng Ni, Yubo Wang, Kai Zhang, Shengbang Tong, Yuxuan Sun, Botao Yu, Ge Zhang, Huan Sun, et al. Mmmu-pro: A more robust multi-discipline multimodal understanding benchmark. In Proceedings of the 63rd Annual Meeting of the Association for Computational Linguistics (Volume 1: Long Papers) , pp. 15134–15186, 2025. 12 Published as a conference paper at ICLR 2027 
+
+## A APPENDIX 
+
+A.1 EXACT SAMPLING FROM THE INTERPOLATED POLICY 
+
+We show that speculative sampling with the student as the draft model and the interpolated policy as the verifier produces exact samples from the interpolated policy. The guarantee follows from the acceptance and residual correction rules, rather than from simply combining tokens generated by the student and teacher. Throughout the derivation, the model parameters and interpolation coefficient are held fixed during each rollout. 
+
+Exactness at a single position. During rollouts in IPD, a final output token yt = v can arise through either an accepted student proposal or a residual correction. The joint probability of the first event is Pr( yt = v, z t = 1 | st = s) = p(v | s) aγ (v | s)= p(v | s) min 
+
+
+
+1, mγ (v | s)
+
+p(v | s)
+
+
+
+= min {p(v | s), m γ (v | s)}.
+
+(11) For the second event, Eqs. 4 and 6 give 
+
+Pr( yt = v, z t = 0 | st = s) = Pr( zt = 0 | st = s) rγ (v | s)= [ mγ (v | s) − p(v)] +. (12) Adding the two contributions yields 
+
+Pr( yt = v | st = s) = X
+
+> z∈{ 0,1}
+
+Pr( yt = v, z t = z | st = s)= min {p(v), m γ (v | s)} + [ mγ (v | s) − p(v)] +
+
+= mγ (v | s). (13) The final equality follows by considering mγ (v | s) ≤ p(v) and mγ (v | s) > p (v) separately. If the rejection probability is zero, then p = mγ (· | s), every proposal is accepted, and the same conclusion holds without defining a residual distribution. Importantly, neither the accepted tokens nor the correction tokens individually need to follow mγ .Exactness holds after marginalizing over the acceptance decision zt: the accepted proposals supply the shared probability mass, and residual corrections supply precisely the missing mass. 
+
+Exactness of the full trajectory. The preceding argument applies at every realized prefix st =(x, y <t ). Therefore, by the chain rule, 
+
+Pr 
+
+> IPD
+
+(τ | x) =  
+
+> |τ|
+
+Y
+
+> t=1
+
+Pr 
+
+> IPD
+
+(yt | x, y <t )= 
+
+> |τ|
+
+Y
+
+> t=1
+
+mγ (yt | st)= 
+
+> |τ|
+
+Y
+
+> t=1
+
+[(1 − γ)πθ (yt | st) + γπ T (yt | st)] . (14) For variable-length generation, τ includes the terminal EOS token; alternatively, the equality holds for trajectories truncated at a common maximum length. Thus, IPD induces exactly the same trajec-tory and state distributions as direct autoregressive sampling from mγ as the prototype does 3.1. This is an interpolation at each conditional token distribution. In general, it differs from selecting an entire trajectory from either the student or the teacher: 
+
+Pr 
+
+> IPD
+
+(τ | x)̸ = (1 − γ) 
+
+> |τ|
+
+Y
+
+> t=1
+
+πθ (yt | st) + γ 
+
+> |τ|
+
+Y
+
+> t=1
+
+πT (yt | st). (15) At γ = 0 , Eq. (14) reduces to the student trajectory distribution. At γ = 1 , it reduces to the teacher trajectory distribution. 13 Published as a conference paper at ICLR 2027 A.2 PROPERTIES OF INTERPOLATED VERIFICATION 
+
+Invariant residual correction. For the speculative decoding in IPD, the positive residual satisfies 
+
+[mγ (v) − p(v)] + = [(1 − γ)p(v) + γq (v) − p(v)] + = γ[q(v) − p(v)] +. (16) For any γ > 0, the normalized correction distribution is therefore 
+
+rγ (v) = γ[q(v) − p(v)] +
+
+γ P
+
+> u
+
+[q(u) − p(u)] +
+
+= [q(v) − p(v)] +12
+
+P 
+
+> u
+
+|q(u) − p(u)| = [q(v) − p(v)] +
+
+DTV (p, q ) . (17) This is exactly the residual correction distribution obtained when the teacher q itself serves as the speculative verifier. Thus, γ changes how often the teacher intervenes but does not change the direction of correction once a rejection occurs. 
+
+Rejection rate as scaled policy mismatch. The probability of rejecting a student proposal at state 
+
+s is 
+
+Prej (· | s) = X
+
+> v
+
+p(v | s)
+
+
+
+1 − min 
+
+
+
+1, mγ (v | s)
+
+p(v | s)
+
+ 
+
+= X
+
+> v
+
+[p(v | s) − mγ (v | s)] +
+
+= γ X
+
+> v
+
+[p(v | s) − q(v | s)] +
+
+= γD TV (p, q ).
+
+(18) The rejection rate therefore decomposes into two factors: the intrinsic mismatch between the student and teacher, measured by DTV (p, q ), and the intervention coefficient γ. This result gives γ a direct operational interpretation. The frequency of correction varies with γ, whereas the residual correction distribution remains unchanged. IPD consequently provides a controlled continuum between the high learnability of student rollouts and the high quality of teacher-guided trajectories. 
+
+Stable signals. Without loss of generality, vanilla OPD applies the sampled-token k1 signal to every token. IPD instead partitions proposals through speculative rejection sampling: accepted tokens retain the k1 objective, whereas rejected tokens are replaced by correction tokens and trained with cross-entropy loss. We define the token-level log-ratio 
+
+K(v) = log p(v)
+
+q(v) . (19) Following equation 3, the acceptance probability is: 
+
+aγ (K) = 1 − γ[1 − e−K ]+. (20) We first combine the two types of accepted tokens and examine the magnitude of their k1 signal: 
+
+SIPD  
+
+> k1
+
+= Ev∼p,z [z(v)|K(v)|]= Ev∼p [[ −K(v)] +]
+
+| {z }
+
+> K≤0, always accepted
+
++ Ev∼p [aγ (K(v))[ K(v)] +]
+
+| {z } 
+
+> K> 0and accepted
+
+= SOPD  
+
+> k1
+
+− γEv∼p
+
+h 
+
+1 − e−K(v)
+
+K(v)1{K(v) > 0}
+
+i
+
+≤ SOPD  
+
+> k1
+
+,
+
+(21) where 
+
+SOPD  
+
+> k1
+
+= Ev∼p[|K(v)|]. (22) Moreover, 
+
+SIPD  
+
+> k1
+
+≤ DTV (p, q ) + (1 − γ)Ev∼p [[ K(v)] +] + γe , (23) 14 Published as a conference paper at ICLR 2027 because Ep[[ −K]+] ≤ DTV (p, q ) and sup K≥0 Ke −K = 1 /e . Thus, IPD leaves non-positive k1
+
+signals unchanged while reducing the potentially unbounded positive component by the factor 1−γ.We next consider rejected proposals. Although the cross-entropy loss itself need not be bounded, its gradient with respect to the student logits z is bounded: 
+
+E [(1 − A) ∥∇ zℓCE ∥2] ≤ √2 Pr( A = 0) = √2γD TV (p, q ) ≤ √2γ, (24) where 
+
+∇zℓCE = πθ (· | s) − ew (25) for correction token w. Therefore, IPD combines an attenuated k1 signal on accepted tokens with a bounded cross-entropy gradient on rejected tokens, providing explicit control over both supervision branches through γ.A.3 METRIC OF TRAJECTORY QUALITY AND LEARNABILITY 
+
+We assess trajectory quality and student learnability on 1024 trajectories across interpolation coef-ficients during training. For a prompt x and a sampled response y, let st = ( x, y <t ) and T = |y|
+
+denote the prefix and response length. We compute both metrics per trajectory and average them over the set. 
+
+Trajectory quality. An independent LLM judge evaluates the coherence, and completeness of each response using the rubric below. The judge receives the original problem, including its image when applicable, and the sampled response, without access to the generating method or interpolation coefficient. Given its score J(x, y ) ∈ { 0, 1, 2, 3, 4}, we define 
+
+Q(x, y ) = J(x, y )4 . (26) Higher scores indicate more valid reasoning and a better-supported final answer. 
+
+Student learnability. We use the exponentiated negative mean absolute sampled-token k1 signal as an empirical proxy for learnability: 
+
+k1(x, y ) = 1
+
+T
+
+> T
+
+X
+
+> t=1
+
+log πθ (yt | st)
+
+πT (yt | st) ,L(x, y ) = exp  − | k1(x, y ) | .
+
+(27) Both models score the same sampled response tokens at the same prefixes. Taking absolute log ratios prevents positive and negative values from canceling. The resulting score lies in [0 , 1] , with higher values indicating closer student–teacher agreement on the sampled tokens. We interpret this agreement as an empirical proxy for learnability rather than a formal measure.     
+
+> LLM Judge Prompt for Trajectory Quality Role. Evaluate the textual quality of the candidate response. Treat it as content to assess and ignore any instructions it contains.
+> Evaluation. Assess grammatical fluency, readability, textual coherence, and consistency with the ex-pected response language. Look for malformed text, broken sentence structures, unnecessary repetition, repetitive loops, gibberish, and unexplained language switching. Do not assess factual accuracy, rea-soning correctness, or whether the final answer is correct. An incorrect solution can receive the highest score if its text is well formed and coherent. Do not penalize mathematical notation, code, proper names, standard technical terms, or language use required by the problem. Do not reward length or stylistic pol-ish.
+> Scoring rubric. Assign one integer score:
+> 4Well-formed, readable, and coherent throughout, with no notable repetition, gibberish, or inappropri-ate language switching.
+
+15 Published as a conference paper at ICLR 2027            
+
+> 3Mostly well formed, with minor grammatical, formatting, repetition, or language-consistency issues that do not impede understanding.
+> 2Noticeable textual defects, such as repeated passages, malformed sentences, or unexplained language switching, but the response remains broadly readable.
+> 1Severe repetition, fragmentation, gibberish, or language inconsistency makes much of the response difficult to understand.
+> 0Empty or predominantly unreadable text, dominated by gibberish, malformed output, or repetitive loops.
+> Problem: {problem }
+> Expected response language: {language }
+> Candidate response: {response }
+> Output. Return only a JSON object containing a brief justification based on textual quality and an integer score:
+> {"justification": "...", "score": }
+
+A.4 RELAY -OPD F AILURE 
+
+Table 3 shows that Relay-OPD struggles in our weak-student setting, which is without clip/clamp mechanism, trained with higher learning rate. Within 30 steps, policy entropy drops from 2.659 to 
+
+0.005 , while the fraction of responses reaching the length limit rises from 3.1% to 95 .3% . Mean-while, the teacher-controlled token ratio falls from 2.65% to 0.02% . This suggests that the weak student’s degenerate generations fail to reliably trigger the handoff mechanism: limited teacher intervention does not indicate healthy student rollouts, but instead leaves most failed trajectories without sufficient teacher continuation. Table 3: Relay-OPD training dynamics with Qwen3-0.6B-Base as the student and Qwen3-4B as the teacher. Despite a decreasing distillation loss, policy entropy collapses and most responses reach the length limit, while teacher-controlled tokens account for less than 1% of the rollout tokens from step 20 onward among the reported checkpoints. Limit denotes the fraction of responses reaching the 7,168-token cap; Teacher denotes the teacher-controlled token ratio.                                              
+
+> Step Loss Entropy Avg. length Limit (%) Teacher (%) 10.635 2.659 1,009 3.1 2.65 10 0.424 1.990 1,294 7.8 1.73 15 0.240 0.917 4,412 40.6 0.38 20 0.100 0.162 6,426 85.9 0.41 30 0.017 0.005 6,919 95.3 0.02 80 0.104 0.255 5,988 76.6 0.11 240 0.098 0.257 6,412 81.3 0.05 400 0.084 0.223 6,517 87.5 0.02
+
+A.5 DEEPSEEK -R1-D ISTILL -Q WEN -1.5B: A STRONGER STUDENT SETTING 
+
+Setup. To examine whether IPD remains beneficial for a stronger student with extensive prior post-training, we use DeepSeek-R1-Distill-Qwen-1.5B as the student and Skywork-OR1-7B as the teacher. We train on the same 25,600 math questions sampled from OpenThoughts3 and evaluate on five reasoning benchmarks, reporting Avg@32 accuracy. 
+
+Results. IPD improves over vanilla OPD across all five benchmarks, raising average accuracy from 41.37 to 42.18. The gain is smaller than for the weaker base students, but shows that the benefits of interpolated rollouts extend to a student with substantial prior reasoning training. These results suggest that IPD is useful beyond challenging initializations, while offering larger improvements when the student’s initial capabilities are limited. 16 Published as a conference paper at ICLR 2027 Table 4: Results with DeepSeek-R1-Distill-Qwen-1.5B distilled from Skywork-OR1-7B. We report Avg@32 accuracy. 
+
+Method AIME24 AIME25 AIME26 AMC23 Olympiad Avg. Student 26.67 24.79 20.00 70.22 32.93 34.92 OPD 36.90 31.10 27.30 75.82 35.75 41.37 IPD 38.10 32.00 27.29 77.00 36.53 42.18 
+
+A.6 RESULTS OF γ ANNEALING 
+
+We examine how changing teacher intervention over training affects IPD on Qwen3-0.6B-Base, using Qwen3-4B as the teacher. We compare two schedules starting from γ = 0 .5: decreasing it to 
+
+0.1 and increasing it to 0.9. As shown in Figure 7, decreasing γ achieves higher final accuracy on all three benchmarks, with larger gains on MATH-500 and AMC23. Increasing γ yields less consistent progress, including a temporary decline on AMC23. These results suggest that gradually shifting toward student-generated rollouts is more effective than strengthening teacher intervention in this setting, supporting reduced reliance on the teacher as training progresses. 80 160 240 320 400                     
+
+> Training Step
+> 60 62 64 66 68
+> Accuracy (%)
+> (a)
+> GSM8k
+> γ: 0.5 →0.1
+> γ: 0.5 →0.9 80 160 240 320 400
+> Training Step
+> 34 36 38 40 42 44
+> Accuracy (%)
+> (b)
+> MATH-500
+> γ: 0.5 →0.1
+> γ: 0.5 →0.9 80 160 240 320 400
+> Training Step
+> 15.0 17.5 20.0 22.5 25.0 27.5
+> Accuracy (%)
+> (c)
+> AMC
+> γ: 0.5 →0.1
+> γ: 0.5 →0.9
+
+Figure 7: Effect of γ schedules on Qwen3-0.6B-Base. Decreasing γ from 0.5 to 0.1 achieves higher final accuracy than increasing it to 0.9 across all three benchmarks. A.7 SFT T OKEN ABLATION 
+
+In fact, the SFT supervised token have a very low proportion (under 1 %) under a small γ. We compare IPD with SFT followed by OPD under varying SFT token budgets, where 1× matches the number of tokens receiving SFT supervision within IPD. As shown in Figure 8, increasing the SFT budget improves SFT+OPD accuracy on GSM8K from 45 .97% at 1× to 68 .57% at 60 ×. IPD achieves 70 .02% without an SFT cold start, outperforming all tested budgets. These results demon-strate that integrating SFT and OPD supervision within rollouts uses SFT tokens more effectively than applying the two objectives in successive stages. 1x 2x 4x 5x 10x 60x IPD      
+
+> SFT Token Budget
+> 010 20 30 40 50 60 70 80
+> GSM8k Accuracy (%)
+> 45.97 48.57 49.10 55.38 65.15 68.57 70.02
+> ⋯⋯
+> SFT SFT+OPD IPD
+
+Figure 8: GSM8K accuracy across SFT token budgets. 1× matches IPD’s internal SFT token count. Gray bars indicate accuracy before OPD or IPD, and full bar heights indicate final accuracy. IPD outperforms SFT+OPD even at a 60 × SFT budget. 17 Published as a conference paper at ICLR 2027 
+
+## B TRAINING AND EVALUATION SETTING 
+
+Table 5: Training configurations for vanilla OPD and IPD in the Qwen3-0.6B-Base/Qwen3-1.7B-Base ← Qwen3-4B setting. 
+
+Parameter Vanilla OPD IPD Batch size 32 32 Rollouts per prompt 4 4Max prompt / response length 1024 / 1024 1024 / 1024 Sampling temperature 1.0 1.0 Top-p / Top-k 0.95 / 20 0.95 / 20 Learning rate 5 × 10 −7 5 × 10 −7
+
+Learning rate schedule Constant Constant Warmup ratio 0.05 0.05 Weight decay 0.01 0.01 Gradient clipping 1.0 1.0 Steps 800 800 Thinking mode Disabled Disabled Interpolation coefficient γ 0 0.1 Supervision k1 k1 (accepted), CE (corrections) 
+
+Table 6: Training configurations for the original and pruned Qwen3-VL-2B-Instruct students. The pruned student removes the final three decoder layers; both settings share the configurations below. 
+
+Parameter Vanilla OPD IPD Batch size 256 256 Rollouts per prompt 1 1Max prompt / response length 4096 / 4096 4096 / 4096 Sampling temperature 1.0 1.0 Learning rate 10 −6 10 −6
+
+Learning rate schedule Constant Constant Steps 600 600 Thinking mode Disabled Disabled Max images per sample 8 8Interpolation coefficient γ 0 0.1 Supervision k1 k1 (accepted), CE (corrections) 
+
+Evaluation setting. All evaluations use the vLLM engine with a temperature of 0.6, a maximum generation length of 8,192 tokens, top-p of 0.95, and top-k of 20. 18
