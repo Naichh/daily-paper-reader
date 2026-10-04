@@ -1,0 +1,936 @@
+Title: SAKI: Maximal-Coupling-Routed Teacher Supervision for On-Policy Distillation
+
+URL Source: https://arxiv.org/pdf/2609.36601v1
+
+Published Time: Wed, 30 Sep 2026 00:48:21 GMT
+
+Number of Pages: 24
+
+Markdown Content:
+Preprint 
+
+# SAKI: M AXIMAL -C OUPLING -R OUTED TEACHER SU-
+
+# PERVISION FOR ON-P OLICY DISTILLATION 
+
+Miteto Wei 1 Xiaohan Wang 1,∗ Zehao Chen 1 Jiajun Chai 1 Sichao Liu 2
+
+Li Wang 1 Haoyuan Xu 1 Zhaoyu Hu 1 Wei Lin 1 Guojun Yin 1,∗
+
+> 1
+
+Meituan 2KTH Royal Institute of Technology 
+
+vizzlin@foxmail.com,wangxiaohan17@meituan.com,yinguojun02@meituan.com 
+
+## ABSTRACT 
+
+On-policy distillation (OPD) reduces train–test state mismatch by training a stu-dent on its own generated trajectories. However, a weak student may initially visit poor, teacher-misaligned prefixes, forcing the teacher to provide supervision on states that it would rarely generate under its own policy. Teacher-guided rollout policies improve the visited state distribution, but typically retain the same per-prefix reverse-KL objective. We introduce SAKI (Supervision Allocation with KL-constrained Interpolation), which routes token-level supervision using re-alized accept/correction events from maximal coupling . We construct a geo-metrically interpolated behavior policy inside a student-centered KL trust region and realize it through maximal coupling with the student. The coupling preserves a student proposal whenever possible and exposes a correction event precisely when realizing the guided policy requires an intervention. Accepted positions re-tain reverse-KL supervision, whereas correction positions switch to direct super-vision on the teacher’s highest-probability token. Because the correction prob-ability is exactly TV( pt, q t), the same trust-region radius constrains rollout de-viation and upper-bounds intervention and specialized-supervision frequency. An engine-resident speculative verifier preserves the exact-q trajectory distribution and coupling semantics while improving matched-workload rollout throughput by 
+
+4.22 ×. Across seven mathematical reasoning benchmarks, our method improves the matched teacher-guided baseline in Mean@8 and Pass@8 for both 1.7B and 0.6B students . Placement controls show that correction-triggered routing outperforms both equal-budget random and TV-weighted placement. Fixed-prefix analysis further shows persistent teacher alignment, with larger gains over random placement at higher initial student–teacher disagreement. 
+
+Code: github.com/Miteto-sudo/SAKI 
+
+## 1 INTRODUCTION 
+
+Knowledge distillation (KD) transfers capabilities from a strong teacher model to a smaller student by matching its predictive behavior (Buciluˇ a et al., 2006; Ba & Caruana, 2014; Hinton et al., 2015; Gou et al., 2021), with sequence-level distillation extending this idea to autoregressive generation (Kim & Rush, 2016). For autoregressive language models, however, conventional distillation suf-fers from a state-distribution mismatch: the student is often trained on fixed or teacher-generated prefixes, while at inference time it must condition on its own generations (Bengio et al., 2015; Ross et al., 2011). On-policy distillation (OPD) alleviates this mismatch by letting the student generate its own trajectories and querying the teacher on states actually visited by the student (Gu et al., 2024; Agarwal et al., 2024). This is particularly attractive for reasoning distillation, where an early generation decision can alter the entire subsequent trajectory and hence the states on which later supervision is provided (Hu et al., 2026). Yet OPD’s defining strength also creates an important limitation. The effectiveness of distillation depends not only on what supervision the teacher provides, but also on the states at which that 
+
+> *
+
+Corresponding author 
+
+1arXiv:2609.36601v1 [cs.AI] 29 Sep 2026 Preprint 
+
+supervision is queried. When the student is substantially weaker than the teacher, early mistakes can compound and drive its rollout toward prefixes that have low probability under the teacher’s own behavior. Although the teacher distribution remains well-defined at such prefixes, the teacher is forced to continue from states that it would rarely generate under its own policy. The resulting conditional signal may therefore be less representative of the reasoning behavior that makes the teacher strong and less directly useful for capability transfer. This suggests that improving OPD requires considering both where teacher supervision is queried and how the student is updated at the resulting positions (Wang et al., 2026). A natural approach is to guide the rollout distribution toward the teacher. Directly replacing student rollouts with teacher trajectories, however, introduces the opposite distribution shift: the resulting states may be too far from the student’s current behavior to form an appropriate online learning distribution. Trust-Region Behavior Blending (TRB) (Plyusov et al., 2026) addresses this trade-off by constructing, at every prefix, an intermediate behavior distribution that moves toward the teacher while remaining inside a student-centered KL trust region. Given student distribution pt and teacher distribution Tt, TRB constructs a teacher-guided behavior distribution qt that moves toward Tt while satisfying a student-centered constraint DKL (qt∥pt) ≤ ϵ. TRB therefore addresses the behavior-side question of where supervision is queried while retaining the same per-prefix objective. This leaves a complementary objective-side question: should positions where the guided behavior retains a student proposal receive the same supervision as positions where it must override that proposal? Reverse KL is student-weighted: tokens contribute in proportion to the student distribution (Lin et al., 2026). Consequently, teacher-preferred tokens with low student support receive weak gradient updates under RKL, highlighting the need for targeted direct supervision at high-conflict positions. Sampling qt through maximal coupling provides this distinction automatically. At each position, the student proposes from pt; the coupling either retains the proposal or draws the residual correction required to realize qt. We reuse this realized accept/correction event as an endogenous supervision router. Under maximal coupling, Pr( Ct = 1) = TV( pt, q t), which is the minimum disagreement probability among couplings of pt and qt; the trust-region constraint further gives Pr( Ct = 1) ≤pϵ/ 2. Section 3.3 formalizes these properties. We designate this framework SAKI (Supervision Allocation with KL-constrained Interpolation). Under this design, KL-constrained interpolation defines the target intermediate behavior distribution, while realized maximal-coupling events serve as an endogenous mechanism that adaptively routes token-level supervision. This creates a natural distinction between two types of positions. At an accepted position , the student proposes behavior that remains compatible with the teacher-guided rollout. At a correction position ,the student’s proposed behavior cannot be retained and the intermediate policy must modify the trajectory. We hypothesize that these two regimes need not receive identical supervision. We therefore retain the ordinary sampled-token reverse-KL (RKL) signal at accepted positions, while switching correction positions to direct supervision on the teacher’s highest-probability to-ken. Specifically, once maximal coupling identifies a correction, we query the teacher at the same prefix and optimize the negative log-likelihood of its Top-1 token. This exposes the student to the teacher-preferred mode precisely at positions where the guided rollout cannot retain the student pro-posal. Because corrections occur with probability TV( pt, q t), the resulting teacher supervision is sparse and follows a stochastic, conflict-adaptive routing pattern determined by the rollout coupling itself rather than by an external token-selection heuristic. The residual correction token determines the subsequent rollout prefix, whereas the teacher Top-1 token determines the local parameter update. Thus, the same coupling process controls both trajectory construction and supervision routing. Exact teacher-guided rollout requires online teacher distributions. We therefore use engine-resident speculative block verification to amortize teacher inference while preserving the exact-q trajectory distribution and the coupling semantics required by our objective. Our contributions are summarized as follows: • Coupling-routed teacher-mode supervision. We reuse realized correction events as an endogenous supervision router: accepted positions retain sampled-token RKL, while cor-rections receive direct supervision on the teacher’s Top-1 token. Placement controls show 2Preprint gains over both count-matched random and TV-weighted conflict-aware placement, while fixed-prefix analysis shows persistent teacher support and larger gains over random place-ment at higher student–teacher conflict. • Minimal-intervention teacher-guided rollout. We realize the TRB behavior policy through maximal coupling. The correction probability is exactly TV( pt, q t), the mini-mum possible intervention probability among couplings with these marginals, and satisfies 
+
+Pr( Ct = 1) ≤ pϵ/ 2 under the trust region. • Engine-resident exact-q rollout. We implement maximal-coupling rollout with engine-resident speculative block verification, including exact residual correction and first-rejection commit/rollback. The system preserves the exact-q trajectory distribution and coupling semantics while providing a 4.22 × matched-workload speedup over the external-loop implementation. 
+
+## 2 RELATED WORK 
+
+2.1 ON-P OLICY DISTILLATION AND TEACHER -G UIDED ROLLOUTS 
+
+Knowledge distillation has been studied across both strong-to-weak and emerging weak-to-strong settings (Hinton et al., 2015; Chen et al., 2026), with sequence-level distillation extending the idea to autoregressive generation (Kim & Rush, 2016). For language models, fixed or teacher-generated trajectories create a mismatch between prefixes observed during training and those encountered when the student generates autonomously. MiniLLM (Gu et al., 2024) studies reverse-KL distil-lation for language generation, while Generalized Knowledge Distillation (GKD) (Agarwal et al., 2024) provides a framework for training students on their own generated outputs. These approaches motivate modern OPD, in which teacher supervision is delivered on states induced by the student’s current policy. On-policy training reduces train–test state mismatch, but it also makes the training state distribution depend on the current student’s quality. TRB (Plyusov et al., 2026) addresses this issue by replacing pure student rollout with a teacher-guided behavior distribution constrained by a student-centered KL trust region, while retaining the same reverse-KL objective at visited prefixes. We adopt the same intermediate-policy construction, but additionally exploit the accept/correction information exposed when that policy is realized through maximal coupling. Recent work has also explored fine-grained distillation objectives and token-level supervision, including selective KL objectives and reflective credit assignment (Xing et al., 2026; Wei et al., 2026). Our focus is on whether the guided rollout process itself can provide the routing signal for such specialized supervision. 2.2 SPECULATIVE DECODING AND DISTILLATION 
+
+Speculative decoding accelerates autoregressive generation by allowing a draft model to propose multiple tokens that are verified in parallel by a stronger target model (Stern et al., 2018; Leviathan et al., 2023; Chen et al., 2023). Accepted prefixes can be committed in blocks, reducing the number of expensive serial target-model decoding steps while preserving the desired sampling distribution. Draft-OPD (Lei et al., 2026) connects speculative verification with on-policy distillation and demon-strates that verification outcomes can provide useful training structure in addition to computational acceleration. Our use of speculative execution serves a different role: the student is the capability-distilled model itself, and speculative verification is used to efficiently realize a separate teacher-guided intermediate distribution q. The resulting maximal-coupling decisions are then reused to route token-level supervision. Thus, speculative execution in our framework simultaneously amor-tizes teacher inference and exposes the coupling events that connect trajectory construction with the distillation objective. 
+
+## 3 METHOD 
+
+Figure 1 summarizes one rollout-and-update step. At prefix ht, the rollout student pt and teacher Tt
+
+define the trust-region behavior distribution qt. Maximal coupling then realizes qt while exposing an accept/correction event that determines the rollout token and routes the local distillation objective. 3Preprint Prob.           
+
+> 1
+> 0
+> Tokens
+> Prob.
+> 1
+> 0
+> Tokens
+> Prefix
+> Student
+> Teacher
+> Geometric bridge
+> Student Guided Teacher
+> teacher -seeking
+> Stay near student
+> Student
+> rollout
+> Guided
+> rollout
+> Teacher
+> reference
+> Future
+> prefixes
+> Student
+> proposal
+> Maximal Coupling
+> Target:
+> Rejected mass Overlap Residual mass
+> Minimal intervention
+> ε bounds intervention and supervision frequency
+> Accept
+> Prob.
+> Correct
+> Prob.
+> ACCEPT
+> Reverse -KL supervision Next prefix
+> CORRECTION
+> Teacher Top -1 supervision
+> Rollout token Supervision Next prefix
+> in general
+> Training Objective
+> Draft K = 8 tokens Verify in one teacher pass Sequential coupling
+> Accepted First rejection
+> Correct at first rejection
+> Discard suffix; resume
+> Same coupling
+> events
+> Logits stay
+> on GPU
+
+4.22 ×      
+
+> matched -workload
+> rollout speedup
+> Exact -q speculative execution
+> 1Teacher -Guided Trust -Region Bridge 2Maximal Coupling: Accept / Correction 3Coupling -Routed Supervision and
+> Next -Prefix Rollout
+> Inherited from TRB Maximal -Coupling Realization
+
+Figure 1: Overview of SAKI and its exact-q execution. The TRB bridge defines qt; maximal coupling either retains a student proposal with RKL supervision or draws a residual rollout correc-tion and routes teacher-Top-1 supervision. The residual token controls the next prefix, whereas the teacher mode controls the update. Bottom: an engine-resident K-token verifier commits proposals only through the first rejection, commits an exact residual correction there, and discards the invalid suffix. 3.1 PROBLEM SETUP 
+
+Let ht = ( x, y <t ) denote the prefix at decoding step t. We write pt(v) = πold (v | ht) for the frozen student behavior distribution and Tt(v) = πT (v | ht) for the fixed teacher distribution. The trainable student is denoted by πθ .Standard student-rollout OPD samples yt ∼ pt and uses the detached log-ratio advantage 
+
+At = − sg[log pt(yt) − log Tt(yt)] .
+
+Under exact student on-policy sampling, this gives the standard one-sample score-function estimator associated with reverse KL (Williams, 1992); Appendix C provides the derivation. In our teacher-guided rollout, we reuse the same sampled log-ratio signal on student proposals retained by maximal coupling. As shown in Section 3.4, the resulting RKL supervision acts on the student–guided overlap mass min {pt, q t}, while correction positions receive the teacher-mode objective introduced below. 3.2 TEACHER -G UIDED TRUST -R EGION ROLLOUT 
+
+Following TRB (Plyusov et al., 2026), we construct the teacher-guided behavior policy by geometric interpolation between the student and teacher: 
+
+qβ,t (v) = pt(v)1−βt Tt(v)βt
+
+Zt(βt) , Zt(βt) = X
+
+u
+
+pt(u)1−βt Tt(u)βt . (1) At every position, we choose the largest feasible βt ∈ [0 , 1] satisfying 
+
+DKL (qβ,t ∥pt) ≤ ϵ. (2) Thus, ϵ = 0 recovers qt = pt, while a sufficiently large trust region permits qt = Tt. For complete-ness, Appendix B outlines the derivation of this geometric bridge following TRB (Plyusov et al., 2026). 4Preprint 3.3 MAXIMAL COUPLING AND CORRECTION EVENTS 
+
+To sample exactly from qt while exposing the relationship between student and guided behavior, we use maximal coupling (Lindvall, 2002). The student first proposes 
+
+zt ∼ pt. (3) The proposal is accepted with probability 
+
+at(zt) = min 
+
+
+
+1, qt(zt)
+
+pt(zt)
+
+
+
+. (4) If accepted, 
+
+yt = zt, Ct = 0 . (5) Otherwise, we draw a correction token from the positive residual distribution 
+
+rt(v) = [qt(v) − pt(v)] +
+
+P
+
+> u
+
+[qt(u) − pt(u)] +
+
+, (6) and set 
+
+yt = ct ∼ rt, Ct = 1 . (7) The following proposition gives the key distributional semantics of the correction event. 
+
+Proposition 1 (Distributional semantics of coupling corrections) . For maximal coupling between distributions p and q, the final output has marginal distribution q, and 
+
+Pr( C = 1) = TV( p, q ) = 1 − X
+
+> v
+
+min {p(v), q (v)}. (8) The conditional rejected-proposal and residual-correction distributions are derived in Appendix G. 
+
+Proposition 2 (Minimal-intervention property) . Let Γ( p, q ) denote the set of all couplings with marginals p and q. For any γ ∈ Γ( p, q ),
+
+Pr  
+
+> γ
+
+(Z̸ = Y ) ≥ TV( p, q ), (9) 
+
+with equality under maximal coupling. Thus, maximal coupling realizes the guided marginal with the minimum possible intervention probability. 
+
+Corollary 1 (Trust-region control of intervention rate) . If the guided distribution satisfies 
+
+DKL (qt∥pt) ≤ ϵ, (10) 
+
+then the maximal-coupling correction probability satisfies 
+
+Pr( Ct = 1) = TV( pt, q t) ≤
+
+r 12 DKL (qt∥pt) ≤
+
+r ϵ
+
+2 . (11) Thus, ϵ controls not only the distributional distance of the rollout from the student but also the maximum local probability that the rollout must override a student proposal. Appendix J.2 reports the empirical correction trajectory under the annealed trust-region schedule: the observed correction probability remains below the Pinsker upper bound and vanishes when ϵ
+
+reaches zero. The proof is given in Appendix G. Proposition 1 shows that a correction transfers the trajectory from probability mass overrepresented by the student relative to q toward mass underrepresented by the student relative to q. Hence, correction is not an arbitrary gating heuristic: it has an explicit distributional meaning. Unlike scalar conflict measures such as TV or KL, Ct is a realized, proposal-dependent event: it identifies positions where the sampled student proposal cannot be retained under the minimum-intervention coupling that exactly realizes qt.For the geometric bridge, the positive residual is supported only on tokens whose teacher-to-student likelihood ratio exceeds a prefix-dependent threshold; Appendix H gives the derivation. 5Preprint 3.4 COUPLING -R OUTED SUPERVISION 
+
+SAKI allocates supervision using the realized coupling indicator Ct. Accepted positions retain the sampled-token RKL update, whereas correction positions receive teacher-mode supervision. For a token v at prefix ht, define the sampled-token RKL loss 
+
+LRKL ,t (v) = −At(v) log πθ (v | ht), (12) where 
+
+At(v) = − sg [log pt(v) − log Tt(v)] . (13) At an accepted position, we evaluate this loss on the retained proposal v = zt = yt. We retain the ordinary RKL signal at accepted positions and replace it with teacher-mode supervision when 
+
+Ct = 1 .
+
+Teacher-mode supervision. At a correction position, let 
+
+v∗ 
+
+> t
+
+= arg max 
+
+> v
+
+Tt(v) (14) denote the teacher’s highest-probability token at the same prefix. We replace the RKL term with 
+
+LTM ,t = − log πθ (v∗ 
+
+> t
+
+| ht). (15) Thus, correction detection and correction supervision play decoupled roles: maximal coupling de-termines where specialized supervision is activated, while the teacher mode determines what the student learns. We adopt the deterministic teacher mode ( v∗ 
+
+> t
+
+= arg max v Tt(v)) rather than stochas-tic teacher sampling ( ˜v ∼ Tt), as the mode provides a sharp, low-variance target precisely at high-conflict positions. Empirically, teacher-mode supervision outperforms stochastic teacher sampling by +0 .62 Mean@8 and +1 .56 Pass@8 on the 1.7B student (Appendix F, Table 8), confirming the benefit of mode-seeking updates under coupling-detected divergence. This design naturally decouples exploration steering from parameter optimization: the residual token 
+
+ct steers the autoregressive prefix along the guided target distribution qt, whereas the teacher mode 
+
+v∗ 
+
+> t
+
+provides a low-variance, deterministic anchor for parameter updates at divergence points. Let Mt ∈ { 0, 1} denote the valid response-token mask and let Nvalid = P 
+
+> t
+
+Mt. Our coupling-aware objective is 
+
+L = 1
+
+Nvalid 
+
+"X
+
+> t
+
+Mt(1 − Ct)LRKL ,t + X
+
+> t
+
+MtCtLTM ,t 
+
+#
+
+. (16) At a fixed prefix, suppressing the time index for clarity, Proposition 1 gives 
+
+E [(1 − C)LRKL (Z)] = X
+
+> v
+
+min {p(v), q (v)}LRKL (v). (17) Thus, accepted-position RKL supervision acts exactly on the student–guided overlap mass 
+
+min {p, q }. Correction positions form the complementary branch of the same maximal-coupling re-alization: at these positions, the sampled student proposal cannot be retained while exactly realizing the guided rollout distribution q. We reuse this realized branch to switch from RKL to teacher-mode supervision, without introducing an additional token-selection rule or routing threshold. In our main training schedule, this correction supervision is transient: we anneal ϵ to zero so that the method eventually returns exactly to student-rollout RKL training. Section 4.3 analyzes the distributional effect of this transition. 3.5 EFFICIENT ENGINE -R ESIDENT EXACT -q ROLLOUT 
+
+Token-wise exact coupling requires both student and teacher distributions at every generated posi-tion and is therefore substantially more expensive than student-only OPD. We amortize this online computation with speculative block verification. At each wave, the frozen rollout student drafts up to K tokens from the current true prefix, and the teacher evaluates the corresponding proposal pre-fixes in one batched verification. Inside the inference engine, we construct qt for all block positions, 6Preprint solve the trust-region coefficients βt in batch, and evaluate maximal-coupling acceptance from left to right. The engine commits the longest consecutively accepted proposal prefix. If the first rejection occurs at position j, it samples cj ∝ [qj − pj ]+, commits that correction, discards all later speculative tokens and KV states, and resumes from the corrected prefix. Student and teacher full-vocabulary logits remain on GPU; the training loop receives only compact token-aligned metadata, including committed tokens, the correction mask, selected log-probabilities, and teacher-mode targets. Be-cause proposal prefixes coincide with true prefixes up to the first rejection and no post-correction speculative state is reused, this execution has the same autoregressive law and coupling events as sequential exact-q sampling. Appendix I proves exactness, and Appendix K gives implementation and validation details. 
+
+## 4 EXPERIMENTS 
+
+4.1 EXPERIMENTAL SETUP 
+
+Models and shared protocol. We distill Qwen3-0.6B-Base and Qwen3-1.7B-Base students (Yang et al., 2025) from the same Qwen3-4B-Base-GRPO teacher on DAPO-Math-17K (Yu et al., 2025). Within each student scale, all methods use the same student and teacher checkpoints, training prompts, 200-step budget, rollout batch of 64 prompts with eight responses per prompt, and student-only evaluation protocol. Complete optimization, sampling, and model-compatibility details are in Appendix A. 
+
+Baselines. Where an RKL term is present, OPD, ExOPD, TRB, Random-TM, TV-Weighted-TM, and Ours use the same sampled-token log-ratio update. ExOPD (Yang et al., 2026b) follows the official G-OPD code with λ = 1 .25 , only reverse kl advantages=True , and the initial student as the fixed reference. SKD (Xu et al., 2025) is reproduced using its canonical Top-25 spec-ulative rollout and full-distribution KL objective under our unified training and evaluation protocol. Random-TM and TV-Weighted-TM are placement controls for the 1.7B student. Both match the number of teacher-mode updates used by Ours on each exact-q trajectory. Random-TM uses count-matched random placement, whereas TV-Weighted-TM samples positions without replacement ac-cording to the local TV( pt, q t) score. For TV-Weighted-TM, the realized correction mask deter-mines only the per-trajectory supervision budget, not the selected locations. TRB, Random-TM, TV-Weighted-TM, and Ours share an exact-q rollout with K = 8 and ϵ : 0 .02 →
+
+0 linearly over the first 50 steps, directly adopting the established schedule from Plyusov et al. (2026). To strictly isolate the algorithmic impact of supervision routing from confounding trajectory dynamics, all exact-q variants share the identical rollout schedule established in prior work (Plyusov et al., 2026). This strictly controlled protocol ensures that all empirical improvements are directly attributable to token-level supervision allocation rather than behavioral tuning artifacts. 
+
+Evaluation. We evaluate MATH-500 (Hendrycks et al., 2021; Lightman et al., 2024), HMMT-Feb26, AIME 2026, AIME 2025, AMC 2023, Minerva Math (Lewkowycz et al., 2022), and OlympiadBench (He et al., 2024). We sample eight responses per problem at temperature 1.0 with maximum response length 16,384. Mean@8 is the average correctness over the eight samples, Pass@8 is the fraction of problems with at least one correct sample, and Average is the unweighted mean over the seven displayed benchmarks. Full decoding settings are in Appendix A. 4.2 MAIN RESULTS 
+
+Performance summary. Tables 1 and 2 show that Ours achieves the best macro Mean@8 and Pass@8 at both student scales. Relative to TRB, the 1.7B student improves from 27.9/44.6 to 29.0/47.5 ( +1 .1/ + 2 .9 points), and the 0.6B student improves from 17.2/33.6 to 18.4/35.6 (+1 .2/ + 2 .0 points). Relative to SKD, the gains are +4 .5/ + 6 .3 points for 1.7B and +6 .0/ + 6 .0
+
+points for 0.6B. Mean@8 improves over TRB in 13 of 14 student–benchmark pairs. 7Preprint Table 1: Mean@8 accuracy (%). Average is the mean over the seven benchmarks; bold and 
+
+underline denote the best and second-best trained method within each student size, respectively. Method MATH-500 HMMT AIME26 AIME25 AMC23 Minerva Olympiad Average                                                                                                         
+
+> Teacher (4B) 84.1 15.2 19.2 19.6 60.9 38.0 51.9 41.3 Student (1.7B) 10.2 0.0 0.4 0.4 3.8 3.1 3.2 3.0 OPD 70.7 2.3 6.3 8.3 42.8 27.2 33.7 27.3 ExOPD 69.5 2.7 5.4 7.9 44.4 27.5 32.1 27.1 SKD 64.3 3.4 5.4 4.6 40.9 23.9 29.1 24.5 TRB 70.7 4.9 6.3 8.8 43.1 26.5 34.7 27.9
+> SAKI (Ours) 70.9 5.7 7.9 8.3 47.2 28.1 34.9 29.0
+> Student (0.6B) 6.2 0.4 0.0 0.0 0.9 2.2 2.1 1.7 OPD 52.7 0.8 0.4 2.5 26.9 15.4 20.7 17.1 ExOPD 52.1 1.5 0.8 1.7 31.3 15.9 20.8 17.7 SKD 41.7 1.1 0.4 0.4 19.1 11.0 13.3 12.4 TRB 52.0 1.5 0.4 2.5 28.4 14.9 20.9 17.2
+> SAKI (Ours) 52.6 1.9 1.7 4.2 31.9 15.3 21.2 18.4
+
+Table 2: Pass@8 accuracy (%). Average is the mean over the seven benchmarks; bold and under-line denote the best and second-best trained method within each student size, respectively. Method MATH-500 HMMT AIME26 AIME25 AMC23 Minerva Olympiad Average                                                                                                         
+
+> Teacher (4B) 94.4 24.2 30.0 26.7 97.5 57.4 70.2 57.2 Student (1.7B) 49.6 0.0 3.3 3.3 20.0 19.9 18.4 16.4 OPD 90.0 9.1 20.0 20.0 72.5 46.3 57.2 45.0 ExOPD 87.6 6.1 20.0 20.0 75.0 45.6 56.7 44.4 SKD 86.6 6.1 16.7 13.3 67.5 44.5 53.6 41.2 TRB 90.4 9.1 16.7 23.3 70.0 44.9 57.9 44.6
+> SAKI (Ours) 90.0 18.2 20.0 23.3 75.0 47.4 58.5 47.5
+> Student (0.6B) 35.8 3.0 0.0 0.0 7.5 13.2 12.9 10.3 OPD 78.2 3.0 3.3 6.7 52.5 34.2 43.6 31.6 ExOPD 77.2 6.1 6.7 6.7 57.5 36.0 41.9 33.2 SKD 71.0 6.1 3.3 3.3 57.5 31.3 34.4 29.6 TRB 77.4 9.1 3.3 6.7 60.0 34.9 43.9 33.6
+> SAKI (Ours) 81.2 9.1 10.0 13.3 60.0 32.0 43.3 35.6
+
+Placement controls. For the 1.7B student, Random-TM reaches 28.30 Mean@8 and 45.50 Pass@8. TV-Weighted-TM matches the same per-trajectory teacher-mode budget but weights place-ment by the local TV( pt, q t) score, reaching 28.24 Mean@8 and 46.77 Pass@8. Ours reaches 29.00/47.50, exceeding TV-Weighted-TM by +0 .76 Mean@8 and +0 .73 Pass@8. Thus, scalar conflict-aware placement is useful, while realized coupling corrections provide a stronger routing signal under the matched setup. Aggregate values are reported in Table 6; Figure 3(c) visualizes the Random-TM decomposition. 4.3 MECHANISTIC ANALYSIS : P ERSISTENT ALIGNMENT AND CONFLICT -A DAPTIVE 
+
+TEACHER SUPPORT 
+
+Matched fixed-prefix probe. We compare matched TRB, Random-TM, and Ours runs on a frozen probe of 2,048 positions from 213 prompts. We track student probability on the teacher Top-1 token (C1) and Top-16 set ( C16 ), and stratify positions by initial DKL (T ∥S). Differences are prompt-equal, and confidence intervals use prompt-clustered bootstrap. Correction-triggered supervision ends at step 51; full probe construction and statistics are in Appendix E. 
+
+Teacher-mode supervision establishes persistent alignment. Figure 2(a) shows that correction-triggered teacher-mode supervision rapidly increases teacher-supported probability mass during the correction-active phase. At step 50, Ours exceeds TRB by 4.63 percentage points in C1 and 4.54 
+
+points in C16 . After teacher-mode supervision is disabled at step 51, these gains remain visible: at step 200, after 149 RKL-only steps, the corresponding advantages are still 4.26 and 2.94 points. Additional divergence and entropy statistics are reported in Appendix E. 8Preprint 0 50 100 200        
+
+> Training step
+> 0246
+> Gain vs. TRB (pp)
+> (a) Persistent gains
+> Top-1 Top-16
+> Q1 Q2 Q3 Q4
+> Initial conflict quartile
+> 0.0 0.5 1.0 1.5
+> Gain vs. Random-TM (pp)  (b) Top-16 gain
+> Q1 Q2 Q3 Q4
+> Initial conflict quartile
+> −0.5 0.0 0.5 1.0 1.5
+> Gain vs. Random-TM (pp)  (c) Gain decomposition
+> ΔC 1
+> Δ(C 16 − C 1)
+
+Figure 2: Persistent and conflict-adaptive teacher support. C1 is student probability on the teacher Top-1 token, and C16 is student probability mass on the teacher Top-16 set. (a) Gains over TRB during training; shading marks the correction-active phase and the dotted line marks step 51. Error bars are 95% prompt-clustered bootstrap CIs. (b,c) Step-200 gains over Random-TM by initial DKL (T ∥S) quartile (Q1 lowest, Q4 highest). The Q4–Q1 contrasts are +1 .07 pp for ∆C16 
+
+and +1 .28 pp for ∆( C16 − C1).Table 3: Exact-q rollout throughput under the matched workload above.           
+
+> Backend Tok/s Relative Student-only reference 7,760 –External-loop exact-qK8 776 1.00 ×
+> Engine-resident exact-qK8 3,276 4.22 ×
+
+Coupling-based placement is conflict adaptive. The equal-budget Random-TM control tests whether correction-based placement provides benefits beyond teacher-mode supervision alone. Rel-ative to Random-TM, correction-triggered placement increases C1 by 0.648 points and C16 by 0.816 
+
+points at step 200. More importantly, Figure 2(b,c) shows that the C16 advantage grows from +0 .25 
+
+points in the lowest-conflict quartile to +1 .32 points in the highest-conflict quartile (Q4–Q1: +1 .07 
+
+points; 95% CI: [0.87, 1.29]). This increase is primarily carried by teacher-supported non-argmax tokens (Q4–Q1: +1 .28 points), while the corresponding C1 interaction is not significant. These results show that maximal-coupling corrections provide an effective conflict-adaptive routing signal beyond the effect of supervision budget alone. 4.4 EXACT -q ROLLOUT EFFICIENCY 
+
+We measure committed response tokens per generation wall-clock second under the same 64-prompt 
+
+× 8-response, maximum-length 7,168, K = 8 workload. The engine-resident backend achieves 3,276 tokens/s compared to 776 tokens/s for the external-loop implementation—delivering a 4.22 ×
+
+speedup under identical workloads. Remarkably, despite executing full online teacher verification and batched trust-region interpolation at every wave, the engine sustains over 42% of the theoretical throughput ceiling defined by unguided student-only generation (Table 3). Appendix K reports timing breakdowns, model/cache lifecycle, and correctness checks. 
+
+## 5 CONCLUSION 
+
+We introduce SAKI, which realizes a teacher-guided trust-region policy through maximal coupling and routes teacher-mode supervision at correction events. It achieves the best macro Mean@8 and Pass@8 at both student scales. Placement controls and fixed-prefix analysis support correction-based, conflict-adaptive routing. An engine-resident exact-q verifier preserves sampling semantics while providing a 4.22 × matched-workload speedup. 9Preprint AI USE STATEMENT 
+
+In this work, generative AI tools were used to assist with checking and refining mathematical proofs, code development, and language editing of the manuscript. All mathematical arguments were in-dependently verified by the authors. AI-assisted code was reviewed and tested by the authors for correctness, and all AI-assisted textual edits were reviewed before inclusion in the manuscript. The authors take full responsibility for the final content of this work, including text, claims, code, and other artifacts produced with the aid of generative AI. REPRODUCIBILITY STATEMENT 
+
+We provide supplementary code containing a reference implementation of the core components of SAKI. Appendix A reports the training and evaluation configuration, Appendices G and I provide the coupling and exact-execution derivations, and Appendix K describes the systems implementation and validation details. 
+
+## REFERENCES 
+
+Rishabh Agarwal, Nino Vieillard, Yongchao Zhou, Piotr Stanczyk, Sabela Ramos Garea, Matthieu Geist, and Olivier Bachem. On-policy distillation of language models: Learning from self-generated mistakes. In International Conference on Learning Representations , volume 2024, pp. 21246–21263, 2024. Lei J Ba and Rich Caruana. Do deep nets really need to be deep? Advances in neural information processing systems , 27, 2014. Samy Bengio, Oriol Vinyals, Navdeep Jaitly, and Noam Shazeer. Scheduled sampling for sequence prediction with recurrent neural networks. Advances in neural information processing systems ,28, 2015. Cristian Buciluˇ a, Rich Caruana, and Alexandru Niculescu-Mizil. Model compression. In Pro-ceedings of the 12th ACM SIGKDD international conference on Knowledge discovery and data mining , pp. 535–541, 2006. Charlie Chen, Sebastian Borgeaud, Geoffrey Irving, Jean-Baptiste Lespiau, Laurent Sifre, and John Jumper. Accelerating large language model decoding with speculative sampling. arXiv preprint arXiv:2302.01318 , 2023. Zehao Chen, Gongxun Li, Tianxiang Ai, Zixuan Huang, Xiaodong Liu, Yifei Li, Wang Zhou, Fuzhen Zhuang, Xianglong Liu, Jianxin Li, et al. Weak-driven learning: How weak agents make strong agents stronger. arXiv preprint arXiv:2602.08222 , 2026. Thomas M. Cover and Joy A. Thomas. Elements of Information Theory . John Wiley & Sons, 2 edition, 2006. doi: 10.1002/047174882X. Bradley Efron, Robert J Tibshirani, et al. An introduction to the bootstrap . Boca Raton, Florida, 2000. Jianping Gou, Baosheng Yu, Stephen J Maybank, and Dacheng Tao. Knowledge distillation: A survey. International journal of computer vision , 129(6):1789–1819, 2021. Yuxian Gu, Li Dong, Furu Wei, and Minlie Huang. Minillm: Knowledge distillation of large language models. In International Conference on Learning Representations , volume 2024, pp. 32694–32717, 2024. Chaoqun He, Renjie Luo, Yuzhuo Bai, Shengding Hu, Zhen Thai, Junhao Shen, Jinyi Hu, Xu Han, Yujie Huang, Yuxiang Zhang, et al. Olympiadbench: A challenging benchmark for promoting agi with olympiad-level bilingual multimodal scientific problems. In Proceedings of the 62nd Annual Meeting of the Association for Computational Linguistics (Volume 1: Long Papers) , pp. 3828–3850, 2024. 10 Preprint Dan Hendrycks, Collin Burns, Saurav Kadavath, Akul Arora, Steven Basart, Eric Tang, Dawn Song, and Jacob Steinhardt. Measuring mathematical problem solving with the math dataset. arXiv preprint arXiv:2103.03874 , 2021. Geoffrey Hinton, Oriol Vinyals, and Jeff Dean. Distilling the knowledge in a neural network. arXiv preprint arXiv:1503.02531 , 2015. Zhexin Hu, Li Wang, Xiaohan Wang, Jiajun Chai, Xiaojun Guo, Wei Lin, and Guojun Yin. Ziprl: Adaptive multi-turn context compression with hindsight response replay. arXiv preprint arXiv:2605.28069 , 2026. Yoon Kim and Alexander M Rush. Sequence-level knowledge distillation. In Proceedings of the 2016 conference on empirical methods in natural language processing , pp. 1317–1327, 2016. Haodi Lei, Yafu Li, Haoran Zhang, Shunkai Zhang, Qianjia Cheng, Xiaoye Qu, Ganqu Cui, Bowen Zhou, Ning Ding, Yun Luo, et al. Draft-opd: On-policy distillation for speculative draft models. 
+
+arXiv preprint arXiv:2605.29343 , 2026. Yaniv Leviathan, Matan Kalman, and Yossi Matias. Fast inference from transformers via speculative decoding. In International conference on machine learning , pp. 19274–19286. PMLR, 2023. Aitor Lewkowycz, Anders Andreassen, David Dohan, Ethan Dyer, Henryk Michalewski, Vinay Ra-masesh, Ambrose Slone, Cem Anil, Imanol Schlag, Theo Gutman-Solo, et al. Solving quantitative reasoning problems with language models. Advances in neural information processing systems ,35:3843–3857, 2022. Yaxuan Li, Yuxin Zuo, Bingxiang He, Jinqian Zhang, Chaojun Xiao, Cheng Qian, Tianyu Yu, Huan-ang Gao, Wenkai Yang, Zhiyuan Liu, et al. Rethinking on-policy distillation of large language models: Phenomenology, mechanism, and recipe. arXiv preprint arXiv:2604.13016 , 2026. Hunter Lightman, Vineet Kosaraju, Yuri Burda, Harrison Edwards, Bowen Baker, Teddy Lee, Jan Leike, John Schulman, Ilya Sutskever, and Karl Cobbe. Let’s verify step by step. In International Conference on Learning Representations , volume 2024, pp. 39578–39601, 2024. Zihan Lin, Xiaohan Wang, Jie Cao, Jiajun Chai, Guojun Yin, Wei Lin, and Ran He. Rest: Reshaping token-level policy gradients for tool-use large language models. In The Fourteenth International Conference on Learning Representations , 2026. URL https://openreview.net/forum? id=gNZlaKRWki .Torgny Lindvall. Lectures on the coupling method . Courier Corporation, 2002. Dengcan Liu, Fengkai Yang, Xiaohan Wang, Shurui Yan, Jiajun Chai, Jiahao Li, Yikun Ban, Zhen-dong Mao, Wei Lin, and Guojun Yin. Cdrrm: Contrast-driven rubric generation for reliable and interpretable reward modeling. In Proceedings of the 32nd ACM SIGKDD Conference on Knowl-edge Discovery and Data Mining V. 2 , pp. 3152–3163, 2026. Daniil Plyusov, Alexey Gorbatovski, Alexey Malakhov, Nikita Balagansky, Boris Shaposhnikov, Daria Korotyshova, and Daniil Gavrilov. Trust-region behavior blending for on-policy distillation. 
+
+arXiv preprint arXiv:2605.31159 , 2026. St´ ephane Ross, Geoffrey Gordon, and Drew Bagnell. A reduction of imitation learning and struc-tured prediction to no-regret online learning. In Proceedings of the fourteenth international con-ference on artificial intelligence and statistics , pp. 627–635. JMLR Workshop and Conference Proceedings, 2011. Mitchell Stern, Noam Shazeer, and Jakob Uszkoreit. Blockwise parallel decoding for deep autore-gressive models. Advances in Neural Information Processing Systems , 31, 2018. Li Wang, Xiaodong Lu, Xiaohan Wang, Yikun Ban, Jiajun Chai, Wei Lin, Tianhao Peng, and Guojun Yin. When self-belief misleads: Active label acquisition for reinforcement learning with verifiable rewards. arXiv preprint arXiv:2605.25864 , 2026. 11 Preprint Zhenlin Wei, Pu Jian, Yingzhuo Deng, Xiaohan Wang, Jiajun Chai, Zhexin Hu, Wei Lin, Shanbin Zhang, and Guojun Yin. Amr-sd: Asymmetric meta-reflective self-distillation for token-level credit assignment. arXiv preprint arXiv:2605.18529 , 2026. Ronald J Williams. Simple statistical gradient-following algorithms for connectionist reinforcement learning. Machine learning , 8(3):229–256, 1992. Xingrun Xing, Haoqing Wang, Boyan Gao, Ziheng Li, and Yehui Tang. Trust region on-policy distillation. arXiv preprint arXiv:2606.01249 , 2026. Wenda Xu, Rujun Han, Zifeng Wang, Long Le, Dhruv Madeka, Lei Li, William Wang, Rishabh Agarwal, Chen-Yu Lee, and Tomas Pfister. Speculative knowledge distillation: Bridging the teacher-student gap through interleaved sampling. In International Conference on Learning Rep-resentations , volume 2025, pp. 64616–64646, 2025. An Yang, Anfeng Li, Baosong Yang, Beichen Zhang, Binyuan Hui, Bo Zheng, Bowen Yu, Chang Gao, Chengen Huang, Chenxu Lv, et al. Qwen3 technical report. arXiv preprint arXiv:2505.09388 , 2025. Fengkai Yang, Zherui Chen, Xiaohan Wang, Xiaodong Lu, Jiajun Chai, Guojun Yin, Wei Lin, Shuai Ma, Fuzhen Zhuang, Deqing Wang, et al. Your group-relative advantage is biased. arXiv preprint arXiv:2601.08521 , 2026a. Wenkai Yang, Weijie Liu, Ruobing Xie, Kai Yang, Saiyong Yang, and Yankai Lin. Learning beyond teacher: Generalized on-policy distillation with reward extrapolation. arXiv preprint arXiv:2602.12125 , 2026b. URL https://arxiv.org/abs/2602.12125 .Qiying Yu, Zheng Zhang, Ruofei Zhu, Yufeng Yuan, Xiaochen Zuo, Yu Yue, Weinan Dai, Tiantian Fan, Gaohong Liu, Lingjun Liu, et al. DAPO: An open-source LLM reinforcement learning system at scale. arXiv preprint arXiv:2503.14476 , 2025. URL https://arxiv.org/abs/ 2503.14476 .
+
+## A TEACHER CONSTRUCTION , M ODEL COMPATIBILITY , AND TRAINING 
+
+## DETAILS 
+
+Teacher construction. We initialize the teacher from Qwen3-4B-Base and reproduce the Qwen3-4B-Base-GRPO construction of Li et al. (2026). We train the teacher with GRPO on the pro-cessed DAPO-Math-17K dataset (Yang et al., 2026a). Following their data format, each question is augmented with the instruction “Please reason step by step, and put your final answer within 
+
+\boxed {} .” We use exactly the reported GRPO hyperparameter recipe, summarized in Table 4. The teacher uses the released rule-based mathematical reward function rather than a learned reward model (Liu et al., 2026). Format reward and reference-model KL regularization are disabled. 
+
+Model compatibility. Our rollout and maximal-coupling implementation operate at the exact to-ken level. The publicly released Qwen3 Base and post-trained checkpoints use different default termination-token conventions. We therefore use Base-to-Base teacher–student pairs so that vo-cabulary, termination behavior, and response masking remain naturally aligned. All prompts are formatted with enable thinking=False .
+
+Matched student-training protocol. The 0.6B and 1.7B students use the same training proto-col; the student parameter count is the primary experimental difference. Both models are trained on the same 17,917 DAPO-Math prompts for 200 optimization steps. Table 5 reports the shared configuration. 
+
+## B DERIVATION OF THE TRUST -R EGION GEOMETRIC BRIDGE 
+
+This section reproduces the geometric bridge underlying TRB (Plyusov et al., 2026) for complete-ness. 12 Preprint Table 4: Training configuration used to construct the Qwen3-4B-Base-GRPO teacher , following Li et al. (2026). 
+
+Setting Value Initialization Qwen3-4B-Base RL algorithm GRPO Training data Processed DAPO-Math-17K Training epochs 1Prompt batch size 64 Reported micro-batch size 64 Responses per prompt 8Maximum prompt length 1,024 Maximum response length 7,168 Learning rate 1 × 10 −6
+
+Sampling temperature 1.0 Top-p 1.0 Repetition penalty 1.0 KL regularization None Additional KL coefficient 0Loss aggregation Token mean Thinking template Disabled 
+
+Table 5: Shared training configuration for the 0.6B and 1.7B students. 
+
+Setting Value Students Qwen3-0.6B / 1.7B Base Teacher Qwen3-4B-Base-GRPO Training 200 steps; AdamW; LR 1 × 10 −6
+
+Weight decay / grad clip 0.01 / 1.0
+
+Rollout batch 64 prompts × 8 responses = 512 
+
+Sampling T = 1 .0, top-p = 1 .0, no top-k
+
+Maximum lengths 7,168 Loss aggregation Token mean over valid response tokens Guided rollout(Ours) K = 8 , ϵ : 0 .02 → 0 over 50 steps 
+
+At a fixed prefix, consider the problem 
+
+min  
+
+> q
+
+DKL (q∥T )
+
+s.t. DKL (q∥p) ≤ ϵ, 
+
+X
+
+> v
+
+q(v) = 1 .
+
+(18) Its Lagrangian is 
+
+L(q, η, ξ ) = DKL (q∥T ) + η (DKL (q∥p) − ϵ) + ξ X
+
+> v
+
+q(v) − 1
+
+!
+
+, (19) where η ≥ 0.Expanding the KL terms gives 
+
+L = X
+
+> v
+
+q(v) [log q(v) − log T (v)] + η X
+
+> v
+
+q(v) [log q(v) − log p(v)] + const . (20) Taking the derivative with respect to q(v),
+
+(1 + η) log q(v) − log T (v) − η log p(v) + const = 0 . (21) 13 Preprint Hence, 
+
+q(v) ∝ p(v) η 
+
+> 1+ η
+
+T (v) 11+ η . (22) Defining 
+
+β = 11 + η ∈ (0 , 1] , (23) we obtain 
+
+qβ (v) = p(v)1−β T (v)β
+
+P 
+
+> u
+
+p(u)1−β T (u)β . (24) If the teacher itself lies inside the trust region, the constraint is inactive, η = 0 , and β = 1 , giving 
+
+q = T . As the trust-region radius approaches zero, η → ∞ , β → 0, and q → p.
+
+## C SINGLE -S AMPLE ESTIMATION OF REVERSE KL 
+
+At a fixed prefix, the reverse KL from student pθ to teacher T is 
+
+DKL (pθ ∥T ) = X
+
+> v
+
+pθ (v) [log pθ (v) − log T (v)] . (25) For a sample Y ∼ pθ , define 
+
+k1(Y ) = log pθ (Y ) − log T (Y ). (26) Taking the expectation under the student distribution gives 
+
+EY ∼pθ [k1(Y )] = X
+
+> v
+
+pθ (v) [log pθ (v) − log T (v)] (27) 
+
+= DKL (pθ ∥T ). (28) Thus, the sampled log-ratio is a one-sample Monte Carlo estimator of the full-vocabulary reverse-KL value under exact student sampling. Since the teacher is fixed, 
+
+∇θ DKL (pθ ∥T ) = X
+
+> v
+
+∇θ pθ (v) [log pθ (v) − log T (v)] + X
+
+> v
+
+pθ (v)∇θ log pθ (v). (29) Using 
+
+∇θ pθ (v) = pθ (v)∇θ log pθ (v) (30) and the score-function identity 
+
+Ev∼pθ [∇θ log pθ (v)] = 0 , (31) we obtain 
+
+∇θ DKL (pθ ∥T ) = Ev∼pθ [(log pθ (v) − log T (v)) ∇θ log pθ (v)] . (32) Therefore, the same sampled log-ratio provides both a Monte Carlo estimator of the reverse-KL value in Eq. 28 and the coefficient of an unbiased score-function estimator of its gradient under exact student sampling. Equivalently, defining a detached advantage 
+
+A(y) = − sg [ k1(y)] , (33) the policy-gradient loss 
+
+LPG = −A(y) log pθ (y) (34) has gradient 
+
+∇θ LPG = k1(y)∇θ log pθ (y), (35) matching the one-sample gradient estimator in Eq. 32. 
+
+Remark 1 (Characterization on Guided Rollouts) . Under teacher-guided rollout ( Y ∼ qt), evaluat-ing the log-ratio update exclusively on accepted proposals corresponds to a localized score-function estimator supported exactly on the student–guided intersection measure min {pt, q t} (Proposition 1). This formulation restricts policy-gradient updates strictly to the subspace where student generations remain compatible with the guided policy, while delegating diverging states to the direct teacher-mode target LTM .
+
+14 Preprint Table 6: Matched supervision-placement controls for the 1.7B student on the same seven-benchmark suite. Random-TM controls for the supervision budget, while TV-Weighted-TM ad-ditionally favors positions with larger local student–guided disagreement. Method Mean@8 Pass@8 TRB 27.90 44.60 Random-TM 28.30 45.50 TV-Weighted-TM 28.24 46.77 Ours 29.00 47.50 0 1 2 3 4    
+
+> Mean@8 gain over TRB (pp)
+> MATH-500 HMMT AIME26 AIME25 AMC23 Minerva Olympiad
+> +0.2 +0.8 +1.6 -0.5 +4.1 +1.6 +0.2 +0.6 +0.4 +1.3 +1.7 +3.5 +0.4 +0.3
+> (a) Mean@8 across benchmarks
+> 1.7B 0.6B
+> 1.7B 0.6B 0.0 0.5 1.0 1.5 2.0 2.5 3.0
+> Gain over TRB (pp)
+> +1.1 +1.2 +2.9 +2.0
+> (b) Macro gains
+> Mean@8 Pass@8
+> Mean@8 Pass@8 0.0 0.5 1.0 1.5 2.0 2.5 3.0
+> Gain over TRB (pp)
+> +0.4 +0.7
+> total +1.1
+> +0.9 +2.0
+> total +2.9
+> (c) Ablation decomposition
+
+Figure 3: Performance gains and supervision-placement ablation. (a) Mean@8 gains over the matched TRB baseline across seven benchmarks . Our method improves six of seven benchmarks for the 1.7B student and all seven for the 0.6B student. (b) Macro Mean@8 and Pass@8 improve at both student scales . (c) The lower segment shows the gain obtained by applying the same number of teacher-mode updates at randomly selected positions (TRB → Random-TM), while the 
+
+upper segment shows the additional gain from placing those updates at maximal-coupling correc-tions (Random-TM → Ours).TV-Weighted-TM is reported separately in Table 6. 
+
+## D ADDITIONAL PLACEMENT -C ONTROL RESULTS 
+
+We compare two supervision-placement controls under the same exact-q rollout. Random-TM matches the number of teacher-mode updates per trajectory used by Ours while placing them at count-matched random locations. For TV-Weighted-TM, let Vi denote the valid response positions of trajectory i and define 
+
+mi = X
+
+> t∈Vi
+
+Ci,t , di,t = TV( pi,t , q i,t ).
+
+We select mi valid positions without replacement using di,t as the sampling weight. Selected posi-tions receive the same teacher-mode loss as Ours, while the remaining valid positions retain RKL supervision. The correction mask is used only to determine mi and does not determine the selected locations. The exact-q rollout and maximal-coupling process are unchanged. We implement the weighted sampling with exponential-race keys − log Ui,t /d i,t and select the mi
+
+smallest keys. If fewer than mi valid positions have positive TV, the remaining positions are filled uniformly. 
+
+## E ADDITIONAL FIXED -P REFIX RESULTS 
+
+Matched fixed-prefix probe. We compare three matched 1.7B runs: TRB, our correction-triggered teacher-mode objective, and a count-matched random-placement control. All three use the same Qwen3-1.7B-Base initialization, Qwen3-4B GRPO teacher, exact-q rollout, speculative block size K = 8 , annealing schedule, training horizon, and seed. TRB retains RKL supervision at all valid positions. Our method replaces RKL with teacher-mode supervision at maximal-coupling corrections. 15 Preprint Using the initial student with ϵ = 0 .02 , we construct a fixed probe containing 1,024 genuine maximal-coupling correction positions and 1,024 matched accepted positions. The fixed probe con-tains 2,048 positions spanning 213 prompts. Prefixes, response positions, teacher distributions, and initial conflict statistics are frozen throughout the analysis. Let v∗ 
+
+> T
+
+(h) denote the teacher’s Top-1 token and let ST
+
+> 16
+
+(h) denote its Top-16 token set. For student distribution S(· | h), we measure 
+
+C1(h) = S(v∗ 
+
+> T
+
+(h) | h), C16 (h) = X
+
+> v∈S T
+> 16 (h)
+
+S(v | h).
+
+Thus, C16 − C1 measures student probability on teacher-supported Top-16 alternatives excluding the teacher argmax. We first average metrics within each prompt and then compute paired method differences, giving each prompt equal weight. Confidence intervals use 10,000 paired bootstrap resamples clustered by prompt (Efron et al., 2000). To analyze heterogeneous placement effects, we rank fixed positions by their initial DKL (T ∥S)
+
+and partition them into four equal-sized conflict quartiles, from Q1 (lowest conflict) to Q4 (highest conflict). The trust-region radius reaches exactly zero at step 51, after which qt = pt and no correction-triggered teacher-mode updates occur. Table 7 reports the complete fixed-prefix statistics underlying Figure 2(a). The reduction in 
+
+DKL (T ∥S) persists after correction-triggered teacher-mode supervision is disabled at step 51, while the accompanying entropy reduction indicates that the student distribution becomes more concen-trated around teacher-supported mass. Table 7: Prompt-equal paired differences between correction-triggered teacher-mode supervision and the matched TRB control. Step ∆C1 ∆C16 ∆DKL (T ∥S) ∆H(S)
+
+50 +4 .63 pp +4 .54 pp −0.133 −0.392 
+
+100 +4 .30 pp +2 .69 pp −0.154 −0.249 
+
+200 +4 .26 pp +2 .94 pp −0.196 −0.269 
+
+## F CORRECTION -P OSITION TEACHER SUPERVISION 
+
+Teacher-mode supervision. At a correction prefix, let 
+
+v∗ = arg max 
+
+> v
+
+T (v).
+
+Our teacher-mode loss is 
+
+LTM = − log pθ (v∗).
+
+Equivalently, because the teacher Top-1 distribution is the point mass δv∗ ,
+
+LTM = DKL (δv∗ ∥pθ ).
+
+Thus, teacher-mode supervision can be viewed as forward KL from a degenerate teacher Top-1 target, while its implementation is simply hard-label negative log-likelihood on the teacher argmax token. 
+
+Teacher-sampled supervision. We additionally consider a stochastic correction objective that keeps the same maximal-coupling routing rule but samples the supervision target from the teacher distribution. At a correction prefix, we draw 
+
+˜v ∼ T
+
+16 Preprint and optimize 
+
+LTS = − log pθ (˜ v).
+
+In expectation over ˜v ∼ T ,
+
+E˜v∼T [LTS ] = − X
+
+> v
+
+T (v) log pθ (v),
+
+so this stochastic objective has the same expected gradient as DKL (T ∥pθ ).Table 8: Correction-supervision ablation for the 1.7B student. The coupling-aware variants use the same maximal-coupling routing rule and trust-region schedule, differing only in the supervision target used at correction positions. Correction supervision Mean@8 Pass@8 TRB 27.90 44.60 Teacher-sampled 28.38 45.94 Teacher-mode ( SAKI ) 29.00 47.50 
+
+Teacher-sampled supervision improves over the matched TRB baseline, showing that coupling cor-rections are useful locations for direct teacher-directed supervision beyond the particular choice of a hard teacher-mode target. Teacher-mode supervision performs better in this setting, improving over teacher-sampled supervision by 0.62 Mean@8 and 1.56 Pass@8 points. We therefore use teacher-mode supervision in the main method. 
+
+## G PROOF OF PROPOSITION 1
+
+Let 
+
+Z ∼ p (36) be the student proposal. Given Z = v, it is accepted with probability 
+
+a(v) = min 
+
+
+
+1, q(v)
+
+p(v)
+
+
+
+. (37) Therefore, 
+
+Pr( Z = v, C = 0) = p(v)a(v) = min {p(v), q (v)}. (38) Summing over v,
+
+Pr( C = 0) = X
+
+> v
+
+min {p(v), q (v)}. (39) Hence, 
+
+Pr( C = 1) = 1 − X
+
+> v
+
+min {p(v), q (v)} (40) 
+
+= 12
+
+X
+
+> v
+
+|p(v) − q(v)| (41) 
+
+= TV( p, q ). (42) For the rejected proposal, 
+
+Pr( Z = v, C = 1) = p(v)
+
+
+
+1 − min 
+
+
+
+1, q(v)
+
+p(v)
+
+ 
+
+(43) 
+
+= [ p(v) − q(v)] +. (44) Conditioning on C = 1 gives 
+
+Pr( Z = v | C = 1) = [p(v) − q(v)] +
+
+TV( p, q ) . (45) 17 Preprint On rejection, the correction token is sampled from 
+
+r(v) = [q(v) − p(v)] +
+
+P
+
+> u
+
+[q(u) − p(u)] +
+
+. (46) Since X
+
+> u
+
+[q(u) − p(u)] + = TV( p, q ), (47) we obtain 
+
+Pr( Y = v | C = 1) = [q(v) − p(v)] +
+
+TV( p, q ) . (48) Finally, the unconditional probability of output token v is 
+
+Pr( Y = v) = Pr( Y = v, C = 0) + Pr( Y = v, C = 1) (49) 
+
+= min {p(v), q (v)} + [ q(v) − p(v)] + (50) 
+
+= q(v). (51) Therefore, maximal coupling produces the exact q marginal. G.1 MINIMAL -INTERVENTION PROPERTY 
+
+For any coupling γ ∈ Γ( p, q ),
+
+Pr  
+
+> γ
+
+(Z = Y ) = X
+
+> v
+
+Pr  
+
+> γ
+
+(Z = v, Y = v) (52) 
+
+≤ X
+
+> v
+
+min {p(v), q (v)}. (53) Therefore, 
+
+Pr  
+
+> γ
+
+(Z̸ = Y ) ≥ 1 − X
+
+> v
+
+min {p(v), q (v)} (54) 
+
+= TV( p, q ). (55) Under the maximal-coupling construction in Proposition 1, 
+
+Pr( Z = v, Y = v) = min {p(v), q (v)}, (56) so equality is attained. This proves Proposition 2. The intervention-rate bound in Corollary 1 follows immediately from Pinsker’s inequality (Cover & Thomas, 2006), 
+
+TV( p, q ) ≤
+
+r 12 DKL (q∥p), (57) together with the trust-region constraint. 
+
+## H TEACHER –S TUDENT INTERPRETATION OF THE RESIDUAL DISTRIBUTION 
+
+For the geometric bridge, 
+
+qβ (v) = p(v)1−β T (v)β
+
+Zβ
+
+, Zβ = X
+
+> u
+
+p(u)1−β T (u)β . (58) Assuming β > 0 and positive softmax probabilities, 
+
+qβ (v)
+
+p(v) = 1
+
+Zβ
+
+ T (v)
+
+p(v)
+
+β
+
+. (59) 18 Preprint Therefore, 
+
+qβ (v) > p (v) ⇐⇒ qβ (v)
+
+p(v) > 1 (60) 
+
+⇐⇒ 
+
+ T (v)
+
+p(v)
+
+β
+
+> Z β (61) 
+
+⇐⇒ log T (v)
+
+p(v) > log Zβ
+
+β . (62) Hence, the positive residual 
+
+[qβ (v) − p(v)] + (63) is supported only on tokens whose teacher-to-student likelihood ratio exceeds a prefix-dependent threshold. Symmetrically, 
+
+p(v) > q β (v) (64) corresponds to teacher-to-student likelihood ratios below this threshold. Combined with Proposi-tion 1, a correction can therefore be viewed as replacing probability mass that is excessive under the student relative to the bridge with probability mass favored by the bridge and associated with sufficiently high teacher-to-student likelihood ratios. 
+
+## I EXACTNESS OF ENGINE -R ESIDENT BLOCK VERIFICATION 
+
+Proposition 3 (Exactness of engine-resident block verification) . Assume that the student and teacher distributions in a speculative block are evaluated on the same proposal prefixes as sequen-tial maximal coupling. If proposals are committed only up to the first rejection, the correction is sampled from the exact residual distribution, and all subsequent speculative states are discarded, then the generated trajectory follows the same autoregressive distribution as sequential sampling from q:
+
+Pr( y1: L | x) = 
+
+> L
+
+Y
+
+> t=1
+
+qt(yt | x, y <t ). (65) 
+
+Proof. Consider a speculative block beginning at a true prefix ht. The student autoregressively proposes 
+
+zt, z t+1 , . . . , z t+K−1. (66) The teacher and bridge distributions are evaluated on the corresponding proposal prefixes. Suppose the first j proposals are accepted. Before any rejection occurs, the actual generated prefix is identical to the proposal prefix. Therefore, for each accepted position 
+
+t, t + 1 , . . . , t + j − 1, (67) the precomputed student and teacher distributions are exactly the same distributions that sequen-tial maximal coupling would evaluate at the true prefix. Thus, committing these accepted tokens produces exactly the same conditional transition as sequential coupling. If the next proposal is rejected, the algorithm samples a correction from 
+
+rt+j (v) ∝ [qt+j (v) − pt+j (v)] +, (68) which is exactly the correction distribution used by sequential maximal coupling at that prefix. After this correction, the true prefix differs from the speculative proposal prefix. Consequently, all precomputed logits for later proposal positions are invalid and are discarded. The next speculative block is constructed from the new true prefix. Therefore, after every committed token—whether accepted or corrected—the algorithm has the same true prefix and uses the same next-token transition kernel as sequential maximal coupling. By induction over decoding steps, 
+
+Yt ∼ qt(· | x, Y <t ) (69) 19 Preprint for every t, and hence 
+
+Pr( y1: L | x) = 
+
+> L
+
+Y
+
+> t=1
+
+qt(yt | x, y <t ). (70) Thus, speculative block verification changes only the execution schedule and does not alter the target autoregressive distribution. 
+
+## J LIMITING CASES AND SANITY CHECKS 
+
+J.1 ϵ = 0 : R ECOVERY OF STANDARD STUDENT ROLLOUT 
+
+If 
+
+ϵ = 0 , (71) the only feasible bridge distribution is 
+
+qt = pt. (72) Therefore, 
+
+TV( pt, q t) = 0 , (73) and Proposition 1 gives 
+
+Ct = 0 (74) almost surely. Consequently, the teacher-mode supervision term vanishes exactly: 
+
+X
+
+> t
+
+MtCtLTM ,t = 0 . (75) The objective in Eq. 16 reduces to 
+
+L = 1
+
+Nvalid 
+
+X
+
+> t
+
+MtLRKL ,t , (76) which is the ordinary student-rollout RKL objective. J.2 CORRECTION ACTIVITY UNDER ANNEALING 
+
+Figure 4 compares the observed maximal-coupling correction probability with the Pinsker upper bound induced by the current trust-region radius. As ϵ is annealed, correction activity decreases and vanishes at the student-rollout endpoint. 20 Preprint 0 20 40 48 51 
+
+Training step 
+
+0246810 
+
+> Probability (%)  6.94 5.40 3.20 1.67 ε = 0
+
+Correction activity follows the annealing schedule  
+
+> Observed corrections Pinsker upper bound
+
+Figure 4: Correction activity under annealing. The observed correction probability decreases with the trust-region radius, remains below the Pinsker upper bound, and vanishes when ϵ reaches zero at step 51. J.3 TEACHER ENDPOINT 
+
+If the teacher distribution itself satisfies 
+
+DKL (Tt∥pt) ≤ ϵ, (77) then the optimal trust-region bridge takes 
+
+βt = 1 , qt = Tt. (78) Thus, the bridge smoothly interpolates between student rollout and the teacher endpoint as the trust-region radius grows. 
+
+## K SYSTEMS IMPLEMENTATION AND ENGINEERING EVOLUTION 
+
+K.1 WHY EXACT -q ROLLOUT IS EXPENSIVE 
+
+Vanilla OPD admits a computationally convenient execution schedule: the student can first generate a complete response, after which the fixed teacher scores the entire sequence in a batched forward pass. Teacher-guided behavior blending instead requires the teacher distribution during generation in order to construct qt at every visited prefix. TRB explicitly notes this online-inference overhead (Plyusov et al., 2026). Ignoring transient activations, the generation-time resident memory can be approximated as 
+
+MOPD (t) ≈ Ws + KV s(nt) (79) for student-only generation, whereas online teacher-guided generation requires 
+
+Mq (t) ≈ Ws + WT + KV s(nt) + KV T (nt). (80) The additional generation-time footprint is therefore approximately 
+
+∆Mgen (t) ≈ WT + KV T (nt). (81) The arithmetic required by the geometric bridge itself is comparatively simple vector computation. In practice, the dominant difficulty in our original implementation was the execution structure sur-rounding this computation: token-level RPCs, transfer of full-vocabulary logits, host synchroniza-tion, repeated prefix handling, and Python control flow. 21 Preprint K.2 FROM TOKEN -W ISE TO EXTERNAL BLOCK VERIFICATION 
+
+Our first correctness-oriented exact-q implementation operated one token at a time. For every decod-ing position, it independently: (i) queried the student for a one-token proposal and full-vocabulary distribution, (ii) queried the teacher at the same prefix, (iii) transferred both distributions outside the inference servers, (iv) constructed the trust-region bridge in Python, (v) executed maximal coupling, and (vi) appended the resulting token before repeating the process. For a response of length L, the execution cost was therefore approximately 
+
+TK=1 ≈ L (Tstudent RPC + Tteacher RPC + Tdense transfer + Tbridge + Tcoupling + Thost ) . (82) In an early unoptimized prototype ( K = 1 ), external per-token RPC and logit serialization yielded only ∼5 tokens/s (compared to ∼3.02K tokens/s for student-only generation under the same pilot), illustrating the severe communication bottleneck of naive online bridge evaluation. We next introduced external K-token proposals. For K = 8 , one student request proposes a block and one teacher suffix-scoring request evaluates the corresponding proposal prefixes. This reduces model-service calls from approximately O(L) to approximately O(L/K ) when blocks are largely accepted. However, bridge construction, dense-logit transfer, coupling, metadata assembly, and commit decisions still occur in the external Python coordinator. K.3 ENGINE -R ESIDENT q BACKEND 
+
+The final backend moves the entire recurrent block loop inside the inference runtime. Each engine replica contains both a student draft model and the fixed teacher. For each speculative wave it performs: 1. student sampling of up to K proposal tokens; 2. teacher verification of the proposal path; 3. batched full-vocabulary construction of qt;4. fixed-wave batched solution of βt;5. vectorized maximal-coupling acceptance; 6. batched positive-residual correction sampling; 7. first-rejection KV commit/rollback; and 8. compact token-aligned metadata packing. Student and teacher logits remain inside the engine. For a batch of proposal blocks, they are rep-resented as tensors of shape [B, K, V ] and reshaped to [BK, V ] for bridge construction. The trust-region solve uses 16 fixed bisection waves. Rows that have converged are masked on GPU rather than triggering host-synchronized early termination. For a proposal token a, maximal-coupling acceptance is evaluated as 
+
+α(a) = exp (min {0, log q(a) − log ps(a)}) . (83) A prefix cumulative product over the acceptance indicators identifies the longest consecutively ac-cepted proposal prefix. If the first rejection occurs at position j, only proposals before j and the sampled correction are committed; every later speculative state is discarded because it was com-puted under an invalid prefix. The external training loop receives only compact metadata required by the objective, rather than full-vocabulary logits. K.4 MODEL AND CACHE LIFECYCLE 
+
+In our 8-GPU training layout, GPUs 0–3 execute the student actor update and GPUs 4–7 host q-engine replicas. Each q-engine keeps a fixed teacher and a draft replica of the evolving student resident in memory. 22 Preprint Table 9: Engineering progression of the exact-q rollout implementation . The first two rows reflect early exploratory setups, while the final two rows benchmark mature implementations under the matched workload.                
+
+> Implementation KTok/s Execution Token-wise prototype 1∼5Per-token external RPC Early external block path 8165–299 External block verification Final external loop 8776 Mature Python/RPC pipeline Engine-resident backend 83,276 GPU-resident bridge/coupling
+
+Table 10: Representative integrated training-step timing .Component Time (s) 
+
+q generation 189.5 Actor update 24.9 Student weight sync 2.5 Whole step 232.6 After every actor update, only the student draft weights are synchronized. The teacher remains fixed throughout training. Cached states associated with the previous student version are invali-dated before new rollout requests resume. This avoids repeatedly redeploying or synchronizing the unchanged teacher. The inference engines also use a separate cache lifecycle from the actor training path. Keeping the q-engine model and cache pools resident avoids repeated release/reinitialization overhead and ensures that speculative proposal and verification states remain under the engine’s ownership. Full-vocabulary distributions are consumed entirely inside the q-engine. The response returned to the training loop contains only token-aligned metadata, including proposal and committed tokens, the correction mask, selected student/ q log-probabilities, β, bridge KL, residual mass, acceptance probability, and the effective trust-region radius. Student synchronization accounts for only approximately 1.1% of the representative step wall-clock, indicating that online rollout rather than draft-weight synchronization remains the dominant systems cost. K.5 CORRECTNESS VALIDATION AND LIMITATIONS 
+
+All system optimizations are required to preserve the same mathematical sampling semantics as the reference implementation. We validate the optimized backend along four dimensions. 
+
+Bridge correctness. GPU bridge construction is compared against a CPU reference on random-ized small-vocabulary distributions. We verify normalization, the trust-region constraint, the exact 
+
+ϵ = 0 student endpoint, and the β = 1 teacher endpoint when feasible. 
+
+Coupling correctness. Monte Carlo samples from maximal coupling are compared against direct samples from q. We additionally test no-rejection blocks, first-rejection commit semantics, residual correction sampling, EOS handling in discarded speculative suffixes, and token-aligned metadata. 
+
+Training-state correctness. We verify that student weight synchronization changes the draft-model checksum while the teacher checksum remains fixed, and that cached states from old student versions are invalidated. 
+
+Routing correctness. Validation always generates from the current student alone. When the ef-fective trust-region radius is exactly zero, the rollout follows the student-only fast path, teacher 
+
+q-forward count is zero, and the correction mask is identically zero. 23 Preprint The optimized system does not eliminate the intrinsic cost of online teacher verification. Its through-put therefore remains below student-only generation and depends on response length, correction rate, and the number of committed tokens per verification wave. 
+
+## L ADDITIONAL OBJECTIVE AND IMPLEMENTATION DETAILS 
+
+Correction masking. At correction positions, we set the RKL contribution exactly to zero. The correction loss does not stack with RKL. 
+
+Normalization. Both accepted-position RKL terms and correction terms are normalized by the total number of valid response tokens, 
+
+Nvalid = X
+
+> t
+
+Mt. (84) Accepted-position RKL terms and correction-position teacher-mode terms receive unit weight and are jointly normalized by the total number of valid response tokens. No additional correction-loss coefficient is used. 
+
+Role of the residual correction token. The correction token sampled from the residual distri-bution becomes the actual response token at that position and therefore determines all subsequent prefixes. However, it is not used as the direct supervision target. At correction positions, the direct training target is the teacher’s highest-probability token and therefore need not equal the sampled residual token. 
+
+Full-vocabulary rollout. The intermediate rollout distribution qt and maximal-coupling compu-tation operate over the full vocabulary. The teacher Top-1 target is used only for the correction supervision objective and does not truncate or otherwise modify the rollout distribution. 
+
+Validation. Evaluation should always generate from the current student alone, rather than from the teacher-guided rollout engine, so that reported benchmark performance measures the distilled student itself. 24

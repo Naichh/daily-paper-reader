@@ -1,0 +1,1574 @@
+Title: Distilling What Matters: Confidence-Aware Selective Distillation for Large Language Models
+
+URL Source: https://arxiv.org/pdf/2609.36734v1
+
+Published Time: Wed, 30 Sep 2026 01:14:05 GMT
+
+Number of Pages: 32
+
+Markdown Content:
+,lcs2 iit delhi Aug 2026 
+
+# Distilling What Matters: Confidence-Aware Selective Distillation for Large Language Models 
+
+Ayan Sengupta 1 Vaibhav Seth 1 Tanmoy Chakraborty 1,2   
+
+> 1Department of Electrical Engineering, Indian Institute of Technology Delhi
+> 2Yardi School of Artificial Intelligence, Indian Institute of Technology Delhi
+
+ayan.sengupta@ee.iitd.ac.in, vaibhavseth2283@gmail.com, tanchak@iitd.ac.in  
+
+> î
+
+parmanu.lcs2.in 
+
+Abstract Knowledge Distillation (KD) trains a smaller-capacity student model to imitate a larger-capacity teacher model by matching output distributions, implicitly assuming the teacher to be a reliable oracle. In large language models (LLMs), this assumption often fails: teacher predictions can exhibit high entropy and hallucinations, causing standard KD to degrade well-calibrated student priors. We propose CaRE-KD , a confidence-gated distillation framework that replaces static objectives with uncertainty-adaptive optimization. CaRE-KD has two components: a token-level loss ( CaRE-Divergence ) that adaptively switches between Forward and Reverse KL divergence based on teacher–student confidence, and a batch-level epistemic rejection mechanism ( Revival ) that suppresses updates when the teacher is more uncertain than the student. We provide a gradient-level analysis showing how this dual-granularity design induces a conditional calibration mechanism that prior static divergences cannot reproduce. Empirically, across eight teacher–student pairs and eleven benchmarks spanning instruction following, chat alignment, code generation, and mathematical reasoning, 
+
+CaRE-KD delivers consistent gains over strong baselines (Skewed-KL, α–β divergence). Highlights include up to +3 .2
+
+average ROUGE-L on instruction-following tasks, +2 .1 pass@1 on MBPP, +1 .7 accuracy on GSM8k, and +1 .8 accuracy on CollegeMath over the strongest baseline, with consistent gains in LLM-as-a-judge factuality (up to +2 .5 per task over Skewed-RKL). Revival further acts as a principled, loss-agnostic plug-in that systematically strengthens existing distillation objectives by filtering epistemically unreliable teacher supervision. 
+
+Keywords Knowledge distillation, efficient language models, on-policy distillation 
+
+## 1 Introduction and Prior Art 
+
+Knowledge Distillation (KD) is a standard paradigm for transferring knowledge from a large teacher model to a small student model by aligning their predictive distributions, most commonly via the Forward Kullback–Leibler (KL) divergence [1, 2]. This formulation implicitly assumes that the teacher provides uniformly reliable supervision, encouraging the student to cover the teacher’s full probability mass. While effective when the teacher is well cali-brated, this assumption becomes fragile in the regime of large language models (LLMs). Despite their strong average performance, modern LLMs frequently exhibit high-entropy predictions, internal inconsistency, and hallucinations [3, 4]. In such cases, minimizing Forward KL forces the student to allocate probability mass to unreliable long-tail predictions, a failure mode often described as zero-forcing [5], which degrades confident and correct student priors. Prior work has attempted to mitigate this issue by modifying the distillation objective – mode-seeking alternatives such as Reverse KL [5], as well as static interpolations, including Skewed KL [6] and α–β divergence [7], reduce sensitivity to the teacher’s tail by globally biasing optimization toward precision. However, these approaches impose a fixed geometric preference throughout training. They fail to account for the inherently dynamic nature of autore-gressive generation, in which a teacher may be highly informative for some tokens while uncertain or hallucinating for others. Our empirical analysis (Figure 1) reveals a recurrent failure mode we call the Fidelity Trap [8, 9]: teacher su-    
+
+> 1arXiv:2609.36734v1 [cs.CL] 29 Sep 2026 Distilling What Matters: Confidence-Aware Selective Distillation for Large Language Models 0.00 0.25 0.50 0.75 1.00
+
+BALD score (Uncertainty)                    
+
+> 0510 15 20
+> Density
+> KS Dist Pre-KD: 0.840 KS Dist Post-KD: 0.836
+> Teacher Student (Pre-KD) Student (Post-KD)
+> (a) CT>CS
+> (Teacher Dominant)
+> CTCSCT<CS
+> (Student Dominant)
+> Confidence regime
+> 0.00 0.05 0.10
+> Post-KD Performance (b) 0.0 0.5 1.0
+> Fidelity (t-s agreement)
+> 0.50
+> 0.25
+> 0.00 0.25 0.50
+> Post-KD performance  Regime: CT<CS
+> Correlation r=0.009 (p=0.94) (c)
+> Figure 1. OpenLLaMA-3B student distilled from a 7B teacher on Dolly-15k with Skewed-RKL [6]. (a) Distillation fails to reduce student epistemic uncertainty when the teacher is uncertain (KS distance changes by only
+
+0.4%). (b) Teacher supervision helps when the teacher is confident (median +4 %) but barely helps when the teacher is uncertain ( +0 .5%). (c) Static objectives enforce agreement even with unreliable teachers. 
+
+pervision helps when the teacher is accurate (median +4 %) but collapses to +0 .5% when the teacher is uncertain about its own generation [10, 11], even though the student often has lower pre-distillation uncertainty than the teacher in such regimes. Standard KD nevertheless forces the student to match the teacher, synchronizing with unreliable supervision and overwriting correct priors. We propose CaRE-KD , with two complementary components. CaRE-Divergence is a token-level objective that dynamically switches between Forward KL (mean-seeking, when the teacher is confident) and Reverse KL (mode-seeking, when the teacher is uncertain). Revival is a batch-level rejection mechanism based on BALD [12] that suppresses updates when the teacher is epistemically less reliable than the student, preventing unlearning of correct priors. Empirically, CaRE-KD achieves consistent improvements across eight teacher–student pairs and eleven bench-marks spanning instruction following, chat alignment, code generation, and mathematical reasoning (Tables 1, 5, 2, and 3). Concrete highlights include a +2 .6 average ROUGE-L gain on GPT2-base over Forward KL, +3 .2 on OPT-125M, +2 .1 pass@1 on MBPP, +1 .7 accuracy on GSM8k, and consistent gains in LLM-as-a-judge factuality (up to +2 .5 per task over Skewed-RKL). Moreover, Revival acts as a general enhancer: when applied to existing divergence objectives, including Forward KL, Reverse KL, α–β divergence, and Skewed RKL, it systematically im-proves performance by selectively filtering unreliable supervision (Table 2). Together, these results demonstrate that selective adaptation of optimization geometry and selective rejection of supervision are both necessary for robust distillation from modern LLMs. Unlike prior work that modifies divergence globally or filters data at the dataset level, our framework adapts both the optimization geometry at the token level and supervision at the sequence level during training. Our contributions can be summarized as follows: • We introduce CaRE-Divergence , a confidence-gated distillation objective that dynamically adapts divergence ge-ometry at the token level. • We propose Revival , a sequence-level epistemic rejection mechanism that filters distillation updates when the teacher is epistemically less reliable than the student, preventing student calibration from collapsing under unreli-able supervision. • We provide a gradient-level analysis explaining how CaRE-Divergence induces conditional calibration and why no static divergence can reproduce its token-wise behavior, together with formal conditions under which entropy-based confidence is a valid proxy for BALD. • We demonstrate consistent empirical gains across instruction following, chat alignment, code generation, and math-ematical reasoning, complemented by an LLM-as-a-judge factuality evaluation that directly measures hallucination, 
+
+> 2
+
+A. Sengupta and V. Seth and T. Chakraborty 
+
+and release a unified evaluation framework for reproducibility. 1
+
+Prior Art. Knowledge Distillation has evolved from logit matching and sequence-level objectives [1, 13] to gen-erative distillation frameworks that address exposure bias via on-policy sampling [2, 14] and mitigate tail risks [5]. Despite these advances, robustly handling noisy or hallucinated supervision remains an open challenge [9, 15, 16]. While prior work has explored static reweighting of divergence geometry [6, 7], proxy-based uncertainty modeling [16], or dataset-level filtering [17], these approaches either introduce additional modeling overhead or completely dis-card potentially informative data. In contrast, our method directly modulates the optimization trajectory, leveraging divergence geometry and intrinsic uncertainty signals to adapt supervision at training time without auxiliary models or data pruning. A more detailed discussion of related work is provided in Appendix A. 
+
+## 2 Methodology 0.4 0.2 0.0 0.2 0.4         
+
+> Confidence gap ( cTcS)
+> 0.0 0.2 0.4 0.6 0.8 1.0
+> Forward KL weight (gate)
+> Margin ( m = 0.05 )
+> Gating mechanism comparison hard vs. soft switching
+> Soft gating (Sigmoid) Hard gating (Step) 6420246
+> Logits
+> Effect on learning target
+> Teacher ( PT)Gate = 1 (Mode-Covering) Gate = 0 (Mode-Seeking) Gate 0.5 (Mixed/Soft)
+
+Figure 2. Token-level geometric adaptation induced by CaRE-Divergence . When the teacher is confident, the objective be-haves as Forward KL (mean-seeking, recall-oriented); when the teacher is uncertain, it transitions to Reverse KL (mode-seeking, precision-oriented), suppressing tail noise. 
+
+CaRE-KD is a dual-granularity distillation frame-work with two complementary mechanisms: (i) a token-level geometric adaptation, CaRE-Divergence 
+
+(§2.1), that switches between Forward and Re-verse KL using single-pass confidence, and (ii) a sequence-level rejection rule, Revival (§2.2), that suppresses updates when the teacher is epistemi-cally less reliable than the student. 
+
+Notation. Let V denote the vocabulary, and let 
+
+p(· | x), q (· | x) ∈ ∆|V|− 1 be the teacher and stu-dent next-token distributions (optionally tempered by T ). We measure single-pass (aleatoric) confi-dence by the normalized-entropy score 
+
+c(p) ≜ 1 − H(p)/ log |V| ∈ [0 , 1] , (1) where H(·) is Shannon entropy; larger c(p) corresponds to a sharper distribution. 
+
+2.1 Token-Level Dynamics: CaRE-Divergence 
+
+Since the appropriate optimization geometry depends on the relative informativeness of the teacher (Figure 2), we replace fixed Forward KL with the confidence-gated combination 
+
+LCARE (p, q ) = g · KL (p∥q) + (1 − g) · KL (q∥p), (2) where g ∈ [0 , 1] is a per-token scalar gate driven by the confidence gap ∆c = c(p) − c(q). We consider two variants: 
+
+ghard = I[c(p) ≥ c(q)] , gsoft = σ(c(p) − c(q) − m), (3) with σ(·) the sigmoid and m a margin. When the teacher is confident ( g → 1), CaRE-Divergence approaches mean-seeking KL (p∥q) and maximizes support coverage; when the teacher is uncertain ( g → 0), it approaches mode-seeking KL (q∥p), suppressing tail noise. 
+
+> 1
+
+The supplementary material contains source code for all divergence objectives implemented in this paper. 3Distilling What Matters: Confidence-Aware Selective Distillation for Large Language Models 
+
+2.2 Batch-Level Rejection: Revival 
+
+Single-pass entropy cannot distinguish intrinsic ambiguity from hallucination-driven epistemic uncertainty. We there-fore introduce Revival , a sequence-level rejection mechanism based on the BALD score [12] computed via Monte Carlo dropout [18]: 
+
+IBALD (x) = H[Eωp(y | x, ω )] − Eω[H(p(y | x, ω ))] , (4) which measures predictive disagreement across stochastic parameter realizations. Let IT and IS denote teacher and student BALD scores, respectively at a sequence; the rejection mask is 
+
+MRevival = I[IT > Q τ (IT) ∧ I S < Q τ (IS)] , (5) where Qτ (·) is the running τ -quantile of historical BALD scores (computed separately for teacher and student). Using a relative percentile rather than a fixed threshold ensures the mask is scale-invariant under training-time drift in BALD magnitudes, and triggers only when the teacher is uncertain relative to a confident student, targeting unreliable supervision rather than uniformly discarding hard tokens. We optionally schedule τ across training (Appendix D). For a batch B, the final per-batch objective is 
+
+LCaRE-KD = (1 − MRevival ) · 1
+
+|B|
+
+∑
+
+> x∈B
+
+LCARE 
+
+(p(x), q (x)). (6) When MRevival = 1 , updates are suppressed; otherwise the student optimizes the gated objective. 
+
+## 3 Theoretical Results 
+
+We provide a gradient-level analysis of CaRE-Divergence that explains how the gated objective differs from Skewed KL [6, 19] and α–β divergence [7], and we formalize when entropy-based confidence proxies BALD. Our results are mechanistic explanations of the empirical behavior, not standalone optimization guarantees. All proofs are in Appendix C. 
+
+3.1 Gradient analysis of CaRE-Divergence 
+
+Proposition 3.1 (Gradient decomposition of CaRE-Divergence ). Let LFKL (θ) = KL (p∥qθ) and LRKL (θ) = KL (qθ∥p)
+
+with p fixed in θ, and let g = g(θ) be a differentiable gate. Then 
+
+∇θLCaRE =
+
+[
+
+g∇θLFKL + (1 − g)∇θLRKL 
+
+]︸ ︷︷ ︸
+
+> Learning signal
+
++
+
+[
+
+(LFKL − L RKL )∇θg
+
+]︸ ︷︷ ︸
+
+> Selection signal
+
+. (7) 
+
+For the soft gate g = σ(c(p) − c(qθ) − m), ∇θg = −g(1 − g)∇θc(qθ), so the selection signal equals −g(1 −
+
+g)( LFKL − L RKL )∇θc(qθ).
+
+Interpretation. When the teacher is comparatively uncertain ( LFKL > LRKL ), the selection signal aligns with 
+
++∇θc(qθ), explicitly pushing the student to increase its confidence. No fixed-skew or fixed-β objective produces such a confidence-dependent term. This selection term is present only for the differentiable soft gate: the hard gate ghard 
+
+is a detached step function with ∇θg ≡ 0, so it retains only the token-level branch selection (the learning term with per-token gt ∈ { 0, 1}, which Proposition 3.2 shows no static divergence can reproduce), while soft gating additionally carries the confidence-pushing selection term. Branch selection alone yields the strongest peak performance, whereas the selection term confers robustness (Section C.1). When MRevival = 1 , ∇θLCaRE-KD = 0 , so the divergence to any reference p⋆ is unchanged – Revival provides worst-case robustness against unreliable supervision (proof in Appendix C). 
+
+> 4A. Sengupta and V. Seth and T. Chakraborty
+
+3.2 Strict separation from SRKL and α–β divergence 
+
+Proposition 3.2 (No global skew or β matches CaRE-Divergence ). In the student-dominant regime ( c(q) > c (p),
+
+g = 0 ), the per-token CaRE-Divergence gradient matches that of Skewed Reverse KL in the limit λ → 1. Globally, however, CaRE-Divergence assigns a token-varying gt ∈ { 0, 1} (and equivalently a token-varying βt ∈ { 0, 1} in the α–β family). No global λ for SRKL or global β for α–β divergence reproduces this token-wise behavior. (Full 
+
+α–β derivation: Appendix C.) 
+
+3.3 Entropy-confidence proxies BALD in the sharp regime 
+
+Assumption 3.3 (Sharpness Hypothesis) . LLMs trained with cross-entropy loss are typically overconfident [4, 20]: 
+
+H[p(y|x, ω )] ≈ 0 for ω ∼ p(ω).
+
+Theorem 3.4 (Conditional equivalence of confidence proxies) . Under Assumption 3.3 and the approximation ˆp ≈
+
+Eω[p(y | x, ω )] , maximizing c(ˆ p) approximately minimizes IBALD (x). Hence single-pass entropy is a computationally efficient proxy for BALD inside the inner loop. 
+
+3.4 Conditional bi-directional calibration 
+
+Within a fixed branch of the gated objective, both KL branches share the unique minimizer q = p (under standard support conditions); convergence in a branch, therefore, drives student entropy toward H(p).
+
+Theorem 3.5 (Conditional bi-directional calibration) . Suppose optimization under LCaRE -KD stays in a fixed branch regime and qθ → p. Then H(qθt ) → H(p). In particular, an overconfident student ( H(qθ0 ) < H (p)) must increase entropy at some step, and an underconfident student ( H(qθ0 ) > H (p)) must decrease entropy. CaRE-Divergence 
+
+thus acts as a conditional calibration mechanism without requiring strict monotonicity. 
+
+## 4 Experimental Setup and Results 
+
+Following established protocols for evaluating distilled language models [6, 7, 19], we evaluate our framework across three modalities – instruction following, code generation, and mathematical reasoning. 
+
+Instruction Following. We consider two complementary evaluation regimes. (1) Standard benchmarks. Following Ko et al. [6], we perform distillation on the Dolly-15k dataset [21]. We evaluate four teacher–student model families: (i) GPT-2 XL → GPT-2 Base/Large [22], (ii) OPT-2.7B → OPT-125M [23], (iii) Gemma-2-9B-Instruct → Gemma-2-2B-Instruct [24] and (iv) OpenLLaMA-7B → OpenLLaMA-3B [25]. Evaluation is conducted on four task-agnostic instruction-following benchmarks: Dolly Evaluation [21], Self-Instruct [26], Super-Natural Instructions [27], and Vicuna Instructions [27]. (2) Large-scale alignment. To assess performance on modern chat-aligned models, we follow Ko et al. [19] and distill a Qwen2-1.5B student from a Qwen2-7B teacher [28] using the UltraChat200k dataset [29]. The resulting models are evaluated on AlpacaEval [30], Evol-Instruct [31], and UltraFeedback [32]. 
+
+Code Generation. For domain-specific coding tasks, we replicate the setup of Ko et al. [19]. We distill a DeepSeek-Coder-1.3B student from a DeepSeek-Coder-6.9B-Instruct teacher [33]. Training is performed on the WizardCoder dataset [34], and evaluation is conducted on HumanEval [35] and MBPP [36]. 
+
+Mathematical Reasoning. To evaluate multi-step reasoning capabilities, we use the Qwen2.5-Math models [37]. A 1.5B student is distilled from a 7B-Instruct teacher using the MetaMathQA dataset [38]. We report zero-shot accuracy on GSM8K [39] and CollegeMath [40]. 
+
+Metrics. For instruction-following and chat alignment we report ROUGE-L on the held-out evaluation set, following Ko et al. [6], together with an LLM-as-a-judge factuality score (0–100) computed by prompting GPT-5-Mini to grade outputs against the reference answer for hallucinations and factual consistency (system prompt in Appendix D.7). For 
+
+> 5
+
+Distilling What Matters: Confidence-Aware Selective Distillation for Large Language Models 
+
+Table 1. Main instruction-following results under SGO training. Cells report ROUGE-L / LLM-as-a-judge factuality on Dolly, Self-Instruct, Super-Natural Instructions, and Vicuna. Across five teacher–student pairs, CaRE-Divergence 
+
+achieves the best average ROUGE-L on three pairs and the best factuality on three pairs, with statistically significant gains over the second-best baseline ( t = 3 .93 , p = 0 .03 ). Bold denotes the best score per cell. Results are averaged over five seeds; detailed comparisons appear in Appendix E.                                                                                                                                                     
+
+> TEACHER →STUDENT LOSS BENCHMARKS AVG
+> DOLLY SELF-INST SUPER-NAT VICUNA FKL 23.4/21.2 10.7/15.6 19.0/16.4 15.0/13.5 17.0/16.7 RKL 24.7/20.7 11.6/16.4 19.2/16.2 16.6/14.6 18.0/17.0 SRKL 24.9/23.1 12.1/17.6 23.6 /21.9 16.5/15.3 19.3/19.5
+> α-βDIV 23.9/23.1 11.5/16.4 21.9/18.3 16.1/15.0 18.4/18.2 GPT2-XL (1.5B) →
+> GPT2-BASE (0.1B)
+> CaRE-Div (OURS) 25.6/24.1 12.9/20.1 22.8/ 24.4 17.3/15.3 19.6/21.0
+> FKL 23.7/21.5 10.1/13.6 15.7/13.4 15.0/14.4 16.1/15.7 RKL 19.3/14.7 9.9/14.3 16.3/13.0 15.0/11.3 15.1/13.3 SRKL 24.1/20.5 11.1/15.0 19.9 /17.0 16.4 /15.3 17.9/16.9
+> α-βDIV 23.0/20.1 10.7/14.6 16.7/15.2 15.5/13.3 16.5/15.8 GPT2-XL (1.5B) →
+> GPT2-LARGE (0.8B)
+> CaRE-Div (OURS) 25.4/25.5 11.6/16.7 19.4/ 18.0 16.0/ 16.1 18.1/19.1
+> FKL 22.4/20.7 9.6/14.1 17.1/14.5 15.5/12.9 16.1/15.5 RKL 24.8/22.7 11.2/15.8 22.2/18.4 16.4/15.9 18.6/18.2 SRKL 25.1/23.9 11.6/ 19.3 22.5/19.5 16.8/18.1 19.0/ 20.2
+> α-βDIV 24.9/23.6 11.2/16.5 21.7/18.3 16.7/13.9 18.6/18.1 OPT-2.7B →
+> OPT-125M
+> CaRE-Div (OURS) 24.3/20.5 12.0 /18.7 23.9/21.4 16.7/13.5 19.3 /18.5 FKL 18.4/19.6 10.4/22.0 19.2/15.3 17.1/16.0 16.3/18.2 RKL 17.5/20.2 10.0/21.8 19.7 /19.1 20.1/ 21.9 16.8/20.7 SRKL 19.7 /24.9 10.8/20.8 16.5/18.3 18.9/18.2 16.5/20.6
+> α-βDIV 18.9/ 25.6 10.7/21.6 17.5/17.2 20.0/20.2 16.8/21.1 GEMMA-2-9B-IT →
+> GEMMA-2-2B-IT
+> CaRE-Div (OURS) 17.0/23.4 11.5/22.0 19.4/ 19.9 20.3 /21.0 17.1/21.6
+> FKL 24.3/32.2 17.6/25.7 30.5/31.3 16.9/22.3 22.3/27.9 RKL 29.1 /40.0 20.7/ 31.7 35.7/ 39.4 20.0 /27.8 26.4 /34.7 SRKL 29.0/ 40.9 20.8/31.2 36.6/37.8 19.2/ 31.1 26.4/35.3
+> α-βDIV 28.3/38.1 19.3/29.7 33.5/35.2 18.6/29.9 24.9/33.2 OPENLLAMA2-7B →
+> OPENLLAMA2-3B
+> CaRE-Div (OURS) 27.7/38.1 20.9 /29.8 37.3 /38.6 18.9/28.6 26.2/33.8
+
+code generation we report execution-based pass@1 on HumanEval and MBPP, and for mathematical reasoning we report exact-match accuracy on GSM8K and CollegeMath. Statistical significance for ROUGE-L improvements is assessed using paired t-tests across model pairs. Additional implementation details, hyperparameters, training protocols, and the LLM-judge system prompt are provided in Appendix D. 
+
+4.1 Results on instruction following tasks 
+
+We evaluate CaRE-KD under SGO training (student rollouts) and non-SGO (teacher forcing); each cell of Tables 1 and 5 reports ROUGE-L / LLM-as-a-judge factuality. In the SGO setting (Table 1), CaRE-Divergence improves over Forward KL by +2 .6 / +4 .3 on GPT2-base, 
+
++2 .0 / +3 .4 on GPT2-large, and +3 .2 / +3 .0 on OPT-125M (ROUGE-L / LLM-judge), and beats Skewed RKL by 
+
++0 .3 / +1 .5 on GPT2-base. On OpenLLaMA-7B → 3B, it achieves the best ROUGE-L on Self-Instruct and Super-Natural Instructions and stays within 0.2 of the best baseline on average. Paired t-tests confirm that the average improvements of CaRE-Divergence over the per-row second-best baseline are statistically significant ( t = 3 .93 ,
+
+p = 0 .03 ). Detailed comparisons against a comprehensive baseline suite (SFT, KD, SeqKD, ImitKD, MiniLLM, GKD, Distillm, ABKD) appear in Appendix E (Tables 6, 7, 8); CaRE-Divergence tops the average ROUGE-L on GPT2-base and OPT-125M. 
+
+The advantage is robustness, not a single large win. The accurate reading of Table 1 is that CaRE-KD is “never bad” rather than “always best”: under SGO it has the best average on four of the five pairs and the highest mean ROUGE-L averaged over all five ( 20 .1 vs. 19 .8 for the next-best static objective, Skewed-RKL). The more informative 
+
+6A. Sengupta and V. Seth and T. Chakraborty 
+
+comparison is worst-case behavior. Each single-geometry objective breaks somewhere — Forward KL trails the best by 4.1 on OpenLLaMA, Reverse KL by 3.0 on GPT2-large, and α–β by 1.6 on GPT2-large — and even the strongest static baseline, Skewed-RKL, trails by up to 0.6 (Gemma). CaRE-KD ’s worst gap on any pair is 0.2.On OpenLLaMA-7B →3B the 0.18 ROUGE-L gap ( 26 .23 vs. 26 .41 , Table 8) is smaller than the per-seed standard deviation of either method on this pair ( 0.19 –0.90 across tasks), so we treat the pair as a statistical tie; Gemma-2-2B-IT on Dolly ( 17 .0 vs. 19 .7) is an outright loss, which we state plainly. 
+
+Scope of applicability. Two factors set how much the confidence gate can help: how unreliable the teacher is, and how far the student sits from the teacher (roughly the compression ratio). The clearest wins occur where both are large — small students distilled from weak teachers under heavy compression (GPT2-XL →base, ∼15 ×; OPT-2.7B →125M, 
+
+∼22 ×). The one tie, OpenLLaMA-7B →3B, distills a strong, well-calibrated teacher at only 2.3×, so the student already sits close to the teacher and there is little unreliable supervision to filter; here a static mode-seeking objective is near-optimal. CaRE-KD should therefore be preferred under large capacity gaps and precision-sensitive tasks. In the non-SGO (teacher-forcing) setting (Table 5, Appendix E), CaRE-Divergence achieves 19 .5/19 .7 (R/LLM) on GPT2-base, strictly dominating SRKL ( 17 .7/17 .7) and FKL ( 16 .1/15 .6); validation-set cross-entropy and exact-match dynamics confirming faster, lower-loss convergence are in Figures 6–7 (Appendix E). 
+
+4.2 LLM-as-a-judge factuality 
+
+ROUGE-L is blind to hallucination. Therefore, we additionally grade every output with GPT-5-Mini on a 0–100 
+
+factuality scale (system prompt: Appendix D.7). CaRE-Divergence improves average factuality alongside ROUGE-L on most pairs: +1 .5 over SRKL on GPT2-base ( 21 .0 vs. 19 .5), +2 .2 on GPT2-large, and the highest Evol-Instruct factuality on Qwen2-1.5B ( 53 .0 vs. 52 .1 Distillm-2). Per-task gaps reach +2 .5 over SRKL (Self-Instruct, Super-Natural Instructions; GPT2-base). To probe whether Revival targets hallucination-prone regions, we measure teacher factuality conditional on the mask: on Dolly with the OpenLLaMA-7B teacher, the teacher’s factuality is 25 .2 when 
+
+Revival fires vs. 28 .6 when it does not (one-sided Wilcoxon p = 0 .06 ). We treat this as suggestive rather than conclusive: the Wilcoxon test is not significant, and a complementary check that splits the sequences by confidence regime and compares teacher factuality where Revival fires against the opposite region is also not significant (Mann– Whitney p = 0 .26 ). We therefore do not claim that Revival selects specifically low-factuality tokens at the mechanism level; the claim we make, and that holds, is that the distilled student’s end-to-end factuality improves under the LLM judge (Tables 1 and 3). 
+
+4.3 Revival as a loss-agnostic enhancer 
+
+Table 2 isolates Revival by reporting ∆ = Score with − Score without . CaRE-Divergence exhibits the most consis-tent positive response: +1 .42 avg. ROUGE-L on OPT-125M ( +3 .62 on Super-Natural Instructions). Revival also improves static baselines (e.g., +1 .14 for RKL on GPT2-base), supporting the broader hypothesis that selective fil-tering is a general enhancement mechanism [16, 17]; however, static objectives are high-variance (RKL −1.78 on Self-Instruct for GPT2-large), whereas CaRE-Divergence remains consistently positive on average, highlighting the complementarity of dynamic geometry and selective rejection. The precise claim is about the average, not every cell: 
+
+CaRE-Divergence itself has two small negative entries ( −0.4 on Vicuna/Gemma, −0.04 on Dolly/GPT2-large), but it has the most reliable positive response overall — the highest mean ∆ with the fewest and smallest negatives. A one-sample t-test over the per-task deltas confirms this: CaRE-Divergence t = 3 .98 (p < 0.001 ), whereas Forward KL ( t = −2.55 ) and Reverse KL ( t = 1 .24 , p = 0 .25 ) are not reliably positive. 
+
+4.4 Results on specialized domains 
+
+Table 3 extends evaluation to chat alignment (Qwen2-7B →1.5B), code (DeepSeek-Coder-6.9B →1.3B), and math (Qwen2.5-Math-7B →1.5B). CaRE-Divergence leads on Evol-Instruct ( 26 .8/53 .0 vs. SRKL 26 .5/52 .1) and Ultra-Feedback ( 22 .6/49 .3); reaches 62 .4 pass@1 on MBPP ( +2 .1 vs. SRKL, +2 .6 vs. ABKD); and achieves 73 .9% on 
+
+> 7Distilling What Matters: Confidence-Aware Selective Distillation for Large Language Models
+
+Table 2. Impact of Revival on different distillation losses. Values are the per-task delta ∆ = Score with-Revival −
+
+Score no-Revival in ROUGE-L. CaRE-Divergence shows the most consistent positive response, with a statistically signif-icant average improvement across model pairs (one-sample t-test: t = 3 .98 , p < 0.001 ). Static baselines such as FKL (t = −2.55 , p = 0 .06 ) often degrade with Revival , while RKL ( t = 1 .24 , p = 0 .25 ) yields insignificant gains, indicating that our confidence-gated geometry is uniquely synergistic with epistemic filtering. Bold marks the largest positive delta per (model, task) cell.                                                                                                                                         
+
+> STUDENT LOSS BENCHMARKS AVG
+> DOLLY SELF-INST SUPER-NAT VICUNA FKL 0.22 0.14 -0.64 0.09 -0.05 RKL 0.32 0.61 3.51 0.12 1.14 SRKL 0.41 0.54 1.64 0.30 0.72
+> α-βDIV 1.11 0.80 0.94 0.67 0.88 GPT2-BASE
+> CaRE 0.35 0.94 1.26 1.04 0.90 FKL -0.36 -0.69 -0.22 -0.26 -0.38 RKL 0.35 -1.78 -1.44 1.75 -0.28 SRKL 0.43 0.70 1.09 -0.56 0.41
+> α-βDIV -0.44 -0.35 0.70 0.68 0.15 GPT2-LARGE
+> CaRE -0.04 0.71 1.06 0.10 0.46 FKL -0.23 -0.18 -0.01 -0.29 -0.18 RKL 0.29 0.57 0.75 0.71 0.58 SRKL 0.27 0.61 1.98 -0.76 0.52
+> α-βDIV -0.42 0.35 0.05 -0.43 -0.11 OPT-125M
+> CaRE 0.55 1.12 3.62 0.38 1.42 FKL -4.02 -3.68 -7.31 -0.66 -3.91 RKL -0.48 -2.68 1.54 0.4 -0.3 SRKL 1.48 1.89 1.56 0.99 1.48
+> α-βDIV 1.37 2.05 10.17 -1.26 3.08 GEMMA-2-2B-IT
+> CaRE 3.6 2.61 5.79 -0.4 2.90 FKL 0.18 -0.31 -0.96 0.09 -0.25 RKL 0.02 0.18 -0.29 -0.03 -0.04 SRKL -0.15 0.67 -1.48 -0.10 -0.26
+> α-βDIV 0.24 1.14 2.16 0.43 0.99 OLLAMA2-3B
+> CaRE 0.27 0.26 1.82 0.57 0.73
+
+GSM8K ( +1 .7 vs. SRKL) and 46 .1% on CollegeMath ( +1 .8 vs. Distillm-2/ABKD). Against the additional on-policy and divergence baselines (GKD, Distillm) now reported in Table 3 for the code and math tasks, CaRE-KD remains best on MBPP, GSM8K and CollegeMath and tied-best on HumanEval. Precision-sensitive domains — where a sin-gle hallucinated step can break a proof, a unit test, or a logical argument — benefit most from confidence-conditioned mode seeking and rejection of unreliable teacher supervision. 
+
+4.5 Hyperparameter sensitivity and ablations 
+
+We conduct ablations on instruction-following tasks with both GPT- and OPT-based students (Figures 3 and 8 in Appendix E). Several consistent trends emerge across architectures. Moderate-to-high skip percentages (roughly 50–70%) consistently outperform low filtering regimes, indicating that a substantial portion of teacher supervision lies in epistemically unreliable regions. An increasing Revival schedule, where selectivity is gradually strengthened over training, reliably yields the best performance, supporting a curriculum effect in which early broad supervision transitions into progressive filtering as the student’s confidence improves. Increasing the number of Monte Carlo samples used for BALD estimation improves stability, though strong performance is already achieved with as few as 
+
+N = 3 when combined with an increasing schedule. Hard gating attains the highest peak performance, while soft gating provides slightly greater robustness across configurations. Performance exhibits a unimodal dependence on sampling temperature, peaking at moderate values (around T = 3 .0), confirming that effective epistemic estimation 
+
+> 8
+
+A. Sengupta and V. Seth and T. Chakraborty 
+
+Table 3. Generalization to specialized domains. Cells report ROUGE-L / LLM-as-a-judge factuality. We evaluate three model families: chat alignment (Qwen2), code generation (DeepSeek-Coder), and math reasoning (Qwen2.5-Math). CaRE-Divergence consistently improves precision-sensitive tasks, achieving +2.1 pp on MBPP, +1.7 pp on GSM8k, and +1.8 pp on CollegeMath over the strongest baseline. Gains are statistically significant ( t = 3 .05 , p = 0 .018 ). Bold denotes the best score per cell. GKD and Distillm are additionally reported on the code and math tasks, where 
+
+CaRE-KD remains best on MBPP, GSM8K and CollegeMath and tied-best on HumanEval; chat-alignment entries for these two baselines are still running and omitted (“–”).                                                          
+
+> METHOD QWEN2-7B-INST
+> →QWEN2-1.5B DS-CODER-6.9B-INST
+> →DS-CODER-1.3B QWEN2.5-MATH-7B-INST
+> →QWEN2.5-MATH-1.5B
+> ALPACA EVOL ULTRA HEVAL MBPP GSM8K COLLEGE
+> ROUGE-L/LLM ROUGE-L/LLM ROUGE-L/LLM PASS@1 PASS@1 PASS@1 PASS@1
+> STUDENT 8.81/27.3 14.9/31.2 10.8/30.5 32.3 58.5 69.9 37.1 DISTILLM2 16.3/43.3 26.5/52.1 22.1/ 49.3 43.3 60.3 72.2 44.2 ABKD 16.4 /44.8 26.7/51.9 22.3/48.4 42.7 59.8 71.0 44.3 GKD –––43.1 60.2 71.4 43.9 DISTILLM –––42.9 60.0 71.7 44.1
+> CaRE-KD (OURS) 16.4 /44.4 26.8/53.0 22.6 /49.3 43.3 62.4 73.9 46.1
+
+requires controlled stochasticity rather than aggressive noise. We further ablate the margin m in gsoft defined in Equation 3. Lower m performs the best, balancing the forward and reverse KL divergence metrics, while higher margins bias the objective and degrade performance. A small margin does not collapse the soft gate into hard gating: 
+
+m only shifts where the sigmoid is centered, not its slope, so at m = 0 .05 the gate is still a smooth, differentiable function of the confidence gap — a near-symmetric switch centered near a gap of zero — and the soft-gate selection term of Proposition 3.1 is retained. Its being the best margin is expected: it matches the hard-gate behavior of switching branches right at the crossover point, exactly where hard gating attains its highest peak, whereas a large m
+
+biases the gate toward one geometry across most tokens. Soft gating is thus the robustness-oriented variant and hard gating the peak-performance variant. The consistency of these trends across GPT and OPT families demonstrates that the design principles underlying CaRE-KD generalize across architectures. Hard Soft 15 20 25                  
+
+> Average score  Gating type
+> 035715 20 25
+> BALD sample size ( N)
+> 0.5 1.0 3.0 5.0 10 20
+> Temperature ( T)
+> 030 50 70 15 20 25 Skip percentage ( )
+> Cons Incr Decr 15 20 25 Schedule type
+> 0.05 0.1 0.5 0.9 15 20
+> Margin ( m)
+
+Figure 3. Ablation study of CaRE-KD with GPT2-base. (a) gating strategy ( ghard vs. gsoft ); (b) MC-dropout sample count N ; (c) sampling temperature T ; (d) target skip percentage τ ; (e) Revival scheduling strategy (constant, increas-ing, decreasing); and (f) margin m in soft gating. 
+
+## 5 Discussion 
+
+Decoupling student confidence from teacher uncertainty. A core failure mode of standard KD is that the student inherits the teacher’s epistemic uncertainty rather than its competence: when the teacher is unsure, Forward KL forces the student to spread probability mass over the teacher’s heavy tail, eroding sharper, correct priors. Figure 4 shows that CaRE-KD explicitly avoids this trap. Across all four benchmarks, the teacher’s BALD distribution exhibits a long, heavy tail of high-uncertainty samples; the student trained with Revival retains a tightly concentrated low-BALD profile that is closer to its pre-distillation prior than to the teacher’s tail. The decoupling is large in magnitude: on Self-Instruct the teacher’s mean BALD is 0.52 while the corresponding distilled student reaches 0.077 , and the Kolmogorov–Smirnov distance between the two distributions exceeds 0.5 on Vicuna and Dolly. Reading the pre-versus post-distillation KS drift (Figures 1a and 4) also isolates the two components of CaRE-KD . Standard Skewed-RKL barely moves the student’s uncertainty away from the teacher: the KS distance drifts by only 0.4% ( 0.840 →
+
+9Distilling What Matters: Confidence-Aware Selective Distillation for Large Language Models 
+
+0.836 ). The CaRE-Divergence token-level loss alone ( Revival removed) already drifts by 2.4% on Dolly ( 0.840 →
+
+0.864 ) — several times the baseline — and adding Revival raises the drift to 7%. The token-level loss is thus the main driver and Revival amplifies it; neither is a 0.4% effect. The same pattern is reproduced under static divergences augmented with Revival (Skewed RKL and α–β, Figures 9–10 in Appendix F), establishing that the effect is driven by selective rejection rather than by any one objective. Crucially, the rejection rate is not a static threshold: the proportion of batches triggering MRevival rises monotonically through training (Figures 11–12), reflecting a curriculum in which broad early supervision gives way to progressively stricter filtering as the student becomes more confident than the teacher on a growing subset of inputs. This empirically realizes the bi-directional conditional calibration formalized in Theorem 3.5. 0.00 0.25 0.50 0.75 1.00           
+
+> BALD score (Uncertainty)
+> 010 20
+> Density
+> KS Dist Pre-KD: 0.963 KS Dist Post-KD: 1.000
+> Task: Sinst
+> Teacher Student (Pre-KD) Student (Post-KD)
+> 0.0 0.1 0.2
+> BALD score (Uncertainty)
+> 020 40 60 80
+> Density
+> KS Dist Pre-KD: 0.988 KS Dist Post-KD: 1.000
+> Task: Vicuna
+> 0.00 0.25 0.50 0.75 1.00
+> BALD score (Uncertainty)
+> 010 20 30
+> Density
+> KS Dist Pre-KD: 0.840 KS Dist Post-KD: 0.910
+> Task: Dolly
+> 0.0 0.2 0.4 0.6 0.8
+> BALD score (Uncertainty)
+> 010 20
+> Density
+> KS Dist Pre-KD: 0.921 KS Dist Post-KD: 0.992
+> Task: Self
+
+Figure 4. BALD uncertainty distributions across four instruction-following benchmarks. Teacher models show heavy high-uncertainty tails (red), whereas CaRE-KD students (blue) suppress these regions and maintain concen-trated low-BALD profiles. Reported KS distances indicate strong distributional separation, exceeding 0.5 on Vicuna and Dolly. 
+
+Computational analysis. Revival trades a moderate amount of additional forward-pass compute for substantially 0 (no revival) 3 5 7
+
+Number of BALD samples ( N)
+
+> 02000 4000 6000 8000 10000 12000
+> Training time (Seconds)
+> 5520s 7860s +42% 9360s +70% 10920s +98%
+
+(a) Wall-clock vs. MC samples 0 (no revival) 30 50 70 
+
+Skip percentage ( )  
+
+> 01000 2000 3000 4000 5000 6000
+> Training time (Seconds)  5520s 5211s -6% 5023s -9% 4874s -12%
+
+(b) Wall-clock vs. skip rate 
+
+Figure 5. Runtime on Dolly-15k with OpenLLaMA-3B for one epoch. (a) Wall-clock time scales near-linearly with the number of MC dropout samples N for BALD estimation. (b) Higher skip rates τ reduce BALD overhead by skipping backward passes on rejected batches. 
+
+more reliable supervision. The dominant cost is BALD estimation, which requires N stochastic dropout passes per batch and scales near-linearly in N (Figure 5(a)). Concretely, on Dolly with OpenLLaMA-3B, one epoch takes 5520s without Revival and 7860s with N = 3 , a 42 % overhead; pushing to N = 7 approaches a 98 % overhead. This cost is partially recovered by the rejection mechanism itself: when MRevival = 1 , the corresponding backward pass is skipped, so increasing τ reduces effective wall-clock per epoch (Figure 5(b)); a 70 % skip target recovers roughly 12 % of the BALD overhead. This ∼40 % figure is specific to instruction following, however; the per-domain overhead at N = 3 is substantially larger, and is largest precisely when the training step is otherwise cheap (per-domain breakdown in Figure 13, Appendix F): approximately +106 % for chat alignment, +170 % for code, and 
+
+10 A. Sengupta and V. Seth and T. Chakraborty 
+
++148 % for math. We therefore no longer describe the overhead as “modest.” Revival is a poor fit for settings with very large teachers, long sequences, or online/streaming updates; in those regimes the single-pass entropy proxy justified by Theorem 3.4 removes the extra stochastic passes at a small loss of precision. Because N = 3 paired with an increasing schedule already achieves the strongest empirical performance and distillation is a one-time offline cost incurred before deployment, the overhead remains acceptable for the offline, high-compression settings CaRE-KD 
+
+targets. 
+
+Limitations. BALD-based rejection requires multiple stochastic passes and therefore costs more than single-pass distillation. As shown above, this overhead is ∼40 % at N = 3 for instruction following but considerably larger per domain (up to ∼170 % on code), and is largest when the training step is otherwise cheap; it is partially amortized by skipped updates, but in compute-constrained regimes, or with very large teachers, long sequences, or online updates, it may still be undesirable. In such settings, the cheaper entropy proxy justified by Theorem 3.4 remains a valid drop-in for the rejection rule, with a small loss of precision. Second, the equivalence between entropy-based confidence and BALD relies on the Sharpness Hypothesis (Assumption 3.3), which is best supported for cross-entropy-trained LLMs in regimes where individual MC samples are sharp. We stress that this assumption is used only to justify the optional single-pass entropy fallback: every reported result uses the full MC-dropout BALD estimate, which does not rely on Assumption 3.3. In genuinely multimodal open-ended generation, where stochastic passes can disagree on which valid continuation to predict rather than how confidently , this assumption may weaken; relaxing the analysis to high-aleatoric regimes is a natural direction for future work. 
+
+## 6 Conclusion 
+
+We introduced CaRE-KD , a confidence-aware framework that redefines how supervision is transferred in generative knowledge distillation. By dynamically adapting the optimization geometry at the token level via CaRE-Divergence ,the student selectively absorbs informative teacher signals while suppressing unreliable long-tail noise. Complemen-tarily, the epistemic rejection mechanism Revival prevents the student from inheriting teacher hallucinations, pre-serving correct priors under uncertain supervision. Across instruction following, code generation, and mathematical reasoning, CaRE-KD consistently yields students that are both more accurate and better calibrated than those trained with static divergence objectives. These findings underscore that effective distillation from modern LLMs requires adapting not only how much to imitate the teacher, but when to trust it. 
+
+## References            
+
+> [1] Y. Kim and A. M. Rush, “Sequence-level knowledge distillation,” arXiv preprint arXiv:1606.07947 , 2016. [2] R. Agarwal, N. Vieillard, Y. Zhou, P. Stanczyk, S. R. Garea, M. Geist, and O. Bachem, “On-policy distillation of language models: Learning from self-generated mistakes,” in The Twelfth International Conference on Learning Representations ,2024. [3] A. T. Kalai, O. Nachum, S. S. Vempala, and E. Zhang, “Why language models hallucinate,” arXiv preprint arXiv:2509.04664 , 2025. [4] F. Sun, N. Li, K. Wang, and L. Goette, “Large language models are overconfident and amplify human bias,” arXiv preprint arXiv:2505.02151 , 2025. [5] Y. Gu, L. Dong, F. Wei, and M. Huang, “Minillm: Knowledge distillation of large language models,” in The Twelfth International Conference on Learning Representations , 2024. [6] J. Ko, S. Kim, T. Chen, and S.-Y. Yun, “Distillm: Towards streamlined distillation for large language models,” arXiv preprint arXiv:2402.03898 , 2024. [7] G. Wang, Z. Yang, Z. Wang, S. Wang, Q. Xu, and Q. Huang, “ABKD: Pursuing a proper allocation of the probability mass in knowledge distillation via $\alpha$-$\beta$-divergence,” in Forty-second International Conference on Machine Learning , 2025. [Online]. Available: https://openreview.net/forum?id=vt65VjJakt
+> 11 Distilling What Matters: Confidence-Aware Selective Distillation for Large Language Models
+
+[8] S. Stanton, P. Izmailov, P. Kirichenko, A. A. Alemi, and A. G. Wilson, “Does knowledge distillation really work?” Ad-vances in Neural Information Processing Systems , vol. 34, pp. 6906–6919, 2021. [9] S. K. Ramesh, A. Sengupta, and T. Chakraborty, “On the generalization vs fidelity paradox in knowledge distillation,” in Findings of the Association for Computational Linguistics: ACL 2025 , W. Che, J. Nabende, E. Shutova, and M. T. Pilehvar, Eds. Vienna, Austria: Association for Computational Linguistics, Jul. 2025, pp. 17 930–17 951. [Online]. Available: https://aclanthology.org/2025.findings-acl.923/ [10] S. Kadavath, T. Conerly, A. Askell, T. Henighan, D. Drain, E. Perez, N. Schiefer, Z. Hatfield-Dodds, N. DasSarma, E. Tran-Johnson, S. Johnston, S. El-Showk, A. Jones, N. Elhage, T. Hume, A. Chen, Y. Bai, S. Bowman, S. Fort, D. Ganguli, D. Hernandez, J. Jacobson, J. Kernion, S. Kravec, L. Lovitt, K. Ndousse, C. Olsson, S. Ringer, D. Amodei, T. Brown, J. Clark, N. Joseph, B. Mann, S. McCandlish, C. Olah, and J. Kaplan, “Language models (mostly) know what they know,” 2022. [Online]. Available: https://arxiv.org/abs/2207.05221 [11] G. Prato, J. Huang, P. Parthasarathi, S. Sodhani, and S. Chandar, “Do large language models know how much they know?” in Proceedings of the 2024 Conference on Empirical Methods in Natural Language Processing , Y. Al-Onaizan, M. Bansal, and Y.-N. Chen, Eds. Miami, Florida, USA: Association for Computational Linguistics, Nov. 2024, pp. 6054–6070. [Online]. Available: https://aclanthology.org/2024.emnlp-main.348/ [12] N. Houlsby, F. Huszár, Z. Ghahramani, and M. Lengyel, “Bayesian active learning for classification and preference learn-ing,” arXiv preprint arXiv:1112.5745 , 2011. [13] G. Hinton, O. Vinyals, and J. Dean, “Distilling the knowledge in a neural network,” arXiv preprint arXiv:1503.02531 ,2015. [14] A. Sengupta, S. Dixit, M. S. Akhtar, and T. Chakraborty, “A good learner can teach better: Teacher-student collaborative knowledge distillation,” in The Twelfth International Conference on Learning Representations , 2024. [Online]. Available: https://openreview.net/forum?id=Ixi4j6LtdX [15] D. Guo, D. Yang, H. Zhang, J. Song, P. Wang, Q. Zhu, R. Xu, R. Zhang, S. Ma, X. Bi, X. Zhang, X. Yu, Y. Wu, Z. F. Wu, Z. Gou, Z. Shao, Z. Li, Z. Gao, A. Liu, B. Xue, B. Wang, B. Wu, B. Feng, C. Lu, C. Zhao, C. Deng, C. Ruan, D. Dai, D. Chen, D. Ji, E. Li, F. Lin, F. Dai, F. Luo, G. Hao, G. Chen, G. Li, H. Zhang, H. Xu, H. Ding, H. Gao, H. Qu, H. Li, J. Guo, J. Li, J. Chen, J. Yuan, J. Tu, J. Qiu, J. Li, J. L. Cai, J. Ni, J. Liang, J. Chen, K. Dong, K. Hu, K. You, K. Gao, K. Guan, K. Huang, K. Yu, L. Wang, L. Zhang, L. Zhao, L. Wang, L. Zhang, L. Xu, L. Xia, M. Zhang, M. Zhang, M. Tang, M. Zhou, M. Li, M. Wang, M. Li, N. Tian, P. Huang, P. Zhang, Q. Wang, Q. Chen, Q. Du, R. Ge, R. Zhang, R. Pan, R. Wang, R. J. Chen, R. L. Jin, R. Chen, S. Lu, S. Zhou, S. Chen, S. Ye, S. Wang, S. Yu, S. Zhou, S. Pan, S. S. Li, S. Zhou, S. Wu, T. Yun, T. Pei, T. Sun, T. Wang, W. Zeng, W. Liu, W. Liang, W. Gao, W. Yu, W. Zhang, W. L. Xiao, W. An, X. Liu, X. Wang, X. Chen, X. Nie, X. Cheng, X. Liu, X. Xie, X. Liu, X. Yang, X. Li, X. Su, X. Lin, X. Q. Li, X. Jin, X. Shen, X. Chen, X. Sun, X. Wang, X. Song, X. Zhou, X. Wang, X. Shan, Y. K. Li, Y. Q. Wang, Y. X. Wei, Y. Zhang, Y. Xu, Y. Li, Y. Zhao, Y. Sun, Y. Wang, Y. Yu, Y. Zhang, Y. Shi, Y. Xiong, Y. He, Y. Piao, Y. Wang, Y. Tan, Y. Ma, Y. Liu, Y. Guo, Y. Ou, Y. Wang, Y. Gong, Y. Zou, Y. He, Y. Xiong, Y. Luo, Y. You, Y. Liu, Y. Zhou, Y. X. Zhu, Y. Huang, Y. Li, Y. Zheng, Y. Zhu, Y. Ma, Y. Tang, Y. Zha, Y. Yan, Z. Z. Ren, Z. Ren, Z. Sha, Z. Fu, Z. Xu, Z. Xie, Z. Zhang, Z. Hao, Z. Ma, Z. Yan, Z. Wu, Z. Gu, Z. Zhu, Z. Liu, Z. Li, Z. Xie, Z. Song, Z. Pan, Z. Huang, Z. Xu, Z. Zhang, and Z. Zhang, “Deepseek-r1 incentivizes reasoning in llms through reinforcement learning,” Nature , vol. 645, no. 8081, p. 633–638, Sep. 2025. [Online]. Available: http://dx.doi.org/10.1038/s41586-025-09422-z [16] L. Fang, Y. Chen, W. Zhong, and P. Ma, “Bayesian knowledge distillation: A bayesian perspective of distillation with uncertainty quantification,” in Forty-first International Conference on Machine Learning , 2024. [Online]. Available: https://openreview.net/forum?id=knZ4NYzGUd [17] C. He, Y. Ding, J. Guo, R. Gong, H. Qin, and X. Liu, “DA-KD: Difficulty-aware knowledge distillation for efficient large language models,” in Forty-second International Conference on Machine Learning , 2025. [Online]. Available: https://openreview.net/forum?id=NCYBdRCpw1 [18] Y. Gal and Z. Ghahramani, “Dropout as a bayesian approximation: Representing model uncertainty in deep learning,” in 
+
+International Conference on Machine Learning . PMLR, 2016, pp. 1050–1059. [19] J. Ko, T. Chen, S. Kim, T. Ding, L. Liang, I. Zharkov, and S.-Y. Yun, “DistiLLM-2: A contrastive approach boosts the distillation of LLMs,” in Forty-second International Conference on Machine Learning , 2025. [Online]. Available: https://openreview.net/forum?id=rc65N9xIrY 
+
+> 12 A. Sengupta and V. Seth and T. Chakraborty
+
+[20] Y. Pawitan and C. Holmes, “Confidence in the reasoning of large language models,” Harvard Data Science Review , vol. 7, no. 1, pp. 2644–2353, 2025. [21] M. Conover, M. Hayes, A. Mathur, J. Xie, J. Wan, S. Shah, A. Ghodsi, P. Wendell, M. Zaharia, and R. Xin, “Free dolly: Introducing the world’s first truly open instructiontuned llm,” 2023. [22] A. Radford, J. Wu, R. Child, D. Luan, D. Amodei, and I. Sutskever, “Language models are unsupervised multitask learners,” 2019. [23] S. Zhang, S. Roller, N. Goyal, M. Artetxe, M. Chen, S. Chen, C. Dewan, M. Diab, X. Li, X. V. Lin et al. , “Opt: Open pre-trained transformer language models,” arXiv preprint arXiv:2205.01068 , 2022. [24] G. Team, M. Riviere, S. Pathak, P. G. Sessa, C. Hardin, S. Bhupatiraju, L. Hussenot, T. Mesnard, B. Shahriari, A. Ramé 
+
+et al. , “Gemma 2: Improving open language models at a practical size,” arXiv preprint arXiv:2408.00118 , 2024. [25] X. Geng and H. Liu, “Openllama: An open reproduction of llama,” May 2023. [Online]. Available: https: //github.com/openlm-research/open_llama [26] Y. Wang, Y. Kordi, S. Mishra, A. Liu, N. A. Smith, D. Khashabi, and H. Hajishirzi, “Self-instruct: Aligning language models with self-generated instructions,” in Proceedings of the 61st annual meeting of the association for computational linguistics (volume 1: long papers) , 2023, pp. 13 484–13 508. [27] Y. Wang, S. Mishra, P. Alipoormolabashi, Y. Kordi, A. Mirzaei, A. Naik, A. Ashok, A. S. Dhanasekaran, A. Arunkumar, D. Stap, E. Pathak, G. Karamanolakis, H. Lai, I. Purohit, I. Mondal, J. Anderson, K. Kuznia, K. Doshi, K. K. Pal, M. Patel, M. Moradshahi, M. Parmar, M. Purohit, N. Varshney, P. R. Kaza, P. Verma, R. S. Puri, R. Karia, S. Doshi, S. K. Sampat, S. Mishra, S. Reddy A, S. Patro, T. Dixit, and X. Shen, “Super-NaturalInstructions: Generalization via declarative instructions on 1600+ NLP tasks,” in Proceedings of the 2022 Conference on Empirical Methods in Natural Language Processing , Y. Goldberg, Z. Kozareva, and Y. Zhang, Eds. Abu Dhabi, United Arab Emirates: Association for Computational Linguistics, Dec. 2022, pp. 5085–5109. [Online]. Available: https://aclanthology.org/2022.emnlp-main.340/ [28] A. Yang, B. Yang, B. Hui, B. Zheng, B. Yu, C. Zhou, C. Li, C. Li, D. Liu, F. Huang, G. Dong, H. Wei, H. Lin, J. Tang, J. Wang, J. Yang, J. Tu, J. Zhang, J. Ma, J. Xu, J. Zhou, J. Bai, J. He, J. Lin, K. Dang, K. Lu, K. Chen, K. Yang, M. Li, M. Xue, N. Ni, P. Zhang, P. Wang, R. Peng, R. Men, R. Gao, R. Lin, S. Wang, S. Bai, S. Tan, T. Zhu, T. Li, T. Liu, W. Ge, X. Deng, X. Zhou, X. Ren, X. Zhang, X. Wei, X. Ren, Y. Fan, Y. Yao, Y. Zhang, Y. Wan, Y. Chu, Y. Liu, Z. Cui, Z. Zhang, and Z. Fan, “Qwen2 technical report,” arXiv preprint arXiv:2407.10671 , 2024. [29] N. Ding, Y. Chen, B. Xu, Y. Qin, S. Hu, Z. Liu, M. Sun, and B. Zhou, “Enhancing chat language models by scaling high-quality instructional conversations,” in Proceedings of the 2023 Conference on Empirical Methods in Natural Language Processing , 2023, pp. 3029–3051. [30] X. Li, T. Zhang, Y. Dubois, R. Taori, I. Gulrajani, C. Guestrin, P. Liang, and T. B. Hashimoto, “Alpacaeval: An automatic evaluator of instruction-following models,” 2023. [31] C. Xu, Q. Sun, K. Zheng, X. Geng, P. Zhao, J. Feng, C. Tao, Q. Lin, and D. Jiang, “Wizardlm: Empowering large pre-trained language models to follow complex instructions,” in The Twelfth International Conference on Learning Representations ,2024. [32] G. Cui, L. Yuan, N. Ding, G. Yao, B. He, W. Zhu, Y. Ni, G. Xie, R. Xie, Y. Lin, Z. Liu, and M. Sun, “Ultrafeedback: boosting language models with scaled ai feedback,” in Proceedings of the 41st International Conference on Machine Learning , ser. ICML’24. JMLR.org, 2024. [33] D. Guo, Q. Zhu, D. Yang, Z. Xie, K. Dong, W. Zhang, G. Chen, X. Bi, Y. Wu, Y. K. Li, F. Luo, Y. Xiong, and W. Liang, “Deepseek-coder: When the large language model meets programming – the rise of code intelligence,” 2024. [Online]. Available: https://arxiv.org/abs/2401.14196 [34] Z. Luo, C. Xu, P. Zhao, Q. Sun, X. Geng, W. Hu, C. Tao, J. Ma, Q. Lin, and D. Jiang, “Wizardcoder: Empowering code large language models with evol-instruct,” in The Twelfth International Conference on Learning Representations , 2024. [Online]. Available: https://openreview.net/forum?id=UnUwSIgK5W 
+
+> 13 Distilling What Matters: Confidence-Aware Selective Distillation for Large Language Models
+
+[35] M. Chen, J. Tworek, H. Jun, Q. Yuan, H. P. de Oliveira Pinto, J. Kaplan, H. Edwards, Y. Burda, N. Joseph, G. Brockman, A. Ray, R. Puri, G. Krueger, M. Petrov, H. Khlaaf, G. Sastry, P. Mishkin, B. Chan, S. Gray, N. Ryder, M. Pavlov, A. Power, L. Kaiser, M. Bavarian, C. Winter, P. Tillet, F. P. Such, D. Cummings, M. Plappert, F. Chantzis, E. Barnes, A. Herbert-Voss, W. H. Guss, A. Nichol, A. Paino, N. Tezak, J. Tang, I. Babuschkin, S. Balaji, S. Jain, W. Saunders, C. Hesse, A. N. Carr, J. Leike, J. Achiam, V. Misra, E. Morikawa, A. Radford, M. Knight, M. Brundage, M. Murati, K. Mayer, P. Welinder, B. McGrew, D. Amodei, S. McCandlish, I. Sutskever, and W. Zaremba, “Evaluating large language models trained on code,” 2021. [Online]. Available: https://arxiv.org/abs/2107.03374 [36] J. Austin, A. Odena, M. Nye, M. Bosma, H. Michalewski, D. Dohan, E. Jiang, C. Cai, M. Terry, Q. Le et al. , “Program synthesis with large language models,” arXiv preprint arXiv:2108.07732 , 2021. [37] A. Yang, B. Yang, B. Zhang, B. Hui, B. Zheng, B. Yu, C. Li, D. Liu, F. Huang, H. Wei, H. Lin, J. Yang, J. Tu, J. Zhang, J. Yang, J. Yang, J. Zhou, J. Lin, K. Dang, K. Lu, K. Bao, K. Yang, L. Yu, M. Li, M. Xue, P. Zhang, Q. Zhu, R. Men, R. Lin, T. Li, T. Xia, X. Ren, X. Ren, Y. Fan, Y. Su, Y. Zhang, Y. Wan, Y. Liu, Z. Cui, Z. Zhang, and Z. Qiu, “Qwen2.5 technical report,” arXiv preprint arXiv:2412.15115 , 2024. [38] L. Yu, W. Jiang, H. Shi, J. YU, Z. Liu, Y. Zhang, J. Kwok, Z. Li, A. Weller, and W. Liu, “Metamath: Bootstrap your own mathematical questions for large language models,” in The Twelfth International Conference on Learning Representations .[39] K. Cobbe, V. Kosaraju, M. Bavarian, M. Chen, H. Jun, L. Kaiser, M. Plappert, J. Tworek, J. Hilton, R. Nakano et al. ,“Training verifiers to solve math word problems,” arXiv preprint arXiv:2110.14168 , 2021. [40] Z. Tang, X. Zhang, B. Wang, and F. Wei, “Mathscale: Scaling instruction tuning for mathematical reasoning,” arXiv preprint arXiv:2403.02884 , 2024. [41] S. Sun, Y. Cheng, Z. Gan, and J. Liu, “Patient knowledge distillation for bert model compression,” arXiv preprint arXiv:1908.09355 , 2019. [42] C.-Y. Hsieh, C.-L. Li, C.-K. Yeh, H. Nakhost, Y. Fujii, A. Ratner, R. Krishna, C.-Y. Lee, and T. Pfister, “Distilling step-by-step! outperforming larger language models with less training data and smaller model sizes,” in Findings of the Association for Computational Linguistics: ACL 2023 , 2023, pp. 8003–8017. [43] Q. Zhong, L. Ding, L. Shen, J. Liu, B. Du, and D. Tao, “Revisiting knowledge distillation for autoregressive language models,” arXiv preprint arXiv:2402.11890 , 2024. [44] M. Li, F. Zhou, and X. Song, “Bild: Bi-directional logits difference loss for large language model distillation,” in Proceed-ings of the 31st International Conference on Computational Linguistics , 2025, pp. 1168–1182. [45] K. Saadi and D. Wang, “TASKD-LLM: Task-aware selective knowledge distillation for LLMs,” in ICLR 2025 Workshop on Deep Generative Model in Machine Learning: Theory, Principle and Efficacy , 2025. [Online]. Available: https://openreview.net/forum?id=QQBfoVJWY2 [46] X.-C. Li, W.-S. Fan, S. Song, Y. Li, S. Yunfeng, D.-C. Zhan et al. , “Asymmetric temperature scaling makes larger networks teach well again,” Advances in neural information processing systems , vol. 35, pp. 3830–3842, 2022. [47] K. Zheng and E.-H. Yang, “Knowledge distillation based on transformed teacher matching,” arXiv preprint arXiv:2402.11148 , 2024. [48] S. Sun, W. Ren, J. Li, R. Wang, and X. Cao, “Logit standardization in knowledge distillation,” in Proceedings of the IEEE/CVF conference on computer vision and pattern recognition , 2024, pp. 15 731–15 740. [49] Y. Gu, L. Dong, F. Wei, and M. Huang, “Minillm: Knowledge distillation of large language models,” 2023. [Online]. Available: https://arxiv.org/abs/2306.08543 [50] G. Kim, D. Jang, and E. Yang, “Promptkd: Distilling student-friendly knowledge for generative language models via prompt tuning,” in Findings of the Association for Computational Linguistics: EMNLP 2024 , 2024, pp. 6266–6282. [51] T. Huang, S. You, F. Wang, C. Qian, and C. Xu, “Knowledge distillation from a stronger teacher,” Advances in Neural Information Processing Systems , vol. 35, pp. 33 716–33 727, 2022. 
+
+> 14 A. Sengupta and V. Seth and T. Chakraborty
+
+[52] Y. Wen, Z. Li, W. Du, and L. Mou, “F-divergence minimization for sequence-level knowledge distillation,” arXiv preprint arXiv:2307.15190 , 2023. [53] W. F. Huang, J. Tao, C. Deng, M. Fan, W. Wan, Q. Xiong, and G. Piao, “Rényi divergence deep mutual learning,” in 
+
+Machine Learning and Knowledge Discovery in Databases: Research Track , D. Koutra, C. Plant, M. Gomez Rodriguez, E. Baralis, and F. Bonchi, Eds. Cham: Springer Nature Switzerland, 2023, pp. 156–172. [54] J. Lv, H. Yang, and P. Li, “Wasserstein distance rivals kullback-leibler divergence for knowledge distillation,” Advances in Neural Information Processing Systems , vol. 37, pp. 65 445–65 475, 2024. [55] C. Guo, S. Zhong, X. Liu, Q. Feng, and Y. Ma, “Why does knowledge distillation work? rethink its attention and fidelity mechanism,” Expert Systems with Applications , vol. 262, p. 125579, 2025. [56] Y. Ovadia, E. Fertig, J. Ren, Z. Nado, D. Sculley, S. Nowozin, J. Dillon, B. Lakshminarayanan, and J. Snoek, “Can you trust your model’s uncertainty? evaluating predictive uncertainty under dataset shift,” Advances in neural information processing systems , vol. 32, 2019. [57] W.-L. Chiang, Z. Li, Z. Lin, Y. Sheng, Z. Wu, H. Zhang, L. Zheng, S. Zhuang, Y. Zhuang, J. E. Gonzalez, I. Stoica, and E. P. Xing, “Vicuna: An open-source chatbot impressing gpt-4 with 90%* chatgpt quality,” March 2023. [Online]. Available: https://lmsys.org/blog/2023-03-30-vicuna/ [58] E. J. Hu, yelong shen, P. Wallis, Z. Allen-Zhu, Y. Li, S. Wang, L. Wang, and W. Chen, “LoRA: Low-rank adaptation of large language models,” in International Conference on Learning Representations , 2022. [Online]. Available: https://openreview.net/forum?id=nZeVKeeFYf9 [59] L. Gao, J. Tow, B. Abbasi, S. Biderman, S. Black, A. DiPofi, C. Foster, L. Golding, J. Hsu, A. Le Noac’h, H. Li, K. McDonell, N. Muennighoff, C. Ociepa, J. Phang, L. Reynolds, H. Schoelkopf, A. Skowron, L. Sutawika, E. Tang, A. Thite, B. Wang, K. Wang, and A. Zou, “The language model evaluation harness,” 07 2024. [Online]. Available: https://zenodo.org/records/12608602 [60] J. Liu, C. S. Xia, Y. Wang, and L. Zhang, “Is your code generated by chatgpt really correct? rigorous evaluation of large language models for code generation,” Advances in Neural Information Processing Systems , vol. 36, pp. 21 558–21 572, 2023. [61] W. Kwon, Z. Li, S. Zhuang, Y. Sheng, L. Zheng, C. H. Yu, J. E. Gonzalez, H. Zhang, and I. Stoica, “Efficient memory management for large language model serving with pagedattention,” in Proceedings of the ACM SIGOPS 29th Symposium on Operating Systems Principles , 2023. [62] A. Lin, J. Wohlwend, H. Chen, and T. Lei, “Autoregressive knowledge distillation through imitation learning,” 2020. [Online]. Available: https://arxiv.org/abs/2009.07253 [63] C. Guo, G. Pleiss, Y. Sun, and K. Q. Weinberger, “On calibration of modern neural networks,” in International conference on machine learning . PMLR, 2017, pp. 1321–1330. [64] Y. Geifman and R. El-Yaniv, “Selective classification for deep neural networks,” Advances in neural information processing systems , vol. 30, 2017. 
+
+> 15 Distilling What Matters: Confidence-Aware Selective Distillation for Large Language Models
+
+## Structure of the Appendix 
+
+A Related Work 16 
+
+B Algorithmic Details 17 B.1 Estimation of Epistemic Uncertainty (BALD) 17 B.2 Verification that the uncertainty estimator is non-degenerate 18 B.3 Numerical stability of the divergence terms 18 
+
+C Proofs of Theoretical Results 18 C.1 Gradient of CaRE-Divergence 18 C.2 Gradient of Skewed Reverse KL 19 C.3 Worst-case robustness under Revival 19 C.4 Proof of Proposition 3.2 (Limiting equivalence to SRKL) 20 C.5 Proof of Theorem 3.4 (Conditional equivalence of confidence proxies) 20 C.6 Proof of Theorem 3.5 (Conditional calibration of overconfident students) 20 C.7 Proof of Theorem 3.5 (Conditional sharpening of underconfident students) 21 
+
+D Experimental Details 21 D.1 Training Datasets 21 D.2 Evaluation Benchmarks 22 D.3 Training Details 22 D.4 Evaluation Protocol 23 D.5 Prompt Structure 23 D.6 Hardware 23 D.7 LLM-as-a-judge Factuality Evaluation Prompt 23 
+
+E Additional Results 24 E.1 Comparison of CaRE-KD against baselines 24 
+
+F Detailed Discussions 28 F.1 Decoupling student confidence from teacher uncertainty 28 F.2 Evolution of student confidence over distillation iterations 30 
+
+G Calibration, Selective Prediction, and Selection-Bias Analyses 31 G.1 Calibration (ECE) and selective prediction 31 G.2 Revival does not preferentially reject hard examples or reduce diversity 32 
+
+## A Related Work 
+
+Knowledge distillation for LLMs. Knowledge Distillation (KD) has progressed from early logit-matching formulations [13] to methods explicitly designed for the generative and autoregressive nature of large language models. Initial extensions focused on sequence-level and white-box distillation objectives [1, 41], while more recent work addresses challenges such as exposure bias, vocabulary mismatch, and distributional shift during generation [42, 43]. Agarwal et al. [2] proposed Generalized Knowledge Distillation (GKD), which performs on-policy distillation by training the student on its own generations scored by the teacher. Gu et al. [5] introduced MiniLLM, showing that Reverse KL can mitigate the zero-forcing behavior of Forward KL by reducing sensitivity to low-probability teacher tails. Sengupta et al. [14] explored collaborative distillation, where teacher and student roles evolve dynamically based on learning progress. Large-scale technical reports such as DeepSeek-V3 [15] further demonstrate that distillation from strong reasoning models can substantially improve smaller models when teacher signals are carefully filtered. Complementing these findings, Ramesh et al. [9] provide systematic evidence that noisy or inconsistent teacher supervision can collapse student performance. A growing body of work therefore emphasizes uncertainty-aware and selective distillation mechanisms to mitigate imperfect supervision [16, 17, 44, 45]. 
+
+> 16 A. Sengupta and V. Seth and T. Chakraborty
+
+Objective functions in knowledge distillation. The distillation objective determines the optimization geometry and, conse-quently, the behavior of the student. Most traditional approaches optimize Forward KL divergence [13, 46–48], which is mean-seeking and encourages the student to cover the teacher’s full support. While this promotes recall, it also exposes the student to tail risk, allocating probability mass to incorrect or ambiguous tokens when the teacher distribution has high entropy [49]. In contrast, Reverse KL divergence [5, 50] is mode-seeking and produces sharper predictions, but can induce mode collapse and reduced diversity. To balance these extremes, recent methods propose static interpolations. Skewed KL [6] reweights gra-dients through a mixture target to stabilize training, while α–β divergence [7] provides a parametric family that controls tail weighting via fixed hyperparameters. Other explored alternatives include Pearson correlation [51], total variation distance [52], Rényi divergence [53], and Wasserstein distance [54]. Despite their expressiveness, these objectives impose a global geometric preference across all tokens and do not adapt to token-level variability in teacher reliability. In contrast, the confidence-gated objective CaRE-Divergence operates as a dynamic geometric switch rather than a static interpolation. By selecting Forward KL when the teacher is confident and Reverse KL when the teacher is uncertain, it en-ables token-level adaptation of the precision–recall trade-off [55]. Moreover, by explicitly incorporating both aleatoric and epistemic uncertainty through the Revival mechanism, our approach selectively rejects unreliable teacher supervision when the student is already confident. This combination of adaptive geometry and selective rejection distinguishes our method from prior divergence-based and uncertainty-aware distillation approaches. 
+
+## B Algorithmic Details 
+
+B.1 Estimation of Epistemic Uncertainty (BALD) 
+
+We estimate epistemic uncertainty using BALD computed via Monte Carlo (MC) dropout. For a batch of inputs, we perform S
+
+stochastic forward passes, producing logits Z ∈ RS×B×L×V , where B is batch size, L is sequence length, and V is vocabulary size. We do not depend on the base model’s deployment-time dropout setting: for the BALD passes we force all dropout layers into training mode and set attention dropout to p = 0 .1, then restore the original configuration afterward. This guarantees a non-degenerate stochastic signal even for models shipped with dropout disabled (a verification on both teachers used here is given in Appendix B.2). Let 
+
+Ps,b,t = softmax (Zs,b,t ) ∈ ∆|V |− 1 (8) denote the corresponding next-token distributions. The posterior predictive distribution is approximated by the mean probability 
+
+¯P = 1
+
+S
+
+> S
+
+∑
+
+> s=1
+
+Ps ∈ RB×L×| V |. (9) BALD is the mutual information between predictions and model parameters, which admits the standard decomposition into total predictive uncertainty and expected (aleatoric) uncertainty. Let H(·) denote Shannon entropy over the vocabulary dimension: 
+
+Htotal = H(¯ P) ∈ RB×L, (10) 
+
+Haleatoric = 1
+
+S
+
+> S
+
+∑
+
+> s=1
+
+H(Ps) ∈ RB×L. (11) The token-wise epistemic uncertainty is then 
+
+Ib,t = Htotal ,b,t − Haleatoric ,b,t ∈ RB×L. (12) To obtain a sequence-level signal for the rejection mask, we mean-pool across tokens: 
+
+U(b) 
+
+> BALD
+
+= 1
+
+L
+
+> L
+
+∑
+
+> t=1
+
+Ib,t . (13) 
+
+> 17 Distilling What Matters: Confidence-Aware Selective Distillation for Large Language Models
+
+B.2 Verification that the uncertainty estimator is non-degenerate 
+
+MC-dropout uncertainty is known to be coarse [18, 56], and a natural concern is that it could collapse to a constant for models not trained with meaningful dropout. Because Revival forces dropout to p = 0 .1 for the estimation passes (Appendix B.1), the signal remains informative. We verify this directly on the two teachers used in our instruction-following experiments. On 500 Dolly evaluation sequences with N = 3 passes, every sequence has non-zero BALD and the top-1 probability moves appreciably across passes, confirming a genuine stochastic signal rather than a degenerate estimate.   
+
+> Table 4. Verification that MC-dropout BALD is non-degenerate on the two teachers (500 Dolly sequences,
+
+N = 3 ,dropout forced to p = 0 .1). 
+
+Teacher N Mean BALD BALD range Non-zero BALD Mean ∆ top-1 prob 
+
+GPT2-XL 3 0.049 0.013–0.107 500/500 (100%) 0.074 OPT-2.7B 3 0.152 0.057–0.239 500/500 (100%) 0.079 
+
+Crucially, Revival uses only a relative teacher-vs-student comparison via running quantiles rather than a calibrated absolute value, which tolerates a coarse estimate; this is why performance is flat between N = 3 and N = 7 (Section 4.5). 
+
+B.3 Numerical stability of the divergence terms 
+
+A potential concern is how KL (q∥p) is kept finite when the teacher assigns near-zero probability to some tokens. The teacher is a tempered softmax, so p has full support by construction. In practice, log-probabilities are taken directly from log_softmax 
+
+and clamped to a finite floor before use, and the α–β objective additionally mixes in a small uniform mass before taking the logarithm. Consequently no inf or NaN values occurred in any of our runs. 
+
+## C Proofs of Theoretical Results 
+
+C.1 Gradient of CaRE-Divergence 
+
+Scope and assumptions. This decomposition applies when the gate g is differentiable and not detached from the computation graph (e.g., soft gating). If g is detached, then ∇θ g ≡ 0 and the selection term below vanishes. 
+
+Proof. Let θ parameterize the student distribution qθ and define 
+
+LgKL (θ) = g(θ) LFKL (θ) + (1 − g(θ)) LRKL (θ),
+
+where LFKL (θ) = KL (p∥qθ ) and LRKL (θ) = KL (qθ ∥p), and p is treated as fixed with respect to θ. Applying the product rule, 
+
+∇θ LgKL = ∇θ
+
+(g LFKL 
+
+) + ∇θ
+
+((1 − g) LRKL 
+
+) (14) 
+
+= g ∇θ LFKL + LFKL ∇θ g + (1 − g) ∇θ LRKL − L RKL ∇θ g (15) 
+
+=
+
+[
+
+g ∇θ LFKL + (1 − g) ∇θ LRKL 
+
+]
+
++
+
+[
+
+(LFKL − L RKL ) ∇θ g
+
+]
+
+, (16) which yields the learning term and the gate-induced term. For soft gating, let 
+
+g = σ(c(p) − c(qθ ) − m), ∆ ≜ c(p) − c(qθ ) − m. 
+
+Then ∇θ g = σ′(∆) ∇θ ∆ = g(1 − g) ∇θ ∆ and since c(p) and m are constants w.r.t. θ,
+
+∇θ ∆ = −∇ θ c(qθ ).
+
+Therefore, 
+
+∇θ g = − g(1 − g) ∇θ c(qθ ), (17) 
+
+> 18
+
+A. Sengupta and V. Seth and T. Chakraborty 
+
+and the gate-induced term becomes 
+
+(LFKL − L RKL ) ∇θ g = − g(1 − g) ( LFKL − L RKL ) ∇θ c(qθ ). (18) This concludes the derivation. 
+
+C.2 Gradient of Skewed Reverse KL 
+
+We derive the gradient of Skewed Reverse KL, KL (q∥m), with m = λp + (1 − λ)q and λ ∈ [0 , 1] , with respect to student logits 
+
+z where q = softmax (z).
+
+Proof. Define 
+
+L = KL (q∥m) = ∑
+
+> k
+
+qk log qk
+
+mk
+
+= ∑
+
+> k
+
+qk log qk − ∑
+
+> k
+
+qk log mk.
+
+First compute ∂L/∂q i. For the entropy term, 
+
+∂∂q i
+
+∑
+
+> k
+
+qk log qk = 1 + log qi.
+
+For the cross term, apply the product rule: 
+
+∂∂q i
+
+∑
+
+> k
+
+qk log mk = log mi + ∑
+
+> k
+
+qk
+
+∂ log mk
+
+∂q i
+
+.
+
+Since mk = λp k + (1 − λ)qk, we have ∂m k 
+
+> ∂q i
+
+= (1 − λ)δki , hence 
+
+∂ log mk
+
+∂q i
+
+= 1
+
+mk
+
+(1 − λ)δki , ∑
+
+> k
+
+qk
+
+∂ log mk
+
+∂q i
+
+= (1 − λ) qi
+
+mi
+
+.
+
+Therefore, 
+
+∂L
+
+∂q i
+
+= (1 + log qi) −
+
+(
+
+log mi + (1 − λ) qi
+
+mi
+
+)
+
+= log qi
+
+mi
+
++ 1 − (1 − λ) qi
+
+mi
+
+. (19) Next, use the softmax Jacobian ∂q k 
+
+> ∂z j
+
+= qk(δkj − qj ):
+
+∂L
+
+∂z j
+
+= ∑
+
+> k
+
+∂L
+
+∂q k
+
+∂q k
+
+∂z j
+
+= qj
+
+(
+
+vj − ∑
+
+> k
+
+qkvk
+
+)
+
+, vk ≜ ∂L
+
+∂q k
+
+. (20) Substituting (19) into vk, note that the additive constant “ +1 ” cancels inside the centering term in (20). Thus an equivalent vector form is 
+
+∇z L = q ⊙
+
+(
+
+log qm − (1 − λ) qm − Ey∼q
+
+[
+
+log qy
+
+my
+
+− (1 − λ) qy
+
+my
+
+]
+
+1
+
+)
+
+, (21) where 1 is the all-ones vector and the final term is the centering constant. 
+
+C.3 Worst-case robustness under Revival 
+
+Proof. When MRevival = 1 , the per-batch objective satisfies LCaRE-KD ≡ 0 by construction (Eq. 6). Hence ∇θ LCaRE-KD = 0 and the student parameters are unchanged at this batch. Therefore for any reference distribution p⋆, KL (p⋆∥qnew ) = KL (p⋆∥qold ),proving the student does not degrade due to noisy teacher supervision in the rejected regime. 
+
+19 Distilling What Matters: Confidence-Aware Selective Distillation for Large Language Models 
+
+C.4 Proof of Proposition 3.2 (Limiting equivalence to SRKL) 
+
+Proof. From (21), as λ → 1 we have m = λp + (1 − λ)q → p and (1 − λ) qm → 0. Therefore, 
+
+∇z KL (q∥m) −→ ∇ z KL (q∥p),
+
+i.e., the Skewed Reverse KL gradient converges to the standard Reverse KL gradient. Under CaRE-Divergence , in the regime 
+
+g = 0 the student optimizes KL (q∥p) per token, matching this limiting geometry pointwise. SRKL applies a fixed λ to every token, so its global gradient is ∑ 
+
+> t
+
+∇z KL (qt∥mt), which cannot equal ∑
+
+> t
+
+[gt∇z KL (pt∥qt) + (1 − gt)∇z KL (qt∥pt)] for general token-varying gt ∈ { 0, 1} unless gt is constant across tokens. This proves the strict separation of CaRE-Divergence from any global SRKL. 
+
+C.5 Proof of Theorem 3.4 (Conditional equivalence of confidence proxies) 
+
+Clarification. The claim is conditional: under the Sharpness Hypothesis and the additional approximation that a single forward pass ˆp is close to the posterior predictive mean p(y | x) = Eω [p(y | x, ω )] , minimizing single-pass entropy serves as a proxy for minimizing BALD. 
+
+Proof. Using the standard BALD decomposition, 
+
+IBALD (x) = H[Eω p(y | x, ω )] − Eω [H(p(y | x, ω ))] . (22) Under the Sharpness Hypothesis, H[p(y | x, ω )] ≈ 0 for ω in the posterior support, hence the second term is approximately zero and 
+
+IBALD (x) ≈ H[p(y | x)] , p(y | x) ≜ Eω p(y | x, ω ). (23) The normalized entropy confidence is 
+
+c(ˆ p) = 1 − H(ˆ p)
+
+log |V| .
+
+Since log |V| > 0 is constant, maximizing c(ˆ p) is equivalent to minimizing H(ˆ p). If the single-pass distribution ˆp is a reasonable approximation to the mean predictive distribution p(· | x), then minimizing H(ˆ p) approximately minimizes H[p(· | x)] . By (23), this approximately minimizes IBALD (x). Therefore, under these assumptions, normalized-entropy confidence can be used as a computationally efficient proxy for BALD in the inner loop. 
+
+C.6 Proof of Theorem 3.5 (Conditional calibration of overconfident students) 
+
+Proof. Consider a fixed branch regime of LCaRE-KD in which the branch selection does not change along the optimization tra-jectory. Within such a regime, the objective reduces to one of the KL branches. In the Forward KL branch, the objective is min  
+
+> q
+
+KL (p∥q),
+
+whose unique global minimizer is q = p, assuming q has support wherever p has support. In the Reverse KL branch, the objective is min  
+
+> q
+
+KL (q∥p),
+
+which is also minimized at q = p, assuming p has full support. Hence, in either fixed branch regime considered here, convergence to the branch minimizer implies 
+
+qθt → p. 
+
+By continuity of entropy on the probability simplex under the stated support conditions, it follows that 
+
+H(qθt ) → H(p).
+
+Since the student is initialized overconfident relative to the teacher, 
+
+H(qθ0 ) < H (p).
+
+> 20 A. Sengupta and V. Seth and T. Chakraborty
+
+The limiting entropy is H(p), so the student entropy must increase at some point along the trajectory in order to reach this limit. Therefore, LCaRE-KD acts, in this fixed branch regime, as a conditional calibration mechanism that moves an overconfident student toward the teacher’s entropy level. 
+
+C.7 Proof of Theorem 3.5 (Conditional sharpening of underconfident students) 
+
+Proof. Consider a fixed branch regime of LCaRE-KD in which the branch selection does not change along the optimization tra-jectory. Within such a regime, the objective reduces to one of the KL branches. In the Forward KL branch, the objective is min  
+
+> q
+
+KL (p∥q),
+
+whose unique global minimizer is q = p, assuming q has support wherever p has support. In the Reverse KL branch, the objective is min  
+
+> q
+
+KL (q∥p),
+
+which is also minimized at q = p, assuming p has full support. Hence, in either fixed branch regime considered here, convergence to the branch minimizer implies 
+
+qθt → p. 
+
+By continuity of entropy on the probability simplex under the stated support conditions, it follows that 
+
+H(qθt ) → H(p).
+
+Since the student is initialized underconfident relative to the teacher, 
+
+H(qθ0 ) > H (p).
+
+The limiting entropy is H(p), so the student entropy must decrease at some point along the trajectory in order to reach this limit. Therefore, LCaRE-KD acts, in this fixed branch regime, as a conditional sharpening mechanism that moves an underconfident student toward the teacher’s entropy level. 
+
+## D Experimental Details 
+
+D.1 Training Datasets 
+
+We train student models using a diverse collection of instruction-tuning and domain-specific datasets, following standard prac-tices in recent large-scale distillation studies [6, 7]. The training corpus spans general instruction following, chat-style alignment, code generation, and mathematical reasoning. 
+
+Dolly-15k [21] is a curated instruction-following dataset containing approximately 15k single-turn instruction–response pairs across tasks such as open-ended question answering, summarization, classification, information extraction, and creative gen-eration. We use Dolly-15k as our primary dataset for controlled instruction-following distillation, consistent with prior work analyzing robustness under noisy teacher supervision. 
+
+UltraChat-200k [29] is a large-scale conversational dataset designed for alignment-oriented training. It consists of multi-turn dialogues generated by strong LLMs and emphasizes helpfulness, harmlessness, and coherence. We use UltraChat-200k to distill chat-optimized student models from larger teachers, following recent alignment-focused distillation setups. 
+
+WizardCoder [34] is a code generation dataset constructed using Evol-Instruct, comprising programming problems paired with step-by-step solutions. The dataset emphasizes logical correctness across varying difficulty levels and is used exclusively to train code-specialized student models without additional filtering or reformatting. 
+
+MetaMathQA [38] is a large-scale mathematical reasoning dataset containing math word problems with structured reasoning traces. It spans arithmetic, algebra, and multi-step symbolic reasoning and is used to train math-specialized student models under standard zero-shot evaluation protocols. 
+
+> 21 Distilling What Matters: Confidence-Aware Selective Distillation for Large Language Models
+
+D.2 Evaluation Benchmarks 
+
+We evaluate distilled models on a diverse suite of held-out benchmarks spanning instruction following, alignment, code genera-tion, and mathematical reasoning. 
+
+Dolly Evaluation [21] consists of held-out instruction-following prompts covering summarization, question answering, classi-fication, and open-ended generation. 
+
+Self-Instruct [26] contains automatically generated instructions with diverse task formulations, designed to test robustness and generalization beyond curated templates. 
+
+Super-Natural Instructions [27] is a heterogeneous benchmark spanning hundreds of task types, evaluating generalization across unseen instructions and domains. 
+
+Vicuna Instructions [57] evaluates conversational response quality on user-style prompts, emphasizing helpfulness and coher-ence. 
+
+AlpacaEval [30] is a pairwise preference benchmark assessing alignment quality via automated and human-aligned judges. 
+
+Evol-Instruct [31] evaluates a model’s ability to handle increasingly complex and compositional instructions generated through iterative evolution. 
+
+UltraFeedback [32] evaluates alignment using preference-based feedback signals, focusing on helpfulness, safety, and response quality. 
+
+HumanEval [35] measures code generation performance using execution-based correctness on Python programming problems. 
+
+MBPP [36] evaluates code synthesis on basic programming tasks using unit-test-based validation. 
+
+GSM8k [39] evaluates multi-step mathematical reasoning using grade-school word problems, reporting exact-match accuracy. 
+
+CollegeMath [40] consists of college-level problems drawn from undergraduate textbooks, covering algebra, calculus, linear algebra, and differential equations. 
+
+D.3 Training Details 
+
+Instruction Following. For Dolly-15k, we follow the setup of Gu et al. [5]. For student models with fewer than 1B parameters, we use a learning rate of 5 × 10 −5, batch size 32, and train for up to 20 epochs. For models larger than 1B parameters, we use the same learning rate with a reduced batch size of 8 and train for 10 epochs. All instruction-following models are trained using LoRA [58] adapters applied to all linear layers in the self-attention and MLP blocks, with rank r = 16 . Model checkpoints are selected based on validation ROUGE-L. For UltraChat-200k, WizardCoder, and MetaMathQA, student models are trained with a learning rate of 5 × 10 −5, LoRA rank r = 16 , and trained for 3, 2, and 2 epochs respectively. 
+
+Hyperparameters for CaRE-KD . Epistemic uncertainty is estimated using Monte Carlo dropout with N ∈ { 3, 5, 7} stochas-tic forward passes. Unless otherwise stated, results are reported with N = 3 , which provides a favorable trade-off between computational cost and estimation fidelity. The Revival mechanism is controlled via a target skip percentage τ , evaluated un-der constant, increasing, and decreasing schedules. The sampling temperature for stochastic forward passes is selected from 
+
+{0.5, 1.0, 3.0, 5.0}, with moderate temperatures (default 3.0) yielding the most reliable uncertainty estimates. 
+
+Scheduling functions. We employ continuous scheduling functions to control the target skip percentage τ over training itera-tions. Let e ∈ [0 , T ] denote the current epoch, where T > 0 is the total scheduling horizon. 
+
+Exponential increasing schedule. 
+
+sinc (e) = τ · 1 − exp (−k eT
+
+)
+
+1 − exp (−k) , k > 0. (24) This schedule gradually increases selectivity, enabling early broad supervision followed by progressively stricter rejection as the student becomes more confident. 
+
+> 22 A. Sengupta and V. Seth and T. Chakraborty
+
+Exponential decreasing schedule. 
+
+sdec (e) = τ · exp (−a eT
+
+) − exp (−a)1 − exp (−a) , a > 0. (25) This schedule relaxes selectivity over time. In the limit a → 0, it reduces to linear decay: lim  
+
+> a→0
+
+sdec (e) = τ
+
+(
+
+1 − eT
+
+)
+
+. (26) 
+
+D.4 Evaluation Protocol 
+
+Instruction-following responses are sampled using temperature 0.8, top-p 0.95, and a maximum length of 512 tokens. AlpacaEval uses text-davinci-003 references, while Evol-Instruct and UltraFeedback use gpt-3.5-turbo . Results are averaged over five random seeds. For mathematical reasoning and code generation, greedy decoding with a maximum length of 1024 tokens is used. Evalua-tion is performed using LM-Evaluation-Harness [59] and EvalPlus [60]. 
+
+D.5 Prompt Structure 
+
+We adopt a unified prompt template following Gu et al. [5]. During student-generated-output (SGO) training, responses are sampled from the student; otherwise, ground-truth responses are used. In the SGO setting the teacher scores the student’s own generations, and the confidence gate of Equation 3 is computed on those same on-policy tokens, so the distillation loss and the gate always share identical contexts; in the non-SGO setting both are computed on the teacher-forced tokens. 
+
+D.6 Hardware 
+
+All experiments are conducted on a single NVIDIA A100 80GB GPU. Evaluation generations use vLLM [61]. 
+
+D.7 LLM-as-a-judge Factuality Evaluation Prompt 
+
+For each (instruction, reference, candidate) triple, we query GPT-5-Mini in a stateless single-turn setting using the following system prompt. The judge returns a single integer factuality score in [0 , 100] , which we then average across the evaluation set. To minimize position bias, we present the reference and candidate in a fixed order; to minimize stochastic variance, we use temperature 0 and average over three independent calls per example. 
+
+You are an impartial grader evaluating the factual correctness of a model’s response against a trusted reference answer. You will be given (i) an instruction, (ii) a reference answer, and (iii) a candidate response. Score the candidate from 0 to 100 according to the following rubric: 
+
+• 90–100: All factual claims in the candidate are correct and consistent with the reference. No fabricated entities, numbers, dates, or relationships. 
+
+• 70–89: The candidate is mostly correct but contains minor inaccuracies (e.g., off-by-one numerical values, slightly imprecise paraphrase) that do not change the core meaning. 
+
+• 40–69: The candidate contains at least one substantive factual error or unsupported claim that mate-rially changes the answer. 
+
+• 10–39: The candidate is largely incorrect, with multiple hallucinated facts, fabricated citations, or contradictions of the reference. 
+
+• 0–9: The candidate is irrelevant, refuses the task, or is entirely fabricated. Ignore stylistic differences (length, tone, formatting). Penalize only factual deviations. Return only a single integer in [0, 100]. Do not produce any other text, justification, or formatting. 
+
+This prompt is held fixed across every model, dataset, and decoding regime to ensure that LLM-judge scores are comparable across cells of Tables 1, 5, and 3. 
+
+> 23
+
+Distilling What Matters: Confidence-Aware Selective Distillation for Large Language Models 
+
+Table 5. Comparison of divergence measures without student-generated outputs (non-SGO) [6]. Each cell reports ROUGE-L / LLM-as-a-judge factuality scores. Even without exploratory rollouts, CaRE-Divergence is competitive with the strongest baseline on every model pair, achieving the highest average ROUGE-L on three of five teacher–student pairs and matching SRKL on the remaining two within standard error. Improvements over FKL/RKL are statistically sig-nificant in a paired t-test ( t = 12 .84 , p < 0.005 ). Bold marks the best score per (model, task, metric) cell.                                                                                                                                                
+
+> TEACHER →STUDENT LOSS BENCHMARKS AVG
+> DOLLY SELF-INST SUPER-NAT VICUNA FKL 23.0/20.4 9.7/14.2 16.8/14.9 14.9/13.0 16.1/15.6 RKL 23.0/20.1 10.1/14.9 17.7/15.3 15.5/13.7 16.6/16.0 SRKL 23.5/21.7 11.1/16.2 21.5/18.8 14.8/14.2 17.7/17.7
+> α-βDIV 23.0/21.6 10.3/15.3 19.7/17.0 14.3/13.8 16.8/16.9 GPT2-XL (1.5B) →
+> GPT2-BASE (0.1B)
+> CaRE-Div 25.2/23.5 12.5/18.6 23.7/21.8 16.3/14.8 19.5/19.7
+> FKL 22.5/19.5 10.1/13.5 14.8/12.9 14.4/12.8 15.4/14.7 RKL 18.2/13.2 7.8/12.6 11.0/10.8 13.8/11.5 12.7/12.0 SRKL 22.1/19.1 10.3/13.8 19.0/16.3 14.0/12.9 16.3/15.5
+> α-βDIV 21.6/18.5 8.6/12.9 15.9/14.2 14.6/13.0 15.2/14.7 GPT2-XL (1.5B) →
+> GPT2-LARGE (0.8B)
+> CaRE-Div 25.0/24.1 11.5/15.6 19.6/16.9 15.4/13.7 17.9/17.6
+> FKL 22.0/19.8 9.4/13.8 17.0/14.7 15.3/13.3 15.9/15.4 RKL 25.1/23.0 11.5/15.7 22.3/18.5 17.0/16.1 19.0/18.3 SRKL 25.6/23.7 12.3/18.9 23.6/20.4 15.9/15.1 19.4/19.5
+> α-βDIV 24.5/22.8 12.1/17.3 21.5/18.0 16.7/14.0 18.7/18.0 OPT-2.7B →
+> OPT-125M
+> CaRE-Div 23.9/20.6 11.3/17.0 22.3/19.2 16.4/13.7 18.5/17.6 FKL 17.7/18.9 11.0/21.3 18.3/14.7 16.5/15.4 15.9/17.6 RKL 16.9/19.5 9.2/21.0 18.9 /18.4 19.2/ 21.0 16.0/20.0 SRKL 18.8 /23.6 9.9/20.2 15.6/17.5 17.8/17.3 15.5/19.7
+> α-βDIV 18.1/ 24.2 9.8/20.9 16.7/16.5 19.1/19.5 15.9/20.3 GEMMA-2-9B-IT →
+> GEMMA-2-2B-IT
+> CaRE-Div 16.3/22.1 10.7/ 21.3 18.6/ 19.0 19.5 /20.3 16.3/20.7
+> FKL 23.9/31.4 17.8/25.1 29.2/30.7 17.1/22.1 22.0/27.3 RKL 26.5/36.5 19.0/29.8 34.2/37.6 20.0 /27.3 24.9/32.8 SRKL 28.2/39.4 20.0/ 30.7 35.6/ 38.2 19.1/ 30.0 25.7/34.6
+> α-βDIV 26.8/36.8 18.6/29.2 32.6/35.1 18.8/29.3 24.2/32.6 OPENLLAMA2-7B →
+> OPENLLAMA2-3B
+> CaRE-Div 27.4/36.9 20.2 /29.5 36.2 /38.0 18.5/28.3 25.6/33.2
+
+## E Additional Results 
+
+E.1 Comparison of CaRE-KD against baselines 
+
+We compare CaRE-KD against a comprehensive suite of baselines, including standard approaches (SFT, KD, SeqKD) and advanced divergence-based methods (ImitKD, MiniLLM, GKD, Distillm, ABKD). Across all three teacher–student configu-rations, CaRE-KD consistently achieves the strongest overall performance, confirming the effectiveness of confidence-gated optimization under noisy and heterogeneous teacher supervision. 
+
+GPT-2 family (1.5B → 0.1B). In the GPT-2 setting, CaRE-KD attains the highest average ROUGE-L of 19.64 , outperforming the strongest baselines (MiniLLM 19.30 and Distillm 19.27) with the clearest gains on Dolly ( 25.55 vs. 24.86 for Distillm) and Self-Instruct ( 12.88 vs. 12.73 for GKD). This result demonstrates that CaRE-KD remains effective even under severe capacity mismatch, where the student is more than an order of magnitude smaller than the teacher. The improvement suggests that selectively adapting the optimization geometry and filtering unreliable supervision is especially beneficial when student capacity is limited. 
+
+OPT family (2.7B → 125M). For OPT-based distillation, CaRE-KD achieves the highest average ROUGE-L of 19.25 and outperforms standard KD and divergence-based baselines on Self-Instruct ( 12.03 ) and Super-Natural Instructions ( 23.93 ). In contrast, standard KD degrades performance below SFT due to noise propagation from uncertain teacher predictions (15.04 vs. 14.43). These results highlight the importance of the Revival mechanism for smaller students, which prevents overfitting to the teacher’s epistemic uncertainty and allows the student to retain correct priors when the teacher is unreliable. 
+
+OpenLLaMA family (7B → 3B). In the OpenLLaMA setting, CaRE-KD directly addresses the fidelity trap observed in stan-dard distillation, where KD (20.10) underperforms even the simple SFT baseline (21.81). By contrast, CaRE-KD achieves an 
+
+24 A. Sengupta and V. Seth and T. Chakraborty  
+
+> Table 6. Baseline comparison for GPT2-XL (1.5B)
+
+→ GPT2-base (0.1B). ROUGE-L on four held-out instruction bench-marks; values in parentheses are standard deviations across 5 seeds. CaRE-KD achieves the best average ROUGE-L. Bold marks per-task best. 
+
+METHOD DOLLY SELF-INST VICUNA SUPER-NAT AVG. 
+
+SFT 23.33 (0.22) 10.56 (0.54) 15.12 (0.47) 17.08 (0.29) 16.52 KD [13] 23.52 (0.19) 11.23 (0.41) 15.92 (0.37) 20.68 (0.14) 17.84 SEQKD [1] 23.38 (0.37) 10.18 (0.18) 15.01 (0.28) 15.08 (0.12) 15.91 IMITKD [62] 21.63 (0.51) 10.85 (0.38) 14.70 (0.29) 17.94 (0.10) 16.28 MINILLM [5] 23.84 (0.26) 12.44 (0.28) 18.29 (0.36) 22.62 (0.26) 19.30 GKD [2] 23.75 (0.15) 12.73 (0.24) 16.64 (0.24) 23.05 (0.23) 19.04 DISTILLM [6] 24.86 (0.16) 12.11 (0.27) 16.52 (0.53) 23.62 (0.42) 19.27 ABKD [7] 23.93 (0.53) 11.50 (0.30) 16.11 (0.57) 21.89 (0.33) 18.36 
+
+CaRE-KD (OURS) 25.55 (0.24) 12.88 (0.09) 17.33 (0.57) 22.80 (0.23) 19.64  
+
+> Table 7. Baseline comparison for OPT-2.7B
+
+→ OPT-125M. ROUGE-L on four held-out instruction benchmarks; values in parentheses are standard deviations across 5 seeds. CaRE-KD achieves the best average ROUGE-L. Bold marks per-task best. 
+
+METHOD DOLLY SELF-INST VICUNA SUPER-NAT AVG. 
+
+SFT 21.78 (0.19) 8.09 (0.39) 14.40 (0.17) 13.45 (0.20) 14.43 KD [13] 20.54 (0.38) 9.16 (0.29) 14.65 (0.47) 15.79 (0.26) 15.04 SEQKD [1] 20.72 (0.59) 8.94 (0.37) 13.56 (0.33) 16.80 (0.36) 15.01 IMITKD [62] 20.16 (0.19) 8.95 (0.50) 15.05 (0.52) 14.72 (0.21) 14.72 MINILLM [5] 22.24 (0.32) 9.92 (0.47) 16.97 (0.49) 16.58 (0.19) 16.43 GKD [2] 22.46 (0.27) 10.59 (0.36) 16.25 (0.65) 19.33 (0.20) 17.16 DISTILLM [6] 25.07 (0.55) 11.60 (0.23) 16.75 (0.23) 22.45 (0.29) 18.97 ABKD [7] 24.88 (0.45) 11.18 (0.77) 16.72 (0.24) 21.73 (0.13) 18.63 
+
+CaRE-KD (OURS) 24.33 (0.19) 12.03 (0.20) 16.73 (0.29) 23.93 (0.19) 19.25 
+
+average ROUGE-L of 26.23 , competitive with the strongest baseline (Distillm at 26.41) within standard error and improving on it on both Self-Instruct ( 20.93 vs. 20.84) and Super-Natural Instructions ( 37.34 vs. 36.64). This indicates that CaRE-KD 
+
+effectively leverages informative teacher signals while avoiding over-alignment to noisy or hallucinated outputs, achieving com-parable or better generalization than the strongest static-divergence baseline without specialized tuning. Figure 6 compares validation loss trajectories across divergence objectives. CaRE-Divergence consistently achieves the lowest validation loss, indicating a better fit to the target distribution and more stable optimization dynamics. For example, in the OpenLLaMA-3B setting, CaRE-Divergence converges to a validation loss of 1.73, compared to 2.21 for Forward KL and 2.69 for Skewed-RKL. This stability is most evident in the student-generated-output regime, where strictly mode-seeking objectives such as Reverse KL exhibit high variance and unstable convergence, with losses exceeding 4.8. In contrast, the confidence-gated mechanism of CaRE-Divergence maintains smooth and consistent convergence. Figure 7 reports exact match accuracy on the development set. In the GPT-2-Large experiment, CaRE-Divergence achieves exact match scores in the range 3.9–4.1, substantially outperforming Reverse KL (0.6–1.9) and α–β divergence (3.1). These results illustrate a key advantage of the bi-directional design: while purely reverse-divergence objectives often suffer from recall degradation due to aggressive mode collapse, CaRE-Divergence preserves precision without sacrificing recall, yielding robust performance across both small and large student models. We conduct an extensive ablation study on Dolly, Self-Instruct, Vicuna, and Super-Natural Instructions (Figures 3 and 8) to evaluate the robustness of CaRE-KD with respect to its key design choices. We vary the aggressiveness of filtering (Skip %), the Revival scheduling strategy, the number of Monte Carlo samples used for epistemic uncertainty estimation, the gating type, and the sampling temperature. Results are reported for both GPT-based and OPT-based student models, allowing us to assess architectural sensitivity and stability. 
+
+Aggressiveness of filtering (Skip percentage). Across both GPT and OPT students, performance improves monotonically 
+
+> 25
+
+Distilling What Matters: Confidence-Aware Selective Distillation for Large Language Models 
+
+Table 8. Baseline comparison for OpenLLaMA2-7B → OpenLLaMA2-3B. ROUGE-L on four held-out instruction benchmarks; values in parentheses are standard deviations across 5 seeds. CaRE-KD is competitive with the strongest baseline (Distillm) on average and achieves the best score on Self-Instruct and Super-Natural Instructions. Bold marks per-task best. 
+
+METHOD DOLLY SELF-INST VICUNA SUPER-NAT AVG. 
+
+SFT 25.11 (0.58) 16.52 (0.56) 16.33 (0.39) 29.28 (0.45) 21.81 KD [13] 20.95 (0.49) 16.12 (0.80) 15.39 (0.39) 27.93 (0.26) 20.10 SEQKD [1] 24.67 (0.47) 15.83 (0.62) 17.06 (0.47) 29.06 (0.28) 21.66 IMITKD [62] 24.53 (0.26) 17.80 (0.80) 17.36 (0.22) 31.50 (0.12) 22.80 MINILLM [5] 27.88 (0.28) 19.94 (0.58) 20.50 (0.41) 36.91 (0.28) 26.31 GKD [2] 26.30 (0.31) 19.56 (1.03) 18.66 (0.34) 35.71 (0.20) 25.06 DISTILLM [6] 28.97 (0.36) 20.84 (0.54) 19.19 (0.36) 36.64 (0.15) 26.41 
+
+ABKD [7] 28.25 (0.35) 19.25 (0.78) 18.64 (0.26) 33.53 (0.23) 24.92 
+
+CaRE-KD (OURS) 27.74 (0.19) 20.93 (0.90) 18.94 (0.55) 37.34 (0.34) 26.23 FKL RKL SRKL - CaRE 0123456
+
+> Dev cross-entropy loss
+> 4.06 6.21 5.47 4.65 3.07
+
+GPT2-base     
+
+> FKL RKL SRKL -CaRE
+> 4.17 6.51 5.82 5.09 3.71
+
+GPT2-large       
+
+> FKL RKL SRKL -CaRE
+> 3.19 4.03 4.01 3.59 2.51
+
+OPT-125M       
+
+> FKL RKL SRKL -CaRE
+> 2.21 2.77 2.69 2.39 1.73
+
+OpenLLaMA-3B 
+
+(a) With student-generated outputs FKL RKL SRKL - CaRE 0246
+
+> Dev cross-entropy loss
+> 3.32 6.49 3.98 5.76 4.79
+
+GPT2-base       
+
+> FKL RKL SRKL -CaRE
+> 4.69 6.67 6.41 6.04 4.68
+
+GPT2-large       
+
+> FKL RKL SRKL -CaRE
+> 3.19 4.02 3.77 3.56 4.37
+
+OPT-125M         
+
+> FKL RKL SRKL -CaRE
+> 2.62 2.79 3.10 2.81 2.58
+
+OpenLLaMA-3B 
+
+(b) Without student-generated outputs 
+
+Figure 6. Cross-entropy loss on the Dolly-15k development set. 
+
+as the Skip percentage increases from low to moderate values, and then saturates. In particular, Skip values in the 50–70% range consistently achieve the strongest results, while low filtering regimes (e.g., near 0%) underperform. Notably, performance remains stable across a broad high-skip plateau rather than peaking sharply at a single value, indicating that CaRE-KD is not brittle to the exact cutoff choice. This robustness supports our central claim: a substantial fraction of teacher supervision lies in epistemically unreliable regions, and selectively discarding it improves student performance without requiring fine-grained tuning. 
+
+Impact of Revival scheduling. We compare constant (Con), increasing (Inc), and decreasing (Dec) schedules for the Skip percentage. Across all architectures and tasks, the increasing schedule consistently dominates, while the decreasing schedule performs worst. Constant schedules yield intermediate performance but are systematically inferior to increasing schedules. This ordering is stable across GPT and OPT models, confirming that the benefit is not architecture-specific. These results reinforce the curriculum interpretation: early training benefits from broader teacher supervision, whereas later stages require progressively stricter selectivity as the student’s confidence improves. 
+
+Epistemic estimation quality (number of MC samples). Varying the number of Monte Carlo dropout samples N reveals a 
+
+26 A. Sengupta and V. Seth and T. Chakraborty FKL RKL SRKL - CaRE 0123456
+
+> Dev exact match
+> 4.10 3.50 4.00 3.30 4.00
+
+GPT2-base      
+
+> FKL RKL SRKL -CaRE
+> 3.40 1.90 3.10 3.10 3.90
+
+GPT2-large      
+
+> FKL RKL SRKL -CaRE
+> 3.60 4.20 3.40 3.90 4.10
+
+OPT-125M         
+
+> FKL RKL SRKL -CaRE
+> 5.20 5.60 5.80 5.60 6.00
+
+OpenLLaMA-3B 
+
+(a) With student-generated outputs FKL RKL SRKL - CaRE 0123456   
+
+> Dev exact match
+> 3.50 3.10 3.80 3.90 4.00
+
+GPT2-base      
+
+> FKL RKL SRKL -CaRE
+> 3.10 0.60 3.00 3.10 4.10
+
+GPT2-large         
+
+> FKL RKL SRKL -CaRE
+> 4.10 3.80 3.70 4.00 4.10
+
+OPT-125M      
+
+> FKL RKL SRKL -CaRE
+> 4.90 5.40 6.20 5.50 5.20
+
+OpenLLaMA-3B 
+
+(b) Without student-generated outputs 
+
+Figure 7. Exact match (pass@1) accuracy on the Dolly-15k development set. Hard Soft 15 20                
+
+> Average score  Gating type
+> 035715 20
+> BALD sample size ( N)
+> 0.5 1.0 3.0 5.0 10 20
+> Temperature ( T)
+> 0.0 30.0 50.0 70.0 15 20
+> Skip percentage ( )
+> Cons Incr Decr 15 20
+> Schedule type
+> 0.05 0.1 0.5 0.9 10 20
+> Margin ( m)
+
+Figure 8. Ablation results with OPT-125M student. 
+
+clear robustness trend. Increasing N from 3 to 7 slightly smooths performance and improves stability, but the gains are modest. Importantly, strong performance is already achieved at N = 3 when combined with an increasing schedule and moderate filtering. This indicates that CaRE-KD does not rely on highly precise uncertainty estimates; instead, its design allows coarse epistemic signals to suffice, significantly reducing computational overhead while preserving performance. 
+
+Gating type. We compare soft (continuous) and hard (binary) gating strategies. Soft gating exhibits slightly higher average per-formance across configurations, reflecting improved robustness to hyperparameter variation. However, hard gating consistently attains the highest peak scores in both GPT and OPT settings. This pattern reveals a desirable trade-off: soft gating offers stabil-ity across regimes, while hard gating maximizes gains when uncertainty estimates and schedules are well calibrated. Crucially, both gating strategies outperform static baselines, demonstrating that confidence adaptivity, rather than the exact gating form, is the dominant factor. 
+
+Impact of sampling temperature. Performance as a function of sampling temperature follows a consistent unimodal pattern across architectures. Very low temperatures fail to induce sufficient stochastic diversity for reliable epistemic estimation, while very high temperatures inject excessive noise. Optimal performance is achieved at moderate temperatures (around T = 3 .0), with broad tolerance around this value. This further highlights the robustness of CaRE-KD : effective uncertainty estimation does not require delicate tuning, only controlled stochasticity. Taken together, these ablations demonstrate that CaRE-KD is robust across a wide range of hyperparameter settings. Per-formance improvements arise from structural properties, confidence-gated geometry, and epistemic rejection, rather than fragile tuning. The consistency of trends across GPT and OPT families further confirms that the proposed framework generalizes across architectures, reinforcing its practical applicability for distilling modern LLMs. 
+
+27 Distilling What Matters: Confidence-Aware Selective Distillation for Large Language Models 
+
+## F Detailed Discussions 0.00 0.25 0.50 0.75 1.00 
+
+BALD score (Uncertainty) 
+
+0510 15 
+
+> Density
+> KS Dist Pre-KD: 0.963 KS Dist Post-KD: 0.978
+
+Task: Sinst 
+
+Teacher Student (Pre-KD) Student (Post-KD) 
+
+0.0 0.1 0.2 
+
+BALD score (Uncertainty) 
+
+010 20 30 40 
+
+> Density
+> KS Dist Pre-KD: 0.988 KS Dist Post-KD: 1.000
+
+Task: Vicuna 
+
+0.00 0.25 0.50 0.75 1.00 
+
+BALD score (Uncertainty) 
+
+0510 15 20 
+
+> Density
+> KS Dist Pre-KD: 0.840 KS Dist Post-KD: 0.836
+
+Task: Dolly 
+
+0.0 0.2 0.4 0.6 0.8 
+
+BALD score (Uncertainty) 
+
+0510 15 
+
+> Density
+> KS Dist Pre-KD: 0.921 KS Dist Post-KD: 0.926
+
+Task: Self 
+
+(a) Skewed RKL without Revival 0.00 0.25 0.50 0.75 1.00 
+
+BALD score (Uncertainty) 
+
+0510 15 
+
+> Density
+> KS Dist Pre-KD: 0.963 KS Dist Post-KD: 0.970
+
+Task: Sinst 
+
+Teacher Student (Pre-KD) Student (Post-KD) 
+
+0.0 0.1 0.2 
+
+BALD score (Uncertainty) 
+
+010 20 30 
+
+> Density
+> KS Dist Pre-KD: 0.988 KS Dist Post-KD: 1.000
+
+Task: Vicuna 
+
+0.00 0.25 0.50 0.75 1.00 
+
+BALD score (Uncertainty) 
+
+0510 15 20 
+
+> Density
+> KS Dist Pre-KD: 0.840 KS Dist Post-KD: 0.836
+
+Task: Dolly 
+
+0.0 0.2 0.4 0.6 0.8 
+
+BALD score (Uncertainty) 
+
+0510 15 
+
+> Density
+> KS Dist Pre-KD: 0.921 KS Dist Post-KD: 0.909
+
+Task: Self 
+
+(b) Skewed RKL with Revival 
+
+Figure 9. Epistemic uncertainty (BALD) distributions of the OpenLLaMA-3B student under Skewed RKL, with and with-out Revival .0.00 0.25 0.50 0.75 1.00 
+
+BALD score (Uncertainty) 
+
+0510 15 
+
+> Density
+> KS Dist Pre-KD: 0.963 KS Dist Post-KD: 0.968
+
+Task: Sinst 
+
+Teacher Student (Pre-KD) Student (Post-KD) 
+
+0.0 0.1 0.2 
+
+BALD score (Uncertainty) 
+
+010 20 30 
+
+> Density
+> KS Dist Pre-KD: 0.988 KS Dist Post-KD: 0.988
+
+Task: Vicuna 
+
+0.00 0.25 0.50 0.75 1.00 
+
+BALD score (Uncertainty) 
+
+0510 15 20 
+
+> Density
+> KS Dist Pre-KD: 0.840 KS Dist Post-KD: 0.832
+
+Task: Dolly 
+
+0.0 0.2 0.4 0.6 0.8 
+
+BALD score (Uncertainty) 
+
+0510 15 
+
+> Density
+> KS Dist Pre-KD: 0.921 KS Dist Post-KD: 0.901
+
+Task: Self 
+
+(a) α–β divergence without Revival 0.00 0.25 0.50 0.75 1.00 
+
+BALD score (Uncertainty) 
+
+0510 15 
+
+> Density
+> KS Dist Pre-KD: 0.963 KS Dist Post-KD: 0.986
+
+Task: Sinst 
+
+Teacher Student (Pre-KD) Student (Post-KD) 
+
+0.0 0.1 0.2 
+
+BALD score (Uncertainty) 
+
+010 20 30 40 
+
+> Density
+> KS Dist Pre-KD: 0.988 KS Dist Post-KD: 1.000
+
+Task: Vicuna 
+
+0.00 0.25 0.50 0.75 1.00 
+
+BALD score (Uncertainty) 
+
+0510 15 20 
+
+> Density
+> KS Dist Pre-KD: 0.840 KS Dist Post-KD: 0.856
+
+Task: Dolly 
+
+0.0 0.2 0.4 0.6 0.8 
+
+BALD score (Uncertainty) 
+
+0510 15 
+
+> Density
+> KS Dist Pre-KD: 0.921 KS Dist Post-KD: 0.934
+
+Task: Self 
+
+(b) α–β divergence with Revival 
+
+Figure 10. Epistemic uncertainty (BALD) distributions of the OpenLLaMA-3B student under α–β divergence, with and without Revival .
+
+F.1 Decoupling student confidence from teacher uncertainty 
+
+A fundamental failure mode in knowledge distillation is that the student inherits not only the teacher’s predictions but also its epistemic uncertainty, effectively learning to reproduce ambiguity rather than competence. This phenomenon is clearly visible when distillation is performed without selective rejection. Across instruction-following benchmarks, the post-distillation student’s BALD distribution closely tracks the teacher’s heavy-tailed uncertainty profile, exhibiting elevated mean uncertainty 
+
+28 A. Sengupta and V. Seth and T. Chakraborty 0 20000 40000 60000 
+
+Training steps 
+
+0.00 0.01 0.02 0.03 0.04 0.05 
+
+> Proportion of  MRevival
+
+Target skip percentage: 30% 
+
+> Con (Avg: 2.7%) Inc (Avg: 1.9%) Dec (Avg: 0.2%)
+
+0 20000 40000 60000 
+
+Training steps 
+
+0.0 0.1 0.2 0.3 
+
+Target skip percentage: 50% 
+
+> Con (Avg: 20.0%) Inc (Avg: 13.2%) Dec (Avg: 1.7%)
+
+0 20000 40000 60000 
+
+Training steps 
+
+0.0 0.2 0.4 0.6 
+
+Target skip percentage: 70%  
+
+> Con (Avg: 54.5%) Inc (Avg: 34.6%) Dec (Avg: 5.0%)
+> (a) GPT-2 Base
+
+0 10000 20000 30000 
+
+Training steps 
+
+0.00 0.05 0.10 0.15 0.20 
+
+> Proportion of  MRevival
+
+Target skip percentage: 30% 
+
+> Con (Avg: 13.2%) Inc (Avg: 9.2%) Dec (Avg: 2.4%)
+
+0 10000 20000 30000 
+
+Training steps 
+
+0.0 0.1 0.2 0.3 0.4 
+
+Target skip percentage: 50% 
+
+> Con (Avg: 34.0%) Inc (Avg: 23.7%) Dec (Avg: 3.7%)
+
+0 10000 20000 30000 
+
+Training steps 
+
+0.0 0.2 0.4 0.6 
+
+Target skip percentage: 70%  
+
+> Con (Avg: 58.0%) Inc (Avg: 43.3%) Dec (Avg: 7.6%)
+> (b) OPT-125M
+
+0 5000 10000 15000 
+
+Training steps 
+
+0.00 0.05 0.10 0.15 0.20 
+
+> Proportion of  MRevival
+
+Target skip percentage: 30% 
+
+> Con (Avg: 6.6%) Inc (Avg: 3.9%) Dec (Avg: 1.6%)
+
+0 5000 10000 15000 
+
+Training steps 
+
+0.0 0.1 0.2 0.3 0.4 
+
+Target skip percentage: 50% 
+
+> Con (Avg: 21.9%) Inc (Avg: 13.0%) Dec (Avg: 3.9%)
+
+0 5000 10000 15000 
+
+Training steps 
+
+0.0 0.2 0.4 0.6 
+
+Target skip percentage: 70%  
+
+> Con (Avg: 52.8%) Inc (Avg: 31.1%) Dec (Avg: 6.6%)
+> (c) OpenLLaMA-3B
+
+Figure 11. Proportion of batches triggering MRevival over training iterations for different skip targets and scheduling strategies. 
+
+and limited separation from the teacher (Figure 4). Such behavior is consistent with the geometry of Forward KL and static divergence mixtures, which encourage the student to cover the teacher’s full predictive mass, including regions dominated by epistemic noise. In contrast, enabling Revival induces a systematic decoupling between teacher uncertainty and student confidence across all evaluated tasks. While teachers consistently exhibit broad, heavy-tailed BALD distributions, the student distilled with Revival 
+
+maintains a sharply concentrated uncertainty profile that remains closer to its pre-distillation prior than to the teacher’s ambigu-ity. This effect is reflected quantitatively in substantially larger teacher–student distributional separations, with Kolmogorov– 
+
+29 Distilling What Matters: Confidence-Aware Selective Distillation for Large Language Models 0 5000 10000 15000              
+
+> Training steps
+> 0.22 0.24 0.26
+> Proportion of  MRevival
+> N=3 (Avg: 0.247) N=5 (Avg: 0.251) N=7 (Avg: 0.260)
+> (a) GPT-2 Base 010000 20000 30000
+> Training steps
+> 0.2 0.3 0.4
+> Proportion of  MRevival
+> N=3 (Avg: 0.358) N=5 (Avg: 0.345) N=7 (Avg: 0.358) (b) OPT-125M 05000 10000 15000
+> Training steps
+> 0.2 0.3
+> Proportion of  MRevival
+> N=3 (Avg: 0.214) N=5 (Avg: 0.223) N=7 (Avg: 0.208) (c) OpenLLaMA-3B
+> Figure 12. Proportion of
+
+MRevival activations for different numbers of MC dropout samples. 
+
+Smirnov distances exceeding 0.5 on benchmarks such as Vicuna and Dolly. These separations confirm that high-uncertainty teacher samples are actively filtered rather than partially absorbed. Importantly, these results also expose the limitations of static divergence objectives. Although mode-seeking losses such as Skewed RKL and α–β divergence reduce variance in student predictions, they continue to enforce alignment on unreliable teacher tokens when applied uniformly. As a result, students trained under these objectives still inherit a non-trivial portion of the teacher’s epistemic uncertainty. In contrast, CaRE-KD combines adaptive divergence geometry with explicit epistemic rejection, allowing the student to ignore teacher supervision entirely in regimes where the teacher is unreliable. Consequently, the student’s uncertainty distribution diverges more decisively from the teacher’s, yielding sharper decision boundaries and higher distributional separation (Figures 9 and 10). Taken together, these observations clarify that effective distillation requires disentangling how to learn (optimization geom-etry) from when to learn (epistemic reliability). By enforcing this separation, Revival enables students that are both accurate and decisive, even when distilled from teachers that frequently hallucinate or exhibit high epistemic uncertainty. 
+
+F.2 Evolution of student confidence over distillation iterations 
+
+We further analyze the temporal evolution of student confidence by tracking the proportion of batches for which the Revival 
+
+mask is activated, denoted by MRevival . By definition, MRevival = 1 corresponds to the regime in which the teacher exhibits higher epistemic uncertainty than the student. Consequently, an increasing proportion of MRevival over training directly reflects a growth in student epistemic confidence relative to the teacher. Figure 11 reports the evolution of MRevival for three student architectures under different skip targets and scheduling strate-gies: constant (Con), increasing (Inc), and decreasing (Dec). Across all architectures, both constant and increasing schedules exhibit a clear upward trend in MRevival . Early in training, rejection is rare, indicating that the student is initially less confi-dent than the teacher. As distillation proceeds, student epistemic uncertainty decreases, leading to a steady rise in MRevival that eventually stabilizes near the target skip percentage. This effect is most pronounced under the increasing schedule, where the gradual tightening of the rejection criterion induces a curriculum-like behavior. Early training benefits from broad teacher supervision, while later stages increasingly favor student confidence as competence improves. In contrast, decreasing schedules consistently suppress this effect. As the rejection criterion is relaxed over time, the student is re-exposed to high-uncertainty teacher supervision, resulting in limited growth in relative student confidence. This behavior mirrors the performance trends reported in Section 4.5, where decreasing schedules yield inferior results. Figure 12 examines the robustness of these dynamics with respect to the number of Monte Carlo dropout samples used to estimate BALD. While increasing the number of samples slightly smooths the trajectories, the qualitative behavior remains unchanged. In particular, the relative ordering of schedules is preserved across all architectures, confirming that the observed confidence evolution is not an artifact of stochastic estimation noise. Overall, these results provide direct empirical evidence that the proposed framework induces a progressive increase in student confidence during distillation. Under constant and increasing schedules, the student transitions from reliance on teacher supervision to a regime in which it is epistemically more confident than the teacher on an expanding subset of data. This 
+
+> 30
+
+A. Sengupta and V. Seth and T. Chakraborty 
+
+evolution aligns closely with the calibration dynamics formalized in Theorems 3.5 and 3.5, reinforcing our central claim that confidence-aware geometric adaptation combined with epistemic rejection yields students that are not only more accurate, but also increasingly decisive over the course of training. 0 (no revival) 3 5 7
+
+> Number of BALD samples ( N)
+> 050000 100000 150000 200000 250000 300000
+> Training time (Seconds)
+> 85000s 174900s +106% 216350s +155% 263700s +210%
+
+(a) Chat alignment 0 (no revival) 3 5 7 
+
+> Number of BALD samples ( N)
+> 020000 40000 60000 80000 100000 120000
+> Training time (Seconds)
+> 26100s 70448s +170% 89640s +243% 104976s +302%
+
+(b) Coding 0 (no revival) 3 5 7 
+
+> Number of BALD samples ( N)
+> 025000 50000 75000 100000 125000 150000
+> Training time (Seconds)
+> 37500s 93000s +148% 118336s +216% 138581s +270%
+
+(c) Mathematical reasoning 
+
+Figure 13. Runtime analysis for different BALD sample configurations for specialized tasks. 
+
+## G Calibration, Selective Prediction, and Selection-Bias Analyses 
+
+G.1 Calibration (ECE) and selective prediction 
+
+We report Expected Calibration Error [ECE; 63] and risk–coverage / selective-prediction curves [64] on the Dolly evaluation set for the GPT2 students. ECE must be read with care in this setting. Correctness is exact next-token match against a single 
+
+reference, so token accuracy is nearly identical for every objective ( 0.43 –0.47 ), and the only quantity that really varies is how confident each student is. Ordered by average confidence, ECE increases monotonically across all six settings (Table 9). 
+
+Table 9. ECE on Dolly for the GPT2 students, ordered by average confidence. With a single-reference target, ECE tracks confidence almost one-for-one and is largely a proxy for sharpness. 
+
+Objective Avg. confidence ECE 
+
+Forward KL 0.67 0.22 
+
+CaRE-KD (softest configuration) 0.68 0.28 
+
+α–β divergence 0.75 0.28 Reverse KL 0.77 0.31 Skewed-RKL 0.79 0.31 
+
+CaRE-KD (default temperature) 0.79 0.34 
+
+ECE tracks average confidence monotonically, from Forward KL ( 0.67 , ECE 0.22 ) up to default CaRE-KD (0.79 , ECE 0.34 ). On a single-reference target ECE is therefore largely a proxy for sharpness, and it penalizes exactly the precision-oriented, mode-seeking behavior our method is designed to produce. Forward KL reaches the lowest ECE only by being under-confident — and it is also the weakest divergence on quality (lowest mean ROUGE-L in Table 1) — while CaRE-KD matches that same ECE level once its distribution is softened (softest configuration, confidence 0.68 ). We therefore do not claim that CaRE-KD is the best-calibrated method by ground-truth ECE, and we do not regard ground-truth ECE as the right yardstick for a method whose aim is to keep the student sharp where it is competent. The calibration property we actually establish is different. Theorem 3.5 states that the student’s entropy converges toward the teacher’s , not toward a ground-truth-optimal value; the direct evidence is the uncertainty decoupling in Figures 1a and 4 (a 
+
+7% post-distillation KS drift on Dolly for CaRE-KD against 0.4% for Skewed-RKL). Separately, the risk–coverage curves are monotone for every objective, so a student’s confidence is a usable selective-prediction signal regardless of its absolute scale. 
+
+31 Distilling What Matters: Confidence-Aware Selective Distillation for Large Language Models 
+
+G.2 Revival does not preferentially reject hard examples or reduce diversity 
+
+A quantile-scheduled rejection rule could in principle bias training by discarding hard examples or collapsing response diversity. We test this directly by comparing the region where Revival fires (teacher uncertain, student confident) against the complemen-tary region on OpenLLaMA-Dolly, using LLM-judged question hardness and response diversity (Table 10). Neither difference is significant: Revival is not discarding the hard questions, and it does not measurably reduce the diversity of the student’s responses.   
+
+> Table 10. Selection-bias check on OpenLLaMA-Dolly. LLM-judged question hardness and response diversity in the re-gion where
+
+Revival fires vs. the complementary region. Neither difference is significant. 
+
+Measure (LLM-judged) Region where Revival fires Opposite region Mann–Whitney p
+
+Question hardness 2.87 2.98 0.37 Response diversity 3.96 3.99 0.63

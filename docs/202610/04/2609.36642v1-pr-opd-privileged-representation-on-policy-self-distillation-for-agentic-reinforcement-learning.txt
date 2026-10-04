@@ -1,0 +1,628 @@
+Title: PR-OPD: Privileged Representation On-policy Self-Distillation for Agentic Reinforcement Learning
+
+URL Source: https://arxiv.org/pdf/2609.36642v1
+
+Published Time: Wed, 30 Sep 2026 01:05:47 GMT
+
+Number of Pages: 19
+
+Markdown Content:
+Preprint. 
+
+# PR-OPD: P RIVILEGED REPRESENTATION ON-POLICY 
+
+# SELF -D ISTILLATION FOR AGENTIC REINFORCEMENT 
+
+# LEARNING 
+
+Muyang Li 1,∗, Jie Yang 2,∗, Zhengyu Fang 3, Junchao Zhu 4, Zhengkun Xiao 1,Ruining Deng 5, Zhe Jiang 1, Shigang Chen 1,†
+
+> 1
+
+University of Florida 2University of Illinois at Chicago 3Case Western Reserve University 
+
+> 4
+
+Vanderbilt University 5Weill Cornell Medicine 
+
+muyang.li@ufl.edu , jyang265@uic.edu 
+
+## ABSTRACT 
+
+Language-model agents are usually trained by reinforcement learning from one reward per episode, and privileged self-distillation enriches it by letting the same policy, given a skill, teach its skill-free self through token probabilities. How-ever, we identify two phenomena that question this channel. Invisible Ad-vantage : a skill in context lifts WebShop success from 42.2% to 56.2%, yet changes the probabilities of fewer than a quarter of the sampled tokens. Much to Align : a skill changes the hidden states of over 80% of response tokens, in a way that linear probes can trace back to the specific skill. To exploit this, we propose Privileged Representation On-policy Self-Distillation (PR-OPD). After a GRPO warm start, the policy writes a hindsight skill for each trajectory, re-reads its own responses with that skill as a stop-gradient teacher, and aligns its projected hidden states to the teacher’s at every layer alongside the reward ob-jective, with no external skill library, separate teacher, or inference overhead. On ALFWorld and WebShop with two backbones, PR-OPD achieves the best overall results in every setting, improving over GRPO by up to 4.7 points in ALFWorld success and 14.0 points in WebShop accuracy. Code is available at 
+
+https://github.com/balibata/PR-OPD .
+
+## 1 INTRODUCTION 
+
+Reinforcement learning with verifiable rewards (RLVR) has emerged as a promising approach for training language-model agents to solve multi-turn tasks (Yao et al., 2023; Shao et al., 2024; Wang et al., 2025; Feng et al., 2026; Jin et al., 2025). In many such tasks, the policy receives only a terminal trajectory-level reward: one number per episode, assigned after a sequence of decisions and generated tokens. Recent methods supplement this coarse feedback with on-policy distilla-tion (OPD), which provides dense token-level guidance on student-generated trajectories (Hinton et al., 2015; Agarwal et al., 2024; Gu et al., 2024; Lu & Lab, 2025; Lu et al., 2026a). In these self-distillation methods, the same model serves as a privileged teacher when conditioned on additional information (Vapnik & Vashist, 2009; Penaloza et al., 2026), such as task knowledge or hindsight feedback (Lu et al., 2026a; Yang et al., 2026c; Wu et al., 2026). The student learns from the teacher’s output probabilities without access to this information, aiming to internalize the guidance so that no additional context is needed at inference time. These methods rest on an implicit assumption: the teacher’s output probabilities provide a suffi-ciently informative signal for transferring privileged guidance to the student. However, these output probabilities reflect what the teacher is likely to generate given the additional information, rather than directly revealing how that information changes its internal reasoning process, and a model’s internal representations can carry information that its outputs do not express (Gurnee et al., 2026). For example, hindsight feedback may help the teacher identify an overlooked task constraint or 
+
+> ∗
+
+Equal contribution. †Corresponding author. 
+
+1arXiv:2609.36642v1 [cs.LG] 29 Sep 2026 Preprint. 0 25 50 75 100               
+
+> Change rate (%)
+> Qwen2.5-3B-Instruct
+> 23.7 81.3
+> Qwen3-1.7B-Instruct
+> 16.4 93.3
+> 025 50 75 100
+> Change rate (%)
+> Hidden state Output
+> All Reasoning Action Other All Reasoning Action Other
+> 050 100 150
+> Training step
+> 010 20 30 40 50 60 70 Validation success (%)
+> 42.2 56.2 64.8
+> (a) Overall changes (c) Student–teacher gap
+> Output Hidden Qwen2.5-3B Qwen3-1.7B Self-generated Other-trajectory Student (no skill) Teacher (with skill) Hidden state alignment
+
+Figure 1: Two phenomena in privileged self-distillation. (a,b) Fraction of tokens whose hidden states or sampled-token probabilities change when the policy re-reads its own responses with its self-generated skill, on ALFWorld at GRPO@100. (c) In-training WebShop validation success on Qwen2.5-3B-Instruct of the student (no skill), the teacher (skill in context), and a student trained by directly aligning to its teacher’s hidden states after branching from GRPO at step 100. an earlier mistake, while producing little change in the probability of a particular sampled token. In such cases, the token-level probability difference provides a limited signal for transferring the teacher’s updated understanding to the student, consistent with recent analyses of the sparsity and dynamics of on-policy distillation signals (Li et al., 2026; Yu et al., 2026; Shen et al., 2026). This motivates us to first examine whether privileged information substantially changes the teacher’s to-ken probabilities, and then investigate how it affects the teacher’s internal processing. To investigate, we take the natural self-evolving variant of this recipe, in which the policy writes a hindsight skill for each of its own completed trajectories, and compare two forward passes of the same policy over the same sampled responses, one with ordinary context and one with the skill added, as shown in Figure 1. We also let the policy solve tasks with and without a skill in context, to see whether the skill makes it a better actor. The skill turns out to make the teacher act better, yet it leaves most of its trace in the model’s hidden states rather than in its next-token probabilities. Our findings highlight two key phenomena: 
+
+❶ Invisible Advantage: the skill makes the teacher act better, yet barely changes its token distri-bution. As shown in Figure 1(c), a skill in context makes the policy a better actor, lifting WebShop success from 42.2% to 56.2%. Yet Figure 1(a,b) shows that adding the skill leaves the teacher’s next-token distribution almost where the student’s was: fewer than a quarter of response tokens change their probability, and at action tokens, where decisions are made, almost none do. The advantage is thus real but nearly invisible in the output channel. An objective that distills token probabilities can therefore transfer only a thin slice of what the skill gives the teacher. 
+
+❷ Much to Align: the skill reshapes the teacher’s hidden states, and aligning with them passes the advantage on. As shown in Figure 1(a,b), the same two passes differ in the hidden states of more than 80% of response tokens, including most action tokens where the output channel is silent. The change is not noise: linear probes on hidden states can tell a trajectory’s own skill from another trajectory’s, while probes on output features stay at chance. Figure 1(c) further shows that this signal is learnable: a student that directly aligns with its teacher’s hidden states, with no added parameters, ends up even above the teacher, whereas the student that acts without the skill stays far behind. What the skill adds lives in how the teacher represents the student’s responses, not in its output tokens. Together, these findings show that the advantage a skill gives the teacher barely reaches its token probabilities, while its hidden states carry it. This leads to a central question: Can the student acquire the advantage that hindsight gives its privileged self, even though this advantage barely shows in the teacher’s tokens? 
+
+To answer this question, we propose Privileged Representation On-policy Self-Distillation ( PR-OPD ). The key idea is to transfer the teacher’s advantage through the channel that actually carries it: 2Preprint. instead of imitating the privileged teacher’s token probabilities, the student aligns with the teacher’s hidden states on the same responses. Specifically, PR-OPD first trains the policy with GRPO until it can act and analyze its own experience. It then keeps optimizing the reward and, for each completed trajectory, has the policy write a hindsight skill and re-read its own sampled responses with that skill as a stop-gradient teacher. The student’s hidden states are passed through a lightweight per-layer MLP projector and aligned to the teacher’s across all layers. Student, hindsight analyzer, and teacher are three roles of one set of weights, and the projector is the only added module, so PR-OPD needs no external skill library, no separate teacher model, and nothing extra at inference. Our main contributions are summarized as follows: • We identify two phenomena in privileged self-distillation, Invisible Advantage and Much to Align : a skill makes the teacher act better yet barely changes its token distribution, and the advan-tage is carried by its hidden states instead. • We propose PR-OPD , in which the policy learns from its own hindsight by aligning its projected hidden states to those of its privileged self at every layer. • Experiments on ALFWorld and WebShop with two backbones show that PR-OPD achieves the best average success and accuracy in every setting, improving over GRPO by up to +4 .7 points on ALFWorld and +11 .7 points on WebShop with Qwen2.5-3B-Instruct. 
+
+## 2 RELATED WORK 
+
+2.1 AGENTIC RL WITH PRIVILEGED SELF -D ISTILLATION 
+
+Reinforcement learning is the standard way to train language-model agents over multi-turn interac-tion, with GRPO (Shao et al., 2024) and its multi-turn extensions (Wang et al., 2025; Feng et al., 2026) learning from a sparse terminal reward. To densify this signal, one line places past experi-ence in the agent’s context, such as Reflexion (Shinn et al., 2023), ExpeL (Zhao et al., 2024), and SkillRL (Xia et al., 2026), and further work trains agents with reinforcement learning to use, in-ternalize, or evolve such skills (Lu et al., 2026b; Shi et al., 2026; Yao et al., 2026). Another line turns it into training-time supervision through privileged on-policy self-distillation, which builds on learning using privileged information (Vapnik & Vashist, 2009; Lopez-Paz et al., 2015) and privi-leged teachers in robot learning (Pinto et al., 2018; Chen et al., 2020), as well as context distillation and on-policy distillation for language models (Snell et al., 2022; Agarwal et al., 2024; Zhao et al., 2026): the same policy, conditioned on a skill it will not see at test time, serves as a teacher whose token log-probabilities are distilled back into the student, as in SDAR (Lu et al., 2026a), PCSD (Lv et al., 2026), OPID (Yang et al., 2026c), SEED (Wu et al., 2026), and related variants (Penaloza et al., 2026; Wang et al., 2026b; Pan et al., 2026; Tu et al., 2026). However, all of these read the teacher after the language-model head, so whatever the skill changes inside the teacher reaches the student only through one scalar per token. To address this, we propose PR-OPD, which aligns the student’s hidden states to those of its privileged self. 2.2 REPRESENTATION -L EVEL DISTILLATION 
+
+Beyond matching output distributions (Hinton et al., 2015; Gu et al., 2024), intermediate represen-tations have long served as distillation targets, from hidden-layer hints in FitNets (Romero et al., 2015) to multi-layer transfer in Patient-KD (Sun et al., 2019), TinyBERT (Jiao et al., 2020), and MiniLM (Wang et al., 2020), all for compressing a fixed, stronger teacher into a smaller student. More recently, OPRD (Yang et al., 2026b) aligns hidden states on student-generated responses for mathematical reasoning, and LastOPD (Yang et al., 2026a) shows that with a separate, larger teacher this signal collapses late in training because depth-paired layers play different roles in the two mod-els, and therefore restricts alignment to the last layer during a brief crossfade into token-level distil-lation. However, these methods assume a teacher that is separate from the student and fixed during training, whereas in self-distillation for agents the teacher is the policy itself, so its layers correspond one-to-one with the student’s, its hindsight is written by that policy, and both change at every update. None of them asks the question raised by our diagnostics: whether an advantage that barely shows in the teacher’s tokens can still be passed on through its hidden states. This motivates PR-OPD, which treats the policy under its own hindsight as a stop-gradient teacher and aligns the student’s hidden 3Preprint. GRPO warm start 
+
+> First Warm up Steps
+> Initial Student
+> Environment GRPO Update
+> Prepared Student
+
+Joint Training 
+
+Student rollout            
+
+> Student Env
+> obs act …✓Success
+> obs act …×Failure
+> 16 tasks ×8 rollouts
+
+Self-evolving hindsight   
+
+> Trajectory
+> + reward
+> Current policy
+> Hindsight skill
+> ✓Reuse what worked
+> ×Correct what failed
+> One skill per trajectory
+
+Joint policy update             
+
+> Student Teacher skill
+> Task 12…TTask 12…T
+> GRPO Hidden state alignment
+
+𝐿 = 𝐿 !"#$ + 𝜆 %𝐿 #"& 
+
+Hidden State Alignment      
+
+> Same policy, two contexts
+> Student Teacher
+> Without skill With skill, stop-grad
+> Same student-sampled response
+> Go to the Room
+
+⋯              
+
+> Layer 1 Layer 2 Layer L
+> h1Sh2ShTS
+> ⋯
+> h1ShTS
+> ⋯
+> h1Sh2ShTS
+> ⋯
+> h2S
+
+⋮               
+
+> h1Th2ThTT
+> ⋯
+> h1Th2ThTT
+> ⋯
+> h1Th2ThTT
+> ⋯
+
+⋮
+
+ℒ!"# = mean '𝑔 $ ℎ% − + ℎ&'
+
+> Align every response token in every layer
+
+PR-OPD: Privileged Representation On-policy Self-Distillation 
+
+Figure 2: Overview of PR-OPD. Left: a GRPO warm start first makes the policy able to act and to analyze its own experience. Center: in each later iteration, the policy collects trajectories, writes one hindsight skill per completed trajectory, and updates with the GRPO loss plus a hidden-state alignment loss. Right: the same policy re-reads the student-sampled response twice, without and with the skill. The skill-conditioned pass is the stop-gradient teacher, and every response token in every layer of the student is passed through a lightweight MLP projector and pulled toward it. Skills and teacher states are recomputed as the policy evolves, and neither is needed at inference. states to it across all layers inside the RL loop, so that the student learns from the teacher’s hidden states rather than imitating its token probabilities. 
+
+## 3 METHOD 
+
+3.1 PROBLEM DEFINITION 
+
+Consider a policy πθ that solves a task q over multiple turns: for each of G sampled trajectories, 
+
+τi = {(xi,u , y i,u )}Ui 
+
+> u=1
+
+records the context xi,u and the sampled response yi,u at every turn u, and the whole trajectory receives one terminal reward Ri. This context holds the task, observations, and interaction history, and is all the policy ever sees at inference. During training, however, the same policy can take on two further roles once a trajectory is complete: as the analyzer it reads (τi, R i)
+
+and writes a hindsight skill si, and as the teacher it re-reads the student’s own responses yi,u with 
+
+si prepended to the context. The catch, as Figure 1 shows, is that the skill makes this teacher act better yet barely changes its token probabilities (Invisible Advantage), while its hidden states change broadly and carry the advantage (Much to Align). Our goal is therefore to pass this advantage to the student through the teacher’s hidden states rather than its token probabilities, without giving up reward learning or adding anything at inference. 3.2 OVERVIEW 
+
+PR-OPD runs in two stages (Figure 2). Stage I trains the policy with GRPO alone for N updates. This warm start is needed because the analyzer is the policy itself, and it has to learn the task before it can explain its own mistakes. Stage II keeps the reward objective and adds representation supervision. Each iteration collects trajectories without skills, has the current policy write one skill per completed trajectory, and updates the policy with the GRPO loss plus an alignment loss toward the teacher’s hidden states. Student, analyzer, and teacher share one set of weights throughout, and the only added module is a lightweight per-layer MLP projector on the student side, trained jointly with the policy and discarded at inference. 4Preprint. 3.3 STAGE I: GRPO W ARM START 
+
+For each task q, the rollout policy πθold samples G trajectories with terminal rewards R = {Ri}Gi=1 ,and GRPO (Shao et al., 2024) gives every response token of trajectory i the group-relative advantage 
+
+Ai = ( Ri − mean( R)) / std( R). With the ratio ri,k (θ) = πθ (yi,k | · )/π θold (yi,k | · ) for the k-th of the Ki response tokens in τi, the policy minimizes 
+
+LGRPO (θ) = − 1
+
+G
+
+> G
+
+X
+
+> i=1
+
+1
+
+KiKiX
+
+> k=1
+
+min 
+
+
+
+ri,k (θ)Ai, clip  ri,k (θ), 1 − ϵ, 1 + ϵAi
+
+
+
+. (1) Stage I optimizes this objective alone for N updates, without skills or teacher passes, so that the hindsight the policy later writes about its own trajectories is worth learning from. 3.4 SELF -G ENERATED HINDSIGHT SKILL 
+
+Generate one skill per trajectory. At Stage-II iteration j, the rollout policy πθj collects fresh trajectories without privileged information. After an episode finishes, we serialize its interaction record and outcome into a compact text zi and prompt the same policy to write a hindsight skill: 
+
+zi = Serialize( τi, R i), si ∼ πθj ( · | zi, I hind ), (2) where the instruction Ihind asks for a short list of actionable rules. For a successful trajectory, these rules describe a reusable workflow and the observations that decided it, and for a failed one, they name the critical mistakes and how to correct them. Skill generation is non-differentiable, and the analyzer receives no separate SFT stage. Skills are rewritten from every new rollout batch rather than retrieved from a library. 
+
+Revisit the same responses with hindsight. For every turn of trajectory i, we prepend its skill to the turn’s context x with a fixed template: 
+
+ex = H(x, s i). (3) The student processes (x, y ) and the teacher processes (ex, y ), so both passes see the same response tokens and the teacher generates no replacement actions. The skill is privileged because it comes from the completed episode, including observations and outcomes unavailable at decision time. 3.5 PRIVILEGED REPRESENTATION ALIGNMENT 
+
+Shared weights and matched positions. Following the representation-level formulation of OPRD (Yang et al., 2026b), we extract hidden states along the student-sampled responses. To keep notation light, we consider one turn with context x, response y, and teacher context ex, and drop the trajectory and turn indices. For layer ℓ and response token yk, define 
+
+h(ℓ) 
+
+> S,k
+
+= f (ℓ) 
+
+> θ
+
+(x, y <k ), h(ℓ) 
+
+> T,k
+
+= f (ℓ) 
+
+> θ
+
+(ex, y <k ), (4) where f (ℓ) 
+
+> θ
+
+returns the layer-ℓ hidden state just before token yk is predicted. The two passes run the same network with the same current weights θ and differ only in their prompts. Layer ℓ of the student is therefore paired with layer ℓ of the teacher, with no layer mapping to choose as in distillation from a different model (Yang et al., 2026a). Because the teacher’s prompt is longer by the skill, the same response token sits at a different absolute position in each pass, so we pair states by response token rather than by position. Within Stage-II iteration j, θ starts from θj , the weights of the rollout policy that collected the batch, and changes as the batch is optimized. 
+
+Align every layer and every response token. Let M collect the valid response tokens of all turns in a training microbatch. Each student state first passes through a per-layer MLP projector 
+
+g(ℓ) 
+
+> ψ
+
+: Rd → Rd with one 512-dimensional hidden layer, giving p(ℓ) 
+
+> S,k
+
+= g(ℓ) 
+
+> ψ
+
+(h(ℓ)
+
+> S,k
+
+). Since the student’s raw states also feed its own language-model head, the projector lets it follow the teacher without forcing those states to copy ones computed under a longer, skill-bearing context. With 
+
+bv = v/ max( ∥v∥2, ε ), we minimize the privileged representation alignment (PRA) loss 
+
+LPRA (θ, ψ ) = 1
+
+L|M| 
+
+> L
+
+X
+
+> ℓ=1
+
+X
+
+> k∈M
+
+bp(ℓ) 
+
+> S,k
+
+− sg 
+
+hbh(ℓ)
+
+> T,k
+
+i 22
+
+, (5) 5Preprint. Table 1: Step-150 results on ALFWorld and WebShop. ALFWorld reports success rates (%), and WebShop reports accuracy (Acc, %) and score. Within each backbone, bold is the best and underline the second best.                                                                                                                                           
+
+> ALFWorld WebShop Method Pick Look Clean Heat Cool Pick2 All Acc Score
+> Qwen2.5-3B-Instruct
+> Vanilla 44.4 28.6 25.0 7.7 14.3 4.3 23.4 0.8 5.4 Skill-Prompt 44.4 63.6 29.2 5.3 4.8 5.9 25.8 0.8 3.1 GRPO 88.9 72.7 50.0 52.6 61.9 58.8 66.4 55.5 70.4 SDAR 88.9 63.6 66.7 63.2 61.9 47.1 68.8 56.3 74.7 OPSD 55.6 35.7 11.1 0.0 14.3 20.0 23.4 1.6 6.0 Skill-SD 91.9 72.7 70.8 55.6 57.1 47.1 69.5 59.4 75.6
+> PR-OPD (ours) 97.2 54.5 70.8 57.9 61.9 52.9 71.1 67.2 83.7 Qwen3-1.7B-Instruct
+> Vanilla 18.9 42.9 0.0 0.0 4.8 0.0 8.6 3.1 44.7 Skill-Prompt 5.6 63.6 41.7 5.3 0.0 5.9 16.4 2.3 25.7 GRPO 58.3 45.5 50.0 36.8 23.8 35.3 43.8 43.0 66.4 SDAR 58.3 63.6 45.8 47.4 23.8 35.3 46.1 45.3 66.6 OPSD 25.0 54.5 8.3 0.0 4.8 5.9 14.8 6.3 44.2 Skill-SD 55.6 45.5 58.3 52.6 28.6 17.6 45.3 54.7 73.7
+> PR-OPD (ours) 69.4 63.6 37.5 52.6 28.6 17.6 46.9 57.0 73.8
+
+where L counts all Transformer layers excluding the embedding output and sg stops gradients through the teacher. M includes reasoning and action tokens in the response but not prompt or padding. Whenever both norms exceed ε, each normalized distance equals 2 − 2 cos( pS , h T ) (Ap-pendix A), so alignment concerns direction rather than magnitude. Because the teacher shares the current weights, its states are recomputed at every update and the target moves with the policy. 3.6 OVERALL OBJECTIVE 
+
+The two stages share one objective, in which the alignment loss is added to the RL loss only after the N warm-start updates: 
+
+L(θ, ψ ; t) = LGRPO (θ) + βLKL (θ) − ηH(πθ )
+
+| {z }
+
+> LRL (θ)
+
++λtLPRA (θ, ψ ), λt =
+
+0, t ≤ N, λ, t > N, (6) where LKL regularizes the student toward a frozen reference policy and H is the policy entropy. No output-space distillation term is used. Algorithm 1 in Appendix B summarizes one Stage-II iteration. After each update, the new policy acts, writes skills, and serves as teacher in the next iteration, so the experience and its hindsight supervision evolve together. 
+
+## 4 EXPERIMENTS 
+
+4.1 EXPERIMENTAL SETTINGS 
+
+Benchmarks. We evaluate on ALFWorld (Shridhar et al., 2020), a text-based household environ-ment, and WebShop (Yao et al., 2022), a web-shopping environment. We report success rates on ALFWorld and task accuracy and graded score on WebShop, with split details in Appendix C. 
+
+Protocol. We use Qwen2.5-3B-Instruct (Qwen Team et al., 2024) and Qwen3-1.7B-Instruct (Yang et al., 2025) as backbones. Every method trains for 150 updates, and PR-OPD spends the first N
+
+of them on GRPO, with N = 120 on WebShop and N = 100 on ALFWorld. All methods are evaluated at step 150 on 128 episodes with hyperparameters and hardware in Appendix C. 
+
+Baselines. We compare against six baselines that each test one alternative explanation: Vanilla and Skill-Prompt whether a skill helps the untrained policy, GRPO (Shao et al., 2024) whether rein-forcement learning alone suffices, SDAR (Lu et al., 2026a) and OPSD (Zhao et al., 2026) whether 6Preprint. 55 65 75 Success (%)            
+
+> GRPO + token OPD + hidden-state align. + align. + projector (PR-OPD)
+> SDAR, curated skills (no shared start)
+> 66.4 57.8 72.7
+> 71.1
+> 68.8
+> w/o w/ (PR-OPD)
+> 40 50 60 70
+> ALFWorld success (%)
+> GRPO
+> 72.7 71.1 3B
+> GRPO
+> 36.7
+> 46.9 1.7B
+> N=100 N=120 50 60 70 80
+> WebShop acc. / score
+> 82.6 83.7
+> 3B score
+> 72.0 73.8
+> 1.7B score
+> 66.7 67.2
+> 3B acc.
+> 49.5
+> 57.0 1.7B acc.
+> 30 upd. 10 upd.
+> 04812
+> Gain over GRPO (points)
+> +0.70 +3.23 +4.00
+> +6.35
+> Score
+> 30 upd. 10 upd.
+> +3.15
+> +9.62
+> +8.22 +3.63
+> Accuracy
+> (a) Ablation · ALFWorld 3B (b) Projector (c) Warm start (d) Gain over GRPO
+> N=100 N=120 N=140
+
+Figure 3: Ablation and sensitivity study. (a) ALFWorld success of each variant with the 3B backbone, relative to GRPO (dashed line). (b) ALFWorld success without and with the projector for both backbones, with GRPO as dotted lines. (c) WebShop accuracy (filled) and score (open) of PR-OPD started at N = 100 or N = 120 . (d) Gain of direct alignment over GRPO continued from the same checkpoint on WebShop with 1.7B, averaged over six seeds. Numbers are in Appendix D. distilling token probabilities is enough, and Skill-SD (Wang et al., 2026a) whether a stronger token-level objective closes the gap. All skill-based baselines use the hand-written skills of SDAR (Lu et al., 2026a), one per task type. 4.2 MAIN RESULTS 
+
+We compare PR-OPD against the six baselines on ALFWorld and WebShop under both backbones. Results are in Table 1. Based on these results, we summarize our observations ( Obs. ) as follows: 
+
+Obs. ❶: PR-OPD achieves the best aggregate result under every backbone. It attains the highest ALFWorld overall success and the highest WebShop accuracy and score under both backbones. On Qwen2.5-3B-Instruct, it improves over GRPO by 4.7 points on ALFWorld and by 11.7 points in WebShop accuracy. It also ranks first or second on at least four of the six ALFWorld task types under each backbone. These results answer the central question of Section 1: the student can acquire the advantage that hindsight gives its privileged self, without seeing the skill at inference. 
+
+Obs. ❷: Aligning hidden states with self-written skills beats distilling tokens with curated ones. SDAR, OPSD, and Skill-SD all distill the teacher’s token probabilities under skills from the same curated library, matched by task type, whereas PR-OPD aligns hidden states under a skill it writes for each trajectory. Against the strongest of them, Skill-SD, PR-OPD gains 7.8 points in WebShop accuracy and 8.1 in score with the 3B backbone, and it also leads on ALFWorld under both backbones. The other token-level methods gain little: SDAR improves over GRPO by at most 2.4 points on ALFWorld, and OPSD falls to roughly the level of the untrained policy. This matches the Much to Align of Phenomenon ❷: the skill’s advantage is carried by the teacher’s hidden states, so aligning them transfers more than distilling its tokens. 4.3 ABLATION AND SENSITIVITY STUDY 
+
+We examine each design choice of PR-OPD by changing one at a time, named as in Figure 3. Ablations use ALFWorld, with the projector compared on both backbones, and the warm-start study uses WebShop with the 1.7B backbone. ( 1) + token OPD distills the teacher’s token probabilities under the same self-generated skills. ( 2) + hidden-state align. aligns hidden states directly, without the projector. ( 3) + align. + projector is the full PR-OPD. ( 4) SDAR distills token probabilities under curated skills and trains from scratch. ( 5) N starts representation supervision after 100, 120, or 140 GRPO updates, and for direct alignment we pair each start with GRPO continued from the same checkpoint over six evaluation seeds. Variants (1) to (3) branch from the GRPO checkpoint at step 100, and all runs end at step 150. From Figure 3, we observe: 
+
+Obs. ❸: Reading the teacher’s hidden states, not its tokens, drives the gain. From the same warm start and the same self-generated skills, token-level OPD falls to 57.8%, 8.6 points below 7Preprint. 1 9 18 27 36 Layer 1e-4 1e-3 1e-2 1 - cosine                     
+
+> 9x
+> 1714 21 28 Layer 1e-4 1e-3 1e-2 1 - cosine  7x
+> 118 36 Layer 50 60 70 80 90 Probe accuracy (%)
+> 65.4 66.0
+> output chance
+> 114 28 Layer 50 60 70 80 90 Probe accuracy (%)
+> 79.4 70.1
+> output chance
+> 1918 27 36 Layer 0.004 .008 .012 1 - CKA  from layer 13
+> 1918 27 36 Layer 0.004 .008 .012 1 - CKA
+> (a) 3B · state change (b) 1.7B · state change (c) 3B · own vs. other (d) 1.7B · own vs. other (e) Linear CKA (f) Debiased CKA
+> Self-generated skill Other-trajectory skill Shuf fl ed skill Unrelated text
+
+Figure 4: How the skill acts on the teacher’s hidden states across depth. Columns show three analyses at fixed checkpoints on ALFWorld, with 3B on top and 1.7B below in (a–d). (a,b) Mean cosine distance from the skill-free context at each layer at GRPO@100, on a logarithmic axis. (c,d) 
+
+Probe accuracy for the trajectory’s own versus another trajectory’s skill at each layer, with output features at the right. (e,f) Same-layer 1 − CKA of the initial 3B policy under linear and debiased CKA. In (a,b,e,f), shaded bands mark the gap between the own skill and unrelated text. GRPO, whereas hidden-state alignment rises to 72.7%, 6.3 points above (Figure 3a). The two runs differ only in how the teacher is read, yet they end 14.9 points apart. SDAR, which reads tokens under curated skills, gains only 2.4 points. This is the Invisible Advantage of Phenomenon ❶ under controlled conditions: the teacher holds the advantage, but its tokens cannot pass it on. 
+
+Obs. ❹: The projector is nearly free on the larger backbone and essential on the smaller one. 
+
+With the 3B backbone, the projector moves success from 72.7% to 71.1%. With the 1.7B backbone, where direct alignment falls to 36.7%, below GRPO, the projector lifts ALFWorld success to 46.9%, the best result in Table 1 (Figure 3b). A smaller policy thus benefits from a learned buffer between its own states and the teacher’s, which is why PR-OPD includes the projector by default (Appendix H). 
+
+Obs. ❺: The starting point matters more than the number of supervised updates. Starting at 
+
+N = 120 instead of N = 100 raises the WebShop accuracy of PR-OPD from 49.5% to 57.0% with 20 fewer supervised updates (Figure 3c). Paired against GRPO continued from the same checkpoint over six evaluation seeds, direct alignment started at step 120 gains 9.62 points after 30 updates and 8.22 after 10, against 3.15 from step 100 and 3.63 from step 140 (Figure 3d). The policy must first learn the task before its own hindsight is worth reading, hence the GRPO warm start. 4.4 GENERAL ANALYSIS 
+
+We next examine where the skill acts inside the teacher and what it carries. At fixed checkpoints on ALFWorld, we fix weights and responses and vary the context among four conditions: the tra-jectory’s own skill, another trajectory’s skill, a token-shuffled skill, and length-matched unrelated text. We measure how much each context changes hidden states at every layer, probe (Alain & Ben-gio, 2016; Belinkov, 2022) whether hidden or output features tell the contexts apart, and compare hidden-state structure with linear CKA (Kornblith et al., 2019). From Figures 4 and 5, we observe: 
+
+Obs. ❻: Hindsight reshapes hidden states across the whole network, far beyond what unre-lated text does. In both backbones, the hidden-state change grows from early to middle layers and stays high through the later layers, rather than concentrating next to the output head (Figure 4a,b). 8Preprint. 50 75 100 Probe accuracy (%)               
+
+> 91.0 92.6 99.8 99.5
+> 50 75 100 Probe accuracy (%)
+> 88.6 91.4 99.6 99.7
+> 50 75 100 Probe accuracy (%)
+> 65.4 66.0 79.4 70.1
+> 50 75 100 Probe accuracy (%)
+> 86.2 87.6 98.3 99.4
+> (a) vs. no skill (b) vs. unrelated (c) vs. other skill (d) vs. shuf fl ed
+> Sampled token Top-64 Full prob. (256D) Hidden: fi rst Hidden: middle Hidden: fi nal
+> Qwen2.5-3B Qwen3-1.7B 50% chance hidden-state rows
+
+Figure 5: Probing the hindsight context at selected layers. Linear-probe accuracy at GRPO@100 on ALFWorld for distinguishing a trajectory’s own skill from (a) no skill, (b) unrelated text, (c) another trajectory’s skill, and (d) a token-shuffled skill. The first three rows are output features read after the language-model head, and the shaded rows are hidden states. All three skill contexts move the states well above length-matched unrelated text, by up to nine times for 3B and seven times for 1.7B, and the trajectory’s own skill moves them the most. The change is therefore specific to the skill rather than to a longer prompt. 
+
+Obs. ❼: Hidden states carry which skill was given, while output features do not. Linear probes on middle-layer hidden states separate a trajectory’s own skill from every alternative in Figure 5, exceeding 88% against no skill or unrelated text, and reaching 65.4% and 79.4% against another trajectory’s skill and 86.2% and 98.3% against a token-shuffled copy for 3B and 1.7B (Appendix E). The three output features stay within 50.2–54.0% on the last two distinctions, close to chance. The information the skill adds is thus readable from the teacher’s hidden states, not its outputs. 
+
+Obs. ❽: The skill information peaks in the middle layers and persists to the output. Prob-ing every layer for own versus other-trajectory skills, accuracy starts near chance at the first layer, rises through the early layers, and stays well above the output features through the rest of the net-work (Figure 4c,d and Appendix F). For 1.7B, accuracy peaks at 79.4% in the middle layers and drops to 70.1% at the final layer, and for 3B the final layer also sits below the intermediate peak, while all three output features stay at 50–52%. Aligning only the last layer as LastOPD does (Yang et al., 2026a) would therefore miss where this information is clearest, so PR-OPD aligns every layer. 
+
+Obs. ❾: The skill makes targeted adjustments to the structure of the hidden states. Unlike cosine distance, linear CKA compares how response positions relate to each other within a layer, so it captures structure rather than the direction of each vector. On the initial 3B policy, before any warm-start training, the trajectory’s own skill leaves the overall structure largely intact, with same-layer CKA averaging 0.996, yet from layer 13 onward it changes the structure more than all three controls (Figure 4e and Appendix G). Averaged across layers, the own skill changes the structure 1.5 times as much as another trajectory’s skill and six times as much as unrelated text, and the debiased estimate gives the same ordering (Figure 4f). The skill therefore reshapes the representation in a targeted, depth-dependent way rather than overwriting it, even before any training. These analyses place the skill’s advantage in the teacher’s hidden states at every layer, exactly what PR-OPD aligns. 
+
+## 5 CONCLUSION 
+
+This paper studies two phenomena of privileged self-distillation for language-model agents: a skill makes the teacher act better yet barely changes its token probabilities, and the advantage it brings is carried instead by the teacher’s hidden states. We therefore introduce PR-OPD, which lets the policy write a hindsight skill for each trajectory and, after a GRPO warm start, align its projected hidden states to those of its privileged self at every layer. On ALFWorld and WebShop with two backbones, 9Preprint. PR-OPD achieves the best overall results in every setting, and our analyses locate the skill’s effect in the teacher’s hidden states across all layers rather than in its outputs. What a policy learns from its own hindsight is thus better read from what its privileged self represents than from what it says. 
+
+## REFERENCES 
+
+Rishabh Agarwal, Nino Vieillard, Yongchao Zhou, Piotr Stanczyk, Sabela Ramos Garea, Matthieu Geist, and Olivier Bachem. On-policy distillation of language models: Learning from self-generated mistakes. In International Conference on Learning Representations , volume 2024, pp. 21246–21263, 2024. Guillaume Alain and Yoshua Bengio. Understanding intermediate layers using linear classifier probes. arXiv preprint arXiv:1610.01644 , 2016. Yonatan Belinkov. Probing classifiers: Promises, shortcomings, and advances. Computational Linguistics , 48(1):207–219, 2022. Dian Chen, Brady Zhou, Vladlen Koltun, and Philipp Kr¨ ahenb¨ uhl. Learning by cheating. In Con-ference on robot learning , pp. 66–75. PMLR, 2020. Lang Feng, Zhenghai Xue, Tingcong Liu, and Bo An. Group-in-group policy optimization for llm agent training. Advances in Neural Information Processing Systems , 38:46375–46408, 2026. Yuxian Gu, Li Dong, Furu Wei, and Minlie Huang. Minillm: Knowledge distillation of large language models. In International Conference on Learning Representations , volume 2024, pp. 32694–32717, 2024. Wes Gurnee, Nicholas Sofroniew, Adam Pearce, Mateusz Piotrowski, Isaac Kauvar, Runjin Chen, Anna Soligo, Paul Bogdan, Euan Ong, Rowan Wang, et al. Verbalizable representations form a global workspace in language models. arXiv preprint arXiv:2607.15495 , 2026. Geoffrey Hinton, Oriol Vinyals, and Jeff Dean. Distilling the knowledge in a neural network. arXiv preprint arXiv:1503.02531 , 2015. Xiaoqi Jiao, Yichun Yin, Lifeng Shang, Xin Jiang, Xiao Chen, Linlin Li, Fang Wang, and Qun Liu. Tinybert: Distilling bert for natural language understanding. In Findings of the association for computational linguistics: EMNLP 2020 , pp. 4163–4174, 2020. Bowen Jin, Hansi Zeng, Zhenrui Yue, Jinsung Yoon, Sercan Arik, Dong Wang, Hamed Zamani, and Jiawei Han. Search-r1: Training llms to reason and leverage search engines with reinforcement learning. arXiv preprint arXiv:2503.09516 , 2025. Simon Kornblith, Mohammad Norouzi, Honglak Lee, and Geoffrey Hinton. Similarity of neural network representations revisited. In International Conference on Machine Learning , 2019. Woosuk Kwon, Zhuohan Li, Siyuan Zhuang, Ying Sheng, Lianmin Zheng, Cody Hao Yu, Joseph E. Gonzalez, Hao Zhang, and Ion Stoica. Efficient memory management for large language model serving with pagedattention. In Proceedings of the 29th Symposium on Operating Systems Prin-ciples , 2023. Yaxuan Li, Yuxin Zuo, Bingxiang He, Jinqian Zhang, Chaojun Xiao, Cheng Qian, Tianyu Yu, Huan-ang Gao, Wenkai Yang, Zhiyuan Liu, et al. Rethinking on-policy distillation of large language models: Phenomenology, mechanism, and recipe. arXiv preprint arXiv:2604.13016 , 2026. David Lopez-Paz, L´ eon Bottou, Bernhard Sch¨ olkopf, and Vladimir Vapnik. Unifying distillation and privileged information. arXiv preprint arXiv:1511.03643 , 2015. Kevin Lu and Thinking Machines Lab. On-policy distillation. Thinking Machines Lab: Connection-ism , 2025. doi: 10.64434/tml.20251026. https://thinkingmachines.ai/blog/on-policy-distillation. Zhengxi Lu, Zhiyuan Yao, Zhuowen Han, Zi-Han Wang, Jinyang Wu, Qi Gu, Xunliang Cai, Weim-ing Lu, Jun Xiao, Yueting Zhuang, et al. Self-distilled agentic reinforcement learning. arXiv preprint arXiv:2605.15155 , 2026a. 10 Preprint. Zhengxi Lu, Zhiyuan Yao, Jinyang Wu, Chengcheng Han, Qi Gu, Xunliang Cai, Weiming Lu, Jun Xiao, Yueting Zhuang, and Yongliang Shen. Skill0: In-context agentic reinforcement learning for skill internalization. arXiv preprint arXiv:2604.02268 , 2026b. Chunji Lv, Yangguang Wei, Junlin Liu, Yang Gao, Ming Liu, Xinming Wang, Jinyang Wu, Guoren Wang, and Changsheng Li. Pcsd: Persistent consistency for self-distillation in agentic reinforce-ment learning. arXiv preprint arXiv:2608.01837 , 2026. Tianjun Pan, Yuan Li, Hongda Wang, Linbo Jin, Mengfei Song, Lei Gao, Qiming Shi, Shaokang Fu, Jiarong Zhao, Chengyu Wang, et al. Bidirectional context self-distillation for reinforcement learning of skill-based llm agents. arXiv preprint arXiv:2608.09555 , 2026. Emiliano Penaloza, Dheeraj Vattikonda, Nicolas Gontier, Alexandre Lacoste, Laurent Charlin, and Massimo Caccia. Privileged information distillation for language models. arXiv preprint arXiv:2602.04942 , 2026. Lerrel Pinto, Marcin Andrychowicz, Peter Welinder, Wojciech Zaremba, and Pieter Abbeel. Asym-metric actor critic for image-based robot learning. In Robotics: Science and Systems , 2018. Qwen Team, An Yang, Baosong Yang, Beichen Zhang, Binyuan Hui, Bo Zheng, Bowen Yu, Chengyuan Li, Dayiheng Liu, Fei Huang, Haoran Wei, et al. Qwen2.5 technical report. arXiv preprint arXiv:2412.15115 , 2024. Adriana Romero, Nicolas Ballas, Samira Ebrahimi Kahou, Antoine Chassang, Carlo Gatta, and Yoshua Bengio. Fitnets: Hints for thin deep nets, 2015. URL https://arxiv.org/abs/ 1412.6550 .Zhihong Shao, Peiyi Wang, Qihao Zhu, Runxin Xu, Junxiao Song, Xiao Bi, Haowei Zhang, Mingchuan Zhang, Y. K. Li, Y. Wu, and Daya Guo. Deepseekmath: Pushing the limits of mathe-matical reasoning in open language models, 2024. URL https://arxiv.org/abs/2402. 03300 .Zhennan Shen, Yanshu Li, Qingyu Yin, Chak Tou Leong, Zhilin Wang, Yanxu Chen, Rongduo Han, Sunbowen Lee, and Yi R Fung. On the geometry of on-policy distillation. arXiv preprint arXiv:2606.07082 , 2026. Guangming Sheng, Chi Zhang, Zilingfeng Ye, Xibin Wu, Wang Zhang, Ru Zhang, Yanghua Peng, Haibin Lin, and Chuan Wu. Hybridflow: A flexible and efficient rlhf framework. In Proceedings of the Twentieth European Conference on Computer Systems , 2025. Yaorui Shi, Yuxin Chen, Zhengxi Lu, Yuchun Miao, Shugui Liu, Qi Gu, Xunliang Cai, Xiang Wang, and An Zhang. Skill1: Unified evolution of skill-augmented agents via reinforcement learning. 
+
+arXiv preprint arXiv:2605.06130 , 2026. Noah Shinn, Federico Cassano, Ashwin Gopinath, Karthik Narasimhan, and Shunyu Yao. Reflexion: Language agents with verbal reinforcement learning. Advances in neural information processing systems , 36:8634–8652, 2023. Mohit Shridhar, Xingdi Yuan, Marc-Alexandre Cˆ ot´ e, Yonatan Bisk, Adam Trischler, and Matthew Hausknecht. Alfworld: Aligning text and embodied environments for interactive learning. arXiv preprint arXiv:2010.03768 , 2020. Charlie Snell, Dan Klein, and Ruiqi Zhong. Learning by distilling context. arXiv preprint arXiv:2209.15189 , 2022. Siqi Sun, Yu Cheng, Zhe Gan, and Jingjing Liu. Patient knowledge distillation for bert model compression. In Proceedings of the 2019 conference on empirical methods in natural language processing and the 9th international joint conference on natural language processing (EMNLP-IJCNLP) , pp. 4323–4332, 2019. Songjun Tu, Chengdong Xu, Qichao Zhang, Yiwen Ma, Yaocheng Zhang, Linjing Li, Dong Li, Xiangyuan Lan, and Dongbin Zhao. Ucob: Learning to utilize and evolve agentic skills via credit-aware on-policy bidirectional self-distillation. arXiv preprint arXiv:2606.29502 , 2026. 11 Preprint. Vladimir Vapnik and Akshay Vashist. A new learning paradigm: Learning using privileged infor-mation. Neural networks , 22(5-6):544–557, 2009. Hao Wang, Guozhi Wang, Han Xiao, Yufeng Zhou, Yue Pan, Jichao Wang, Ke Xu, Yafei Wen, Xiaohu Ruan, Xiaoxin Chen, et al. Skill-sd: Skill-conditioned self-distillation for multi-turn llm agents. arXiv preprint arXiv:2604.10674 , 2026a. Wenhui Wang, Furu Wei, Li Dong, Hangbo Bao, Nan Yang, and Ming Zhou. Minilm: Deep self-attention distillation for task-agnostic compression of pre-trained transformers. Advances in neu-ral information processing systems , 33:5776–5788, 2020. Zi-Han Wang, Zhengxi Lu, Zhiyuan Yao, Jinyang Wu, Jie Wu, Zhengzhou Cai, Yueqing Sun, Ziang Ye, Linji Hao, Qi Gu, et al. Agentopsd: Recursive self-distillation for agentic reinforcement learning. arXiv preprint arXiv:2608.05987 , 2026b. Zihan Wang, Kangrui Wang, Qineng Wang, Pingyue Zhang, Linjie Li, Zhengyuan Yang, Xing Jin, Kefan Yu, Minh Nhat Nguyen, Licheng Liu, et al. Ragen: Understanding self-evolution in llm agents via multi-turn reinforcement learning. arXiv preprint arXiv:2504.20073 , 2025. Jinyang Wu, Shuo Yang, Zhengxi Lu, Fan Zhang, Yuhao Shen, Lang Feng, Haoran Luo, Zheng Lian, Shuai Zhang, Zhengqi Wen, et al. Seed: Self-evolving on-policy distillation for agentic reinforcement learning. arXiv preprint arXiv:2607.14777 , 2026. Peng Xia, Jianwen Chen, Hanyang Wang, Jiaqi Liu, Kaide Zeng, Yu Wang, Siwei Han, Yiyang Zhou, Xujiang Zhao, Haifeng Chen, et al. Skillrl: Evolving agents via recursive skill-augmented reinforcement learning. arXiv preprint arXiv:2602.08234 , 2026. An Yang, Anfeng Li, Baosong Yang, Beichen Zhang, Binyuan Hui, Bo Zheng, Bowen Yu, Chang Gao, Chengen Huang, Chenxu Lv, et al. Qwen3 technical report. arXiv preprint arXiv:2505.09388 , 2025. Jie Yang, Zhengyu Fang, Zelin Xu, Jiarui Sun, Xiran Fan, Junpeng Wang, Liang Wang, Qinghua Liu, Yiwei Cai, and Yan Zheng. Lastopd: Taming collapse in latent on-policy distillation, 2026a. URL https://arxiv.org/abs/2609.28845 .Shenzhi Yang, Guangcheng Zhu, Bowen Song, Haobo Wang, Mingxuan Xia, Xing Zheng, Yingfan Ma, Zhongqi Chen, Weiqiang Wang, Junbo Zhao, et al. Oprd: On-policy representation distilla-tion. arXiv preprint arXiv:2606.06021 , 2026b. Shuo Yang, Jinyang Wu, Zhengxi Lu, Yuhao Shen, Fan Zhang, Lang Feng, Shuai Zhang, Haoran Luo, Zheng Lian, Zhengqi Wen, et al. Opid: On-policy skill distillation for agentic reinforcement learning. arXiv preprint arXiv:2606.26790 , 2026c. Shunyu Yao, Howard Chen, John Yang, and Karthik Narasimhan. Webshop: Towards scalable real-world web interaction with grounded language agents. Advances in Neural Information Pro-cessing Systems , 35:20744–20757, 2022. Shunyu Yao, Jeffrey Zhao, Dian Yu, Nan Du, Izhak Shafran, Karthik Narasimhan, and Yuan Cao. React: Synergizing reasoning and acting in language models. In International Conference on Learning Representations , 2023. Zhiyuan Yao, Yuxin Chen, Zhengxi Lu, Zishan Xu, Yueqing Sun, Yifu Guo, Yuquan Lu, Zhengzhou Cai, Kangning Zhang, Zhuowen Han, et al. Skillrise: Agentic reinforcement learning for cross-task skill evolution. arXiv preprint arXiv:2607.26784 , 2026. Guo Yu, Wenlin Liu, Yulan Hu, Hao-Xuan Ma, Jun-Peng Jiang, and Han-Jia Ye. Dense super-vision, sparse updates: On the sparsity and geometry of on-policy distillation. arXiv preprint arXiv:2606.13657 , 2026. Andrew Zhao, Daniel Huang, Quentin Xu, Matthieu Lin, Yong-Jin Liu, and Gao Huang. Expel: Llm agents are experiential learners. In Proceedings of the AAAI Conference on Artificial Intelligence ,volume 38, pp. 19632–19642, 2024. Siyan Zhao, Zhihui Xie, Mengchen Liu, Jing Huang, Guan Pang, Feiyu Chen, and Aditya Grover. Self-distilled reasoner: On-policy self-distillation for large language models. arXiv preprint arXiv:2601.18734 , 2026. 12 Preprint. 
+
+## A NORMALIZED ALIGNMENT DISTANCE 
+
+For any a, b ∈ Rd with ∥a∥2 ≥ ε and ∥b∥2 ≥ ε, the normalization in Eq. 5 yields the unit vectors 
+
+ba = a/ ∥a∥2 and bb = b/ ∥b∥2, so 
+
+∥ba − bb∥22 = ∥ba∥22 + ∥bb∥22 − 2 ba⊤bb = 2 − 2 a⊤b
+
+∥a∥2 ∥b∥2
+
+= 2 − 2 cos( a, b ). (7) Setting a = p(ℓ) 
+
+> S,k
+
+and b = h(ℓ) 
+
+> T,k
+
+shows that each term of Eq. 5 depends only on the angle between the projected student state and the teacher state, and lies in [0 , 4] . If a norm falls below ε, that vector is divided by ε instead and its norm stays below one, which is why the identity is stated only for norms of at least ε.
+
+## B TRAINING PROCEDURE 
+
+Algorithm 1 lists one Stage-II iteration of PR-OPD. 
+
+Algorithm 1 One Stage-II iteration of PR-OPD                                                               
+
+> Require: Rollout policy πθj, task batch Q, reference policy πref
+> Ensure: Updated policy πθj+1
+> 1: Collect grouped trajectories Djand rewards using πθjwithout skills 2: Cache rollout log-probabilities and compute GRPO advantages 3: for all completed trajectories τi∈ D jdo
+> 4: Generate sifrom (τi, R i)with πθj▷no gradient 5: Set ex=H(x, s i)for every turn of τi; keep yunchanged 6: end for
+> 7: θ←θj
+> 8: for all optimization minibatches B ⊂ D jdo
+> 9: Run the student on (x, y )with current θ; retain gradients 10: Run the teacher on (ex, y )with the same θ; disable gradients 11: Compute LRL +λLPRA using Eqs. 5 and 6 12: Accumulate microbatch gradients for θand ψand take an optimizer step 13: end for
+> 14: θj+1 ←θ; synchronize the rollout policy
+
+## C EXPERIMENTAL DETAILS 
+
+Benchmarks. ALFWorld is a text-based embodied environment in which agents fol-low natural-language instructions to complete multi-step household tasks. We use its 
+
+eval in distribution (seen) split with 140 task instances and report per-task-type and over-all success rates. WebShop requires agents to search, inspect, and purchase products that satisfy user-specified constraints. We use the standard test split of the first 500 instructions and report task accuracy, which requires full completion, and graded task score, which also credits partial satisfac-tion of the requirements. 
+
+Implementation. Both backbones have hidden size d = 2048 . PR-OPD starts from a GRPO checkpoint after N warm-start updates, with N = 100 on ALFWorld and N = 120 on WebShop, and continues to global step 150. The per-layer projector has one 512-dimensional hidden layer and is trained jointly with the policy at a learning rate of 10 −4. We keep the GRPO baseline’s group-relative advantages, clipping, and invalid-action penalty, with KL coefficient β = 0 .01 , entropy coefficient η = 0 .001 , and alignment weight λ = 0 .01 . Our implementation builds on SDAR (Lu et al., 2026a) and uses verl (Sheng et al., 2025) for distributed training and vLLM (Kwon et al., 2023) for rollout generation. All experiments run on eight NVIDIA B200 GPUs with 64 CPU cores and 450 GB of host memory. 
+
+Evaluation. We evaluate the checkpoint at global step 150 with sampling temperature 0.4 on 128 episodes drawn from the evaluation split. Each configuration uses a single training run with training seed 0. Training curves, as in Figure 1(c), report in-training validation every five steps, whereas all tables use the step-150 evaluation. 13 Preprint. Table 2: Ablation on ALFWorld with the 3B backbone, and the projector with the 1.7B backbone at the bottom. All runs end at step 150. ∆ is the difference from GRPO in points.                            
+
+> Variant Teacher channel Success (%) ∆
+> GRPO none 66.4 0.0 + token-level OPD token probabilities 57.8 −8.6
+> + hidden-state alignment, w/o projector hidden states 72.7 +6 .3
+> + hidden-state alignment, w/ projector ( PR-OPD )hidden states 71.1 +4 .7
+> SDAR, with curated skills token probabilities 68.8 +2 .4
+> Projector with the 1.7B backbone
+> GRPO none 43.8 0.0 + hidden-state alignment, w/o projector hidden states 36.7 −7.1
+> + hidden-state alignment, w/ projector ( PR-OPD )hidden states 46.9 +3 .1
+
+Table 3: Sensitivity to the warm-start point on WebShop with the 1.7B backbone. Top: PR-OPD at step 150. Bottom: gain of direct alignment over GRPO continued from the same checkpoint, averaged over six evaluation seeds.                           
+
+> Start NStage-II updates Acc (%) Score
+> 100 50 49.5 72.0 120 30 57.0 73.8 Start NStage-II updates ∆Acc ∆Score
+> 100 30 +3 .15 +0 .70
+> 120 30 +9.62 +3 .23
+> 120 10 +8 .22 +4 .00
+> 140 10 +3 .63 +6.35
+
+## D ABLATION AND SENSITIVITY RESULTS 
+
+Tables 2 and 3 list the numbers shown in Figure 3. 
+
+## E LINEAR PROBING OF HINDSIGHT 
+
+Setup. At fixed GRPO@100 checkpoints on ALFWorld, we train logistic regression probes to dis-tinguish a trajectory’s own self-generated skill from four alternatives: no skill, unrelated filler text, another trajectory’s skill, and a token-shuffled version of the same skill. Evaluation uses five folds grouped by trajectory, so all examples from one trajectory stay in the same fold, and chance accu-racy is 50%. We compare three output-side features, namely the sampled token’s log-probability, the log-probabilities of the skill-free distribution’s top-64 candidates, and a 256-dimensional ran-dom projection of the full output probability vector, against hidden states from the first, middle, and final layers. The middle layers are 18 for Qwen2.5-3B-Instruct and 14 for Qwen3-1.7B-Instruct. 
+
+Results. Against another trajectory’s skill (Figure 5c), middle-layer hidden states reach 65.4% and 79.4% accuracy for 3B and 1.7B, compared with 50.4–51.9% across the output features, while first-layer hidden states stay near chance at 49.8% and 49.2%. Against a token-shuffled copy (Figure 5d), which keeps the skill’s tokens but changes their order, middle-layer probes reach 86.2% and 98.3% and final-layer probes 87.6% and 99.4%, compared with 50.2–54.0% for the output features. Against no skill and unrelated text (Figure 5a,b), middle-layer accuracies range from 88.6% to 99.8%, com-pared with 51.1–59.8% for the output features. Hidden states thus expose skill presence, trajectory matching, and token order under a simple linear readout, whereas the tested output features expose little of any. 14 Preprint. 
+
+## F LAYER -WISE DECODABILITY OF MATCHED HINDSIGHT 
+
+We expand the matched-versus-other-trajectory comparison in Figure 5 by training a separate linear probe on each Transformer layer. The data, trajectory-grouped folds, and output-feature baselines follow Section E. 
+
+Output-side features probe different views of the same predictive distribution. Let p(c) 
+
+> t
+
+∈ R|V| 
+
+denote the model’s next-token probability vector at response position t under context condition c,where V is the vocabulary. The sampled response token yt is held fixed across conditions. We construct three feature representations for separate logistic regression probes: • Sampled-token log-probability. The scalar 
+
+z(c) 
+
+> t, sampled
+
+= log p(c) 
+
+> t
+
+(yt)
+
+records the probability assigned to the token actually sampled in the rollout. It captures a single coordinate of the output distribution, not the probabilities of alternative tokens. • Top-64 log-probabilities. Let Kt contain the 64 highest-probability tokens under the skill-free context. We use 
+
+z(c) 
+
+> t, top64
+
+=  log p(c) 
+
+> t
+
+(v) 
+
+> v∈Kt
+
+.
+
+The candidate tokens and their ordering are fixed across conditions at each response position. This feature captures changes among plausible alternatives, rather than only the sampled token. • 256-dimensional distribution summary. We apply a fixed random linear projection P ∈
+
+R256 ×|V| :
+
+z(c) 
+
+> t, proj
+
+= P p (c) 
+
+> t
+
+.
+
+This feature compresses the full vocabulary probability vector into 256 dimensions. The same projection is used across conditions; each coordinate combines probabilities from the vocabulary rather than representing a selected token. For each feature representation, the probe predicts the context condition, not the next token or task outcome. Higher classification accuracy indicates that the tested features make the context dis-tinction more linearly accessible. Conversely, near-chance accuracy does not establish that the full output distribution contains no relevant information: the selected features, compression, or linear readout may fail to expose it. 
+
+The most decodable layer depends on the backbone. Figure 4(c,d) shows that in both mod-els, discrimination is near chance at the earliest layers and improves with further processing. For Qwen2.5-3B-Instruct, accuracy reaches 65.4% at layer 18, rises further in later intermediate layers, and ends at 66.0%. For Qwen3-1.7B-Instruct, accuracy reaches 79.4% at layer 14 and remains high across several intermediate layers before declining to 70.1% at the final layer. The middle-layer annotations are reference points, not claims about the peak accuracy. 
+
+Output-feature baselines remain weak for this specific distinction. The three output-feature probes at the right of Figure 4(c,d) achieve approximately 50–52% accuracy for both backbones, whereas many hidden layers support substantially stronger discrimination. This depth profile shows why a final-layer-only diagnostic can miss variation in the accessibility of hindsight-related infor-mation. 
+
+## G REPRESENTATIONAL STRUCTURE UNDER HINDSIGHT CONDITIONING 
+
+Controlled comparisons characterize the structural effect of hindsight. We examine the initial Qwen2.5-3B-Instruct policy on ALFWorld using responses captured at rollout step 1, before GRPO warm-start training. We hold the model weights and sampled responses fixed and vary only the pre-ceding context. The four conditions are a trajectory’s self-generated skill, an other-trajectory skill, a token-shuffled version of the same skill, and length-matched unrelated filler text. All conditions are compared with the skill-free context. 15 Preprint. 1 12 24 36 Skill-free layer 112 24 36 Skill-free layer          
+
+> 112 24 36 Hindsight layer 112 24 36
+> 0.3 0.65 1
+> CKA
+> 112 24 36 Hindsight layer 112 24 36 late-layer diagonal drops
+> -0.01 00.01
+> ΔCKA
+> (a) Skill-free vs. skill-free (b) Skill-free vs. hindsight (c) Change in similarity
+
+Figure 6: Cross-layer representational structure under hindsight conditioning. Linear CKA on corresponding response positions of the initial Qwen2.5-3B-Instruct policy on ALFWorld. Model weights and sampled response tokens are fixed. (a) Skill-free representations compared across lay-ers: Aij = CKA( H(i)0 , H (j)0 ). (b) Skill-free representations compared with those conditioned on the trajectory’s self-generated skill: Bij = CKA( H(i)0 , H (j)own ). (c) The difference B − A, where blue denotes lower CKA and orange denotes higher CKA after changing the column context. Rows index skill-free layers throughout. Panels (a,b) share a common color scale; panel (c) uses a sepa-rate, zero-centered scale. Let H(ℓ)0 and H(ℓ) 
+
+> c
+
+denote the matrices of hidden states at corresponding response positions in layer 
+
+ℓ, under the skill-free context and condition c, respectively. We use linear centered kernel alignment (CKA) to compare their representational similarity structure. Unlike token-wise cosine distance, CKA compares the relationships across response positions rather than the direction of each individ-ual hidden-state vector. We first examine cross-layer similarity maps and then resolve same-layer differences across the four conditions. 
+
+Hindsight largely preserves the global representational structure. Figure 6 shows closely matching cross-layer similarity patterns with and without hindsight. For the self-generated-skill con-dition, same-layer linear CKA averages 0.9959 across the 36 layers and remains at least 0.9884 . The difference map nevertheless reveals nonuniform adjustments, including reduced similarity around the late-layer diagonal, with a maximum absolute difference of 0.0118 across all layer pairs. Thus, hindsight conditioning changes the representations while largely preserving their overall cross-layer similarity structure. The negative diagonal differences are relative to self-comparisons of CKA 1,not evidence of degraded task performance. 
+
+Same-layer dissimilarity resolves the differences beneath high CKA. To examine these changes more directly, we measure 
+
+d(ℓ) 
+
+> c
+
+= 1 − CKA  H(ℓ)0 , H (ℓ)
+
+> c
+
+. (8) Larger values indicate a greater change in representational similarity structure. Figure 4(e,f) com-pares this quantity across depth using both the linear and debiased CKA estimates from the diagnos-tic export. 
+
+Self-generated hindsight produces stronger middle-to-late-layer changes than the controls. 
+
+The self-generated-skill curve rises through much of the network, reaches its maximum at layer 34, and declines at the final layer. From layer 13 onward, its linear-CKA dissimilarity exceeds that of all three controls. Averaged across layers, dissimilarity is 0.00406 for self-generated skills, com-pared with 0.00269 for other-trajectory skills, 0.00289 for shuffled skills, and 0.00067 for filler text. The debiased estimates preserve the same qualitative separation; the largest absolute difference between the two estimators is below 0.00067 across all conditions and layers. These comparisons indicate that the structural response depends on the supplied context and is not reproduced by the filler control alone. 16 Preprint. 
+
+High global similarity coexists with context-dependent adjustments. Together, the heatmaps and control curves provide complementary views of hindsight conditioning: the overall representa-tional structure remains highly similar, while more detailed comparisons reveal depth-dependent dif-ferences between context conditions. This complements the token-wise sensitivity and linear-probe analyses, which examine individual-vector changes and the accessibility of hindsight distinctions. The CKA results characterize where structural changes occur; whether representation supervision improves policy learning is assessed separately through the training ablations. 
+
+## H ALIGNMENT DYNAMICS DURING TRAINING 
+
+Setup. Figure 7 tracks the alignment loss LPRA of Eq. 5 for PR-OPD with the projector, started after N = 100 or N = 120 GRPO updates on both backbones and both environments, and Table 4 summarizes each curve. The loss is averaged over layers and response tokens and equals 2 − 2 cos 
+
+between the projected student state and the teacher state (Appendix A), so a loss of 0.2 corresponds to a mean cosine similarity of 0.9. Table 1 uses N = 100 on ALFWorld and N = 120 on WebShop, and every run ends at step 150. 0.1 0.2 0.5 1Alignment loss 
+
+# Qwen2.5-3B · ALFWorld Qwen2.5-3B · WebShop 
+
+## 100 110 120 130 140 150 
+
+## 0.1 0.2 0.5 1Training step Alignment loss 
+
+# Qwen3-1.7B · ALFWorld 
+
+## 100 110 120 130 140 150 
+
+## Training step 
+
+# Qwen3-1.7B · WebShop Start at N = 100 Start at N = 120 
+
+Figure 7: Alignment loss of PR-OPD during Stage II. LPRA with the projector at every training step, when representation supervision starts after N = 100 (dashed) or N = 120 (solid) GRPO up-dates, on a logarithmic axis. Values are raw per-step training logs of a single run, without smoothing. 
+
+Alignment is established within a few updates. When representation supervision begins, the freshly initialized projector yields a loss of 1.22 to 1.52, a cosine similarity of only 0.24 to 0.39 with the teacher. Within 4 to 7 updates the loss falls below 0.5, and within 11 to 19 updates below 0.3, so after about ten updates the projected student already points in nearly the same direction as its privileged self. All eight runs follow this pattern, showing that the alignment objective is easy to optimize across backbones, environments, and starting points. 
+
+Alignment improves steadily and stably throughout Stage II. After the fast initial phase, the loss keeps decreasing at a steady pace. With N = 100 , it drops by a further 23–26% between updates 17 Preprint. Table 4: Summary of the alignment curves in Figure 7. Init. is the loss at the first Stage-II update, and <0.3 is the first update at which the loss falls below 0.3. The next three columns average five consecutive steps: updates 26–30 compare the two starts after the same number of supervised updates, and steps 146–150 compare them at the end of training. The last column is the loss of the matching run without the projector, measured on the student’s raw hidden states.                                                                     
+
+> w/ projector w/o proj. Setting NInit. <0.3Upd. 26–30 Steps 146–150 cos Steps 146–150
+> 3B ·ALFWorld 100 1.360 17 0.224 0.170 0.915 0.012 120 1.391 18 0.239 0.239 0.881 0.012 3B ·WebShop 100 1.524 19 0.228 0.175 0.913 0.008 120 1.405 18 0.242 0.242 0.879 0.009 1.7B ·ALFWorld 100 1.296 11 0.180 0.134 0.933 0.031 120 1.224 12 0.181 0.181 0.910 0.033 1.7B ·WebShop 100 1.389 12 0.195 0.148 0.926 0.027 120 1.492 13 0.213 0.213 0.893 0.026
+
+26–30 and 46–50 in all four settings and reaches a cosine similarity of 0.913 to 0.933, and it is still decreasing at step 150, leaving room for longer Stage-II training. No run diverges or degrades late in training. Even the largest single-step increase after the first ten updates, 0.054 on 1.7B WebShop with N = 120 at step 136, is fully recovered at the next step. Because the teacher shares the student’s weights, its layers correspond one-to-one with the student’s and its target evolves together with the policy, which keeps the objective well behaved throughout training. 
+
+Alignment dynamics are robust to the starting point. Matched by the number of supervised updates rather than by global step, the two starts follow almost identical trajectories. Averaged over updates 26–30, their losses differ by at most 0.018 in every setting, and they fall below 0.3 within one update of each other (Table 4). The optimization of PR-OPD is therefore insensitive to when it begins, and the gap between the two curves at step 150 in Figure 7 simply reflects the 20 additional updates of the earlier start. This lets the warm-start point be chosen for the policy’s competence alone, without affecting how well the student can follow its teacher. 
+
+A later start turns the same alignment into larger gains. On WebShop with 1.7B, starting at 
+
+N = 120 raises accuracy from 49.5% to 57.0% (Table 3) with only 30 rather than 50 supervised updates, while its alignment proceeds at the same rate as that of the earlier start. Each supervised update is thus worth more once the policy has learned the task, in line with the warm-start rationale of Section 3.2: a more competent policy writes more informative hindsight, and PR-OPD transfers it efficiently. The benefit of PR-OPD therefore lies in what the privileged teacher knows rather than in driving the alignment loss to zero, and 30 updates of representation supervision suffice for the WebShop gains in Table 1. 
+
+The behavior holds across backbones and environments. The same fast-then-steady pattern appears on both backbones and both environments. The smaller backbone aligns even more readily: 1.7B falls below 0.3 after 11 to 13 updates, against 17 to 19 for 3B, and ends with a lower loss under every environment and start, for example 0.134 and 0.148 against 0.170 and 0.175 with N = 100 .
+
+The projector turns a fixed gap into a learnable target. Without the projector, the loss is mea-sured directly on the student’s raw hidden states and is not comparable to the projected loss. It is 0.008 to 0.012 for 3B and 0.026 to 0.033 for 1.7B over the last five steps and stays within 0.01 of its initial value in every run, because the teacher shares the student’s weights and moves with every update. The projector instead gives the student a mapping it can learn, so the alignment loss decreases steadily while the raw states that feed the language-model head remain free to serve the policy (Section 3.5). The raw gap is also 2.5 to 3.5 times larger for 1.7B than for 3B, in line with the higher probe accuracy of 1.7B in Section 4.4, and 1.7B is exactly where the projector matters most (Section 4.3), lifting ALFWorld success from 36.7% to 46.9%. 18 Preprint. Together, these curves show that the representation objective of PR-OPD is fast to fit, stable over training, consistent across settings, and insensitive to when it starts, so its gains come from the privileged hindsight it transfers rather than from delicate optimization. 19
