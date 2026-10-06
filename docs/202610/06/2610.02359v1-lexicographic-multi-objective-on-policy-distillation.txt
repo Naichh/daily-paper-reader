@@ -1,0 +1,1851 @@
+LEXICOGRAPHIC MULTI-OBJECTIVE ON-POLICY DIS-
+TILLATION
+Doseok Jang ∗
+Cohere,
+Mila, Universit´e de Montr´eal,
+doseok.jang@mila.quebec
+Jon Ander Campos
+Cohere
+jonander@cohere.com
+Youran Qi
+Cohere
+youran@cohere.com
+ABSTRACT
+Reinforcement learning from verifiable rewards (RLVR) usually optimizes an-
+swer correctness, yet useful language-model behavior also requires high-quality
+reasoning and concise responses. Existing multi-reward post-training methods
+typically scalarize rewards or combine specialists without explicitly protecting a
+reward priority order. This is problematic when trade-offs are asymmetric: con-
+ciseness, for example, should not improve at the cost of correctness. We introduce
+Lexicographic Multi-Objective On-Policy Distillation (LMOPD), a multi-teacher
+method for integrating reward-specialized policies under explicit priorities. For
+each student rollout, LMOPD selects the specialist for the first objective whose
+gate detects a deficiency, then locally projects its centered log-policy correction
+to remove components that oppose higher-priority specialists. We evaluate 30B-
+A3B mixture-of-experts transformer models in two- and four-expert settings on
+three math benchmarks, measuring retained specialist gains. With two experts,
+LMOPD’s point estimates fully retain the accuracy and reasoning-quality gains
+while acquiring 46.9% of the conciseness gain.
+With four experts, it retains
+≈90% of both the accuracy gain and reasoning-correctness gain, compared to
+only ≈57% by the next best evaluated baseline. Matched four-expert ablations
+show that lexicographic routing outperforms random routing and that projection
+further strengthens both top-priority capabilities. Across both scales, LMOPD
+preserves the highest-priority capabilities more effectively than the existing base-
+lines we evaluate, demonstrating the value of explicit priorities for specialist inte-
+gration.
+1
+INTRODUCTION
+Post-training has become a critical stage in building large language models (LLMs) that can solve
+difficult reasoning and agentic tasks. Policy-gradient methods such as Proximal Policy Optimization
+(PPO) (Schulman et al., 2017) and Group Relative Policy Optimization (GRPO) (Shao et al., 2024)
+enable models to improve from outcome-level feedback, and reinforcement learning from verifiable
+rewards (RLVR) has been especially effective in domains such as mathematics and code where cor-
+rectness can be automatically verified. Modern reasoning systems consequently devote substantial
+post-training compute to reinforcement learning on verifiable tasks (Yang et al., 2025).
+Outcome correctness, however, is only one dimension of response quality. A useful mathematical
+assistant should also reason correctly, verify its work, avoid unnecessary dead ends, and commu-
+nicate concisely. These objectives can conflict and have reward signals with different scales and
+densities. A standard solution is scalarization; GDPO, for example, normalizes reward dimensions
+separately before combining them (Liu et al., 2026a). A fixed scalarization still treats objectives as
+compensatory: enough improvement on a lower-priority axis can offset degradation of a prerequi-
+site. Many applications instead require a non-compensatory hierarchy in which presentation quality
+cannot redeem an incorrect solution.
+An alternative is to specialize separate models and combine them after training. Rewarded Soups
+(Ram´e et al., 2023), for example, interpolates parameters of models optimized for different rewards.
+∗Work done as an intern at Cohere
+1
+arXiv:2610.02359v1  [cs.LG]  1 Oct 2026
+
+
+(a) Reward-specialized experts
+(b) Lexicographic rollout routing
+(c) Priority-aware function-space projection
+Figure 1: LMOPD overview. (a) We train reward-specialized experts and assign each reward to an
+expert; one expert may serve multiple rewards. (b) Each student rollout is checked in that order and
+routed to the first objective whose gate detects a deficiency; a rollout that passes every gate is self-
+distilled. (c) At each token, LMOPD removes only components of the routed specialist’s correction
+that oppose earlier specialists, producing a projected virtual-teacher target.
+On-policy distillation (OPD) instead transfers dense teacher feedback on student-generated trajec-
+tories (Agarwal et al., 2024). Multi-teacher OPD (MOPD) routes rollouts to domain-specialized
+teachers (Ma et al., 2026); there, the prompt domain determines which teacher rollouts are routed
+to. We study when several objectives apply to the same prompt, where the missing signal is instead
+which requirement the individual sampled solution fails.
+We propose Lexicographic Multi-Objective On-Policy Distillation (LMOPD) for priority-
+ordered specialist integration. LMOPD uses each rollout’s reward profile to make the routing de-
+cision. We assume an ordered set of objectives r1 ≻r2 ≻· · · ≻rK and a collection of reward-
+specialized experts. For each on-policy student rollout, LMOPD walks through the rewards in pri-
+ority order. A discrete objective routes to its expert when its maximum acceptable reward has not
+been achieved; a continuous objective routes when the rollout has negative group-relative advantage
+on that objective. The first objective that triggers determines the teacher. If every objective passes,
+the rollout is routed to the student itself (effectively contributing no gradient) to avoid unnecessarily
+perturbing already correct behavior. Higher-priority objectives therefore have the first opportunity
+to correct a trajectory, while lower-priority experts only act after higher-priority requirements are
+satisfied.
+Routing alone does not prevent a selected lower-priority expert from proposing a token-level correc-
+tion that opposes a higher-priority expert. We therefore represent each expert’s correction as a cen-
+tered log-policy delta and sequentially remove components with negative inner product against the
+higher-priority expert deltas. This projection is performed in function space rather than parameter-
+gradient space and is implemented through streamed per-token Gram matrices, avoiding one addi-
+tional student backward pass per expert.
+This paper makes three contributions:
+2
+
+
+• We formulate lexicographic corrective routing for multi-teacher OPD. The per-rollout rule
+handles absolute discrete criteria and relative continuous rewards, allows several objectives
+to share one expert, and self-distills when no correction is required.
+• We introduce a one-sided function-space projection that removes components of the routed
+correction that oppose higher-priority experts, together with a streamed Gram-space imple-
+mentation that requires no extra student backward passes.
+• We evaluate LMOPD in two- and four-expert settings at 30B scale and isolate routing and
+projection through component ablations.
+We evaluate whether LMOPD retains prerequisite capabilities, improves teacher assignment over
+random routing, and redirects integration when projection activates. LMOPD is a local supervision
+heuristic, not a claim of globally optimal lexicographic control.
+2
+RELATED WORK
+RLVR and multi-reward reinforcement learning.
+PPO (Schulman et al., 2017) and GRPO
+(Shao et al., 2024) are widely used policy-gradient methods for LLM post-training. RLVR cou-
+ples these updates with automatically verifiable outcome rewards, particularly for mathematical and
+coding tasks. Multi-reward extensions introduce additional reward dimensions for properties such
+as style, format, length, or process quality. GDPO (Liu et al., 2026a) identifies a failure mode in
+naively applying group normalization after summing heterogeneous rewards and instead normalizes
+each reward dimension independently before aggregation. This preserves reward-specific variation,
+but the final policy update still depends on a scalarized combination of objectives. Recent work also
+uses conditional reward structures. SpatialThinker explicitly uses lexicographically gated rewards
+in multimodal RL (Batra et al., 2025), while SCOPE-RL gates process-quality rewards on final-
+answer correctness in mathematical reasoning (Liu et al., 2026b). LMOPD shares the intuition that
+lower-priority feedback should not override task success, but uses this hierarchy to select a teacher
+distribution rather than to construct a scalar reward.
+Combining reward-specialized policies.
+Rewarded Soups (Ram´e et al., 2023) trains policies on
+different rewards from a shared initialization, linearly interpolates their weights, and uses the result-
+ing merged model for all inputs and trajectories.
+On-policy and multi-teacher distillation.
+Knowledge distillation trains a student to match a
+teacher distribution; reverse KL provides a mode-seeking signal for autoregressive LLMs (Gu et al.,
+2024). GKD uses student-generated sequences (Agarwal et al., 2024) instead, providing feedback
+that is both dense and on-policy. MOPD extends GKD by dispatching rollouts to domain-specialized
+teachers to mix capabilities across domains and multiple teachers(Ma et al., 2026). MOPD has
+emerged as a key component of frontier LLM post-training recipes, including MiMo-V2-Flash Xiao
+et al. (2026), DeepSeek-V4 Xu et al. (2026), GLM-5 Zeng et al. (2026), and Nemotron-Cascade
+2 Yang et al. (2026). SMOPD, a concurrent work, first trains reward specialists, then merges a
+token-level mixture of all teachers with a balanced multi-reward policy-gradient anchor (Wang et al.,
+2026).
+At the mechanism level, LMOPD is related to PCGrad, which removes pairwise conflicting
+parameter-gradient components in multi-task learning (Yu et al., 2020). LMOPD instead filters one
+routed teacher correction only against earlier priorities, using an unweighted token-level function-
+space surrogate rather than parameter gradients.
+Lexicographic optimization.
+Lexicographic multi-objective reinforcement learning optimizes
+objectives according to an ordered preference relation rather than treating all trade-offs as inter-
+changeable. Recent work studies this setting theoretically and algorithmically, including regret
+guarantees for linear MDPs (Xue et al., 2025) and thresholded lexicographic formulations (Tercan
+& Prabhu, 2024). LMOPD does not attempt to provide the same policy-level optimality guarantees.
+Instead, it borrows the priority structure to select a corrective teacher signal and locally project that
+signal during distillation.
+3
+
+
+Across these lines of work, LMOPD differs in three coupled choices: unlike domain-routed MOPD,
+it routes individual rollouts by reward deficiency; unlike Rewarded Soups and SMOPD, it does not
+globally or simultaneously merge all specialists; and unlike GDPO, it does not collapse priorities
+into a scalarized advantage.
+3
+METHOD
+LMOPD has two conceptually separable components.
+First, lexicographic rollout routing uses
+the reward profile of each student-generated completion to select the specialist associated with
+its highest-priority deficiency. Second, priority-aware projection modifies the selected specialist’s
+token-level correction whenever it opposes a higher-priority specialist. This decomposition yields
+a routing-only method and a routing-plus-projection method with the same rollout assignments and
+distillation loss. Figure 1 summarizes the complete pipeline.
+3.1
+LEXICOGRAPHIC MULTI-OBJECTIVE SETTING
+Let x ∼D denote a prompt and let a student policy πθ generate a completion y = (y1, . . . , yT ) ∼
+πθ(· | x). We evaluate a rollout with K reward functions
+r(x, y) = (r1(x, y), . . . , rK(x, y)) ,
+(1)
+with priority ordering r1 ≻r2 ≻· · · ≻rK. For a policy π, define performance on objective i as
+Ji(π) = Ex∼D, y∼π(·|x)[ri(x, y)].
+(2)
+The ordering encodes an asymmetric preference: improvement on a lower-priority objective is not
+exchangeable for degradation of a higher-priority objective.
+We are additionally given M frozen specialists {πϕ1, . . . , πϕM }. Let e(i) ∈{1, . . . , M} map reward
+i to the expert used to correct that objective. The mapping need not be one-to-one: if one specialist
+is strong on several correlated rewards, multiple i may share the same e(i).
+3.2
+ON-POLICY DISTILLATION
+At the start of an update, we freeze an anchor ¯πθ ←πθ, sample student rollouts, and minimize a
+token-averaged reverse KL toward a fixed target distribution together with a hard-label cross entropy
+term (Agarwal et al., 2024; Hinton et al., 2015). The target is the routed specialist, the anchor itself,
+or the projected virtual teacher introduced below. Unlike domain-based MOPD (Ma et al., 2026),
+LMOPD chooses this target from the rollout’s reward profile. Appendix A.1 gives the complete
+objective and notation.
+3.3
+STAGE I: LEXICOGRAPHIC ROLLOUT ROUTING
+We sample G rollouts for each prompt from the frozen anchor, as in group-based RL methods:
+yb,g ∼¯πθ(· | xb),
+b ∈{1, . . . , B},
+g ∈{1, . . . , G}.
+(3)
+Writing rb,g,i = ri(xb, yb,g), we compute the within-prompt moments and group-relative advantage:
+µb,i = 1
+G
+X
+g
+rb,g,i,
+σb,i =
+s
+1
+G
+X
+g
+(rb,g,i −µb,i)2,
+Ab,g,i = rb,g,i −µb,i
+σb,i + ϵ
+.
+(4)
+A single satisfaction rule is inappropriate for every reward type. For discrete rewards with a known
+maximum acceptable value rmax
+i
+, we use an absolute gate; for continuous rewards, we use relative
+underperformance:
+gi(xb, yb,g) = I[rb,g,i < rmax
+i
+] (discrete),
+gi(xb, yb,g) = I[Ab,g,i < 0] (continuous).
+(5)
+The absolute gate is important for sparse binary rewards: if every rollout in a group is incorrect, all
+group-relative advantages are zero, yet every rollout still requires correctness supervision.
+4
+
+
+LMOPD selects the first objective whose gate fires:
+k∗(xb, yb,g) = min {i ∈{1, . . . , K} : gi(xb, yb,g) = 1} .
+(6)
+If the set is nonempty, the routed expert is m∗= e(k∗). If every gate passes, no expert is selected and
+the rollout is self-distilled. Let βm∗∈(0, 1] be the routed-teacher coefficient used by the existing
+OPD logit pool; βm∗= 1 recovers a direct specialist target. We use βm∗= 0.9 for all experiments.
+Writing p0,b,g,t = ¯πθ(· | sb,g,t) and pm,b,g,t = πϕm(· | sb,g,t), the routing-only target is
+qroute
+b,g,t =
+softmax((1 −βm∗) log p0,b,g,t + βm∗log pm∗,b,g,t) ,
+if at least one gate fires,
+p0,b,g,t,
+otherwise.
+(7)
+Substituting Eq. 7 into Eq. 13 gives the routing-only LMOPD ablation. The ordering therefore
+gives each objective a “first right of refusal” over the rollout: incorrect responses receive capability
+supervision before lower-priority properties such as conciseness are considered. For projection,
+routing also records the ordered set C(k∗) of distinct higher-priority experts, excluding the routed
+expert itself. Appendix A.2 gives the exact construction, edge cases, and pseudocode.
+3.4
+STAGE II: PRIORITY-AWARE FUNCTION-SPACE PROJECTION
+Why routing alone is insufficient.
+Routing controls which expert supervises a rollout, but it does
+not control the direction of that expert’s update. A lower-priority expert can therefore assign a
+correction that locally opposes a higher-priority capability. LMOPD tests compatibility with an inner
+product between token-level corrections. The test concerns only the teacher-dependent reverse-KL
+component and excludes the hard-label cross-entropy term. This surrogate avoids an additional
+student backward pass per expert compared to computing the inner product on the actual gradients;
+more details can be found in Appendix A.3.
+Centered log-policy corrections.
+For a token prefix st, write the frozen student anchor as p0,t =
+¯πθ(· | st) and expert m as pm,t = πϕm(· | st). For every vocabulary item a, define
+∆m,t(a) = log pm,t(a) −log p0,t(a),
+e∆m,t(a) = ∆m,t(a) −Ea′∼p0,t[∆m,t(a′)] .
+(8)
+e∆m,t(a) is just a centered version of ∆m,t(a).
+One-sided priority-aware projection.
+Suppose the rollout is routed to m∗and C(k∗)
+=
+(c1, . . . , cL). We initialize d(0)
+t
+= βm∗e∆m∗,t, using the same routed-teacher coefficient as Eq. 7.
+We then visit the constraint experts once in priority order. Step ℓis
+uℓ,t =
+D
+d(ℓ−1)
+t
+, e∆cℓ,t
+E
+,
+d(ℓ)
+t
+= d(ℓ−1)
+t
+−min(uℓ,t, 0)
+∥e∆cℓ,t∥2
+2 + ϵ
+e∆cℓ,t.
+(9)
+Each step removes only an opposing component, but a single sweep may leave conflicts among
+non-orthogonal constraints. This is a token-level surrogate, not a parameter-gradient or reward-level
+guarantee; Appendix A.3 gives the exact limiting cases. The projected virtual teacher is
+qproj
+b,g,t = softmax
+
+log p0,t + τd(L)
+t
+
+,
+(10)
+where the projection strength is τ = 1 in our experiments. The complete method substitutes Eq. 10
+into Eq. 13, with the target and projection coefficients detached from the student gradient. Ap-
+pendix A.3 gives the complete algorithm, limiting cases, and one-sweep feasibility analysis. Ap-
+pendix B describes the streamed Gram-space implementation and numerical safeguards.
+4
+EXPERIMENTS
+4.1
+TRAINING
+Datasets.
+We use a proprietary mathematical-reasoning corpus for post-training.
+5
+
+
+Reward functions.
+We use binary answer correctness, reasoning quality judged by a 31B Gemma
+4 judge (Team et al., 2026) as an average over four axes (reasoning correctness, verification, clarity,
+and efficiency), and a bounded length-based score Sconc. All rewards are in the interval [0, 1]. Every
+reported Conc metric is computed from raw Sconc. The conciseness specialist is trained with a
+correctness-gated version where it only receives Sconc on correct rollouts and 0 otherwise, whereas
+GDPO directly optimizes raw Sconc. Appendix C.5 gives the complete definitions.
+The orders encode prerequisites rather than interchangeable utilities. Correctness comes first be-
+cause presentation cannot redeem a wrong answer; reasoning correctness follows as a core capa-
+bility, then verification, efficiency, and conciseness refine otherwise correct solutions. We therefore
+read results from highest to lowest priority and treat their macro-average as a descriptive summary.
+Expert models.
+We train reward-specialized experts from the shared base and select teachers by
+target-reward validation performance. This produces the two integration settings below; See Ap-
+pendix C.6 for further details on specialist training and expert selection.
+Two-expert setting (three rewards).
+The first setting asks whether a student can acquire a lower-priority behavior from one specialist
+while retaining the core mathematical capability of another. We order the objectives as RC ≻
+RRQ ≻Rconc and use two teachers:
+1. a capability expert, selected from the reasoning-specialized runs and used for both the
+correctness and aggregate reasoning-quality gates; and
+2. a conciseness expert, used for the conciseness gate.
+Because both higher-priority gates share one capability teacher, this setting isolates adding concise-
+ness while retaining core mathematical capability. As we use one teacher for both RC and RRQ,
+rollouts that route to either one of those gates would get the same loss.
+Four-expert setting (five rewards).
+The second setting tests a longer priority chain with supervision distributed across more specialists.
+We use RC ≻RRC ≻RRV ≻RRE ≻Rconc. The four teachers are:
+1. a reasoning-correctness expert, shared by the correctness and reasoning-correctness gates;
+2. a reasoning-verification expert;
+3. a reasoning-efficiency expert; and
+4. a conciseness expert.
+This setting tests integration under a longer chain in which distinct specialist corrections compete
+and later teachers act only after earlier gates pass. It therefore tests both multi-expert capability
+integration and the scaling behavior of the lexicographic routing rule.
+Student model.
+The LMOPD student and all RL-trained specialist and baseline policies start from
+the same roughly 30B-parameter mixture-of-experts checkpoint, with approximately 3B active pa-
+rameters per token. The checkpoint is an internal predecessor of Cohere’s North Mini Code (Team
+Cohere, 2026).
+Baselines.
+We compare LMOPD with baselines that isolate different components of the method.
+Rewarded Soup. Rewarded Soups (Ram´e et al., 2023) linearly interpolates the parameters of reward-
+specialized policies trained from the same initialization. We evaluate both a uniform interpolation
+and a correctness-emphasized interpolation selected without using held-out test sets. This tests
+whether capability integration can be achieved by a static weight-space merge rather than by on-
+policy teacher supervision.
+GDPO. GDPO (Liu et al., 2026a) is our primary multi-objective RL baseline. It optimizes raw
+correctness, aggregate reasoning quality, and raw Sconc, normalizing each reward dimension before
+combining the advantages into one policy-gradient direction. GDPO uses objective weights, rather
+6
+
+
+than hand-designed gates, to control the trade-off. We evaluate equal weights and correctness-
+emphasized 5:1 and 25:1 weightings; the main tables show equal weights and the best-tuned 25:1
+run, while Table 4 retains the intermediate configuration.
+Correctness-Gated RLVR. As a lexicographic reward-design control, Correctness-Gated RLVR
+makes correctness a prerequisite by zeroing the aggregate reasoning-quality and conciseness re-
+wards on incorrect rollouts, then scalarizes the rewards that remain. Appendix C.7 gives both base-
+line objectives. Because RRQ is the mean of the same four reasoning-quality axes, Correctness-
+Gated RLVR and each GDPO weighting receive the same three aggregate rewards in the two- and
+four-expert settings. We therefore reuse the same step-300 policy checkpoints in both tables; the
+four-expert table only decomposes aggregate reasoning quality into component axes for evaluation.
+Individual specialists. We report the frozen reward-specialized experts themselves. These models
+are not unified multi-objective solutions; instead, they establish the per-objective headroom available
+from specialization and define the reference point for retained gain.
+Component ablations. The routing-only ablation is exactly the same as LMOPD but skips the pro-
+jection step. This isolates the contribution of priority-aware projection. We also present a random-
+routing control which is exactly the same as the routing-only variant but matches experts to rollouts
+at random. This tests whether improvements come merely from exposure to multiple teachers or
+from matching teacher identity to the rollout’s reward deficiencies and priority order.
+Training settings.
+Two- and four-expert LMOPD variants train for 40 and 80 steps, respectively,
+and use their final checkpoints. All RL-trained specialist and baseline policies use their final step-
+300 checkpoint. See Appendix C for further details.
+4.2
+EVALUATION
+Datasets and protocol.
+We generate 50 completions per problem on AIME 2024, AIME 2025,
+and HMMT February 2025 and report the average and standard error of the mean (SEM) None of
+these benchmarks is used for training or checkpoint selection. See Appendix C for further details.
+Metrics and uncertainty.
+We aggregate each reported objective across the three benchmarks. We
+report pass@1, aggregate reasoning quality (plus the three relevant component axes), and raw Sconc
+independent of correctness. Raw objective values are means with standard errors of the mean (SEM),
+while retained-gain SEs use the delta method.
+For objective i, let Ji(π) denote the model’s mean performance, let π0 be the shared base policy,
+and let π⋆
+i be the best available specialist for that objective. We report the retained gain
+Gi(π) = Ji(π) −Ji(π0)
+Ji(π⋆
+i ) −Ji(π0) × 100%.
+(11)
+Retained gain measures how much of the improvement created by specialization survives after capa-
+bilities are integrated into one model. A value of 0% means that the unified method does not improve
+over the base on that objective, while 100% means that it closes the entire base-to-specialist gap;
+values above 100% indicate that the integrated policy surpasses the best specialist, and negative val-
+ues indicate degradation relative to the base. This normalization is useful because reward axes can
+differ substantially in both scale and available headroom. We report the corresponding raw objective
+values in Table 4 and treat the macro-average retained gain as a descriptive summary rather than a
+substitute for inspecting high-priority objectives individually.
+5
+RESULTS
+5.1
+TWO-EXPERT RETAINED GAIN
+Table 1 reports retained gain aggregated over AIME 2024, AIME 2025, and HMMT February 2025,
+with 50 sampled completions per problem. LMOPD preserves the two high-priority capabilities: its
+point estimates retain (102.9±15.5)% of the accuracy gain (raw: 0.711→0.745) and (103.3±5.7)%
+of the aggregate reasoning-quality gain (raw: 0.719→0.772), while retaining (46.9 ± 2.2)% of the
+7
+
+
+Table 1: Two-expert retained gain. LMOPD has the highest average among unified methods while
+retaining gains in accuracy and aggregate reasoning quality.
+Model
+pass@1
+RQ
+Conc
+Average
+Weight-space merging
+Rewarded Soup (uniform; 1:1)
+61.2 ± 13.7%
+61.6 ± 5.0%
+67.2 ± 2.3%
+63.3%
+Rewarded Soup (correctness-emphasized; 2:1)
+72.7 ± 14.0%
+84.3 ± 5.3%
+44.4 ± 2.1%
+67.1%
+Multi-reward reinforcement learning
+Correctness-Gated RLVR (1,1,1)
+70.0 ± 13.8%
+40.2 ± 5.0%
+49.1 ± 2.2%
+53.1%
+GDPO (1,1,1)
+−457.9 ± 85.2%
+−154.4 ± 15.3%
+355.8 ± 9.8%
+-85.5%
+GDPO (25,1,1)
+−31.5 ± 20.1%
+−2.4 ± 4.7%
+90.5 ± 3.7%
+18.9%
+Ours
+LMOPD
+102.9 ± 15.5%
+103.3 ± 5.7%
+46.9 ± 2.2%
+84.4%
+Reference policies (not unified)
+Base
+0%
+0%
+0%
+0%
+Reasoning Quality + Correctness Expert
+100%
+100%
+39.2 ± 2.2%
+79.7%
+Conciseness Expert
+0.8 ± 16.1%
+−20.4 ± 6.5%
+100%
+26.8%
+Bold and underlined entries are the best and second-best unified methods in each column; reference policies
+are excluded. LMOPD denotes routing plus priority-aware projection and uses the fixed step-40 checkpoint.
+Best specialist per axis: pass@1 = Reasoning Quality + Correctness Expert (0.7440), RQ = Reasoning Quality
++ Correctness Expert (0.7698), and Conc = Conciseness Expert (0.8131). The shared base defines 0%.
+conciseness gain. Because 100% denotes the best-specialist endpoint, both high-priority estimates
+are consistent within their SEs with specialist-level performance.
+LMOPD has the highest performance among unified methods (84.4%), 17.3 points above the
+strongest non-LMOPD baseline, the correctness-emphasized Rewarded Soup (67.1%). That soup
+retains substantial gains in aggregate reasoning quality and conciseness but only 72.7% of the avail-
+able accuracy gain. Equal-weight GDPO reduces mean completion length from 16.3k tokens for the
+base to 6.2k while lowering raw accuracy from 0.711 to 0.559. At 25:1, GDPO avoids this collapse:
+mean length rises to 13.3k tokens, and raw accuracy and aggregate reasoning quality recover to
+0.700 and 0.717, respectively, while retaining 90.5% of the conciseness gain. The equal-weight run
+is therefore consistent with length-dominant reward hacking, while stronger correctness weighting
+substantially mitigates it.
+For qualitative analysis of LMOPD’s completions, we present a case study of an individual eval
+problem in Appendix D.
+5.2
+FOUR-EXPERT RETAINED GAIN
+The four-expert setting tests whether high-priority capabilities remain protected as the priority chain
+grows to five objectives. Table 2 shows that LMOPD retains (90.6 ± 15.0)% of the accuracy gain
+(raw: 0.711 →0.748) and (88.6 ± 7.0)% of the reasoning-correctness gain (raw: 0.755 →0.805).
+Every other unified method reaches at most 57.1% and 63.5%, respectively. LMOPD also has the
+highest macro-average point estimate (39.6%, versus 34.4% for Correctness-Gated RLVR).
+Because the objectives are lexicographically ordered, the columns should be read in priority order
+rather than as equally consequential targets. The central scaling result is therefore LMOPD’s large
+margin on accuracy and reasoning correctness, followed by a positive composite-conciseness gain
+(28.0 ± 1.1%). Reasoning verification and efficiency are lower-priority objectives: their retained
+gains of −6.8% and −2.4% do not outweigh preservation of the first two objectives under the stated
+preference order. This profile is consistent with the intended behavior of LMOPD—preserving
+high-priority capabilities even when all specialist directions cannot be improved simultaneously.
+LMOPD outperforms other multi-objective optimization baselines on important objectives.
+5.3
+COMPONENT ABLATIONS
+Table 3 separates teacher assignment from priority-aware projection. Lexicographic routing’s av-
+erage retained-gain exceeds random routing by 28.7 points with two experts and 23.0 points with
+four. In the four-expert setting, random routing improves later objectives but falls below the base on
+accuracy and reasoning correctness; teacher exposure alone is therefore insufficient.
+8
+
+
+Table 2: Four-expert retained gain, with objectives ordered by priority. LMOPD leads unified meth-
+ods on composite pass@1, RQ-corr, and average.
+Model
+Composite pass@1
+RQ-corr
+RQ-verif
+RQ-eff
+Composite Conc
+Average
+Weight-space merging
+Rewarded Soup (uniform; 1:1:1:1)
+31.4 ± 14.3%
+51.6 ± 7.5%
+−2.3 ± 2.5%
+28.7 ± 2.1%
+40.2 ± 1.4%
+29.9%
+Rewarded Soup (correctness-emphasized; 2:1:1:1)
+30.5 ± 11.6%
+63.5 ± 10.4%
+4.2 ± 2.9%
+19.2 ± 2.0%
+28.5 ± 0.8%
+29.2%
+Multi-reward reinforcement learning
+Correctness-Gated RLVR (1,1,1)
+57.1 ± 9.5%
+55.7 ± 7.7%
+3.2 ± 2.4%
+30.8 ± 4.4%
+25.2 ± 1.8%
+34.4%
+GDPO (1,1,1)
+−373.4 ± 55.7%
+−265.0 ± 35.7%
+−161.5 ± 6.1%
+95.1 ± 2.0%
+182.1 ± 3.0%
+-104.6%
+GDPO (25,1,1)
+−25.7 ± 14.0%
+5.6 ± 9.1%
+−35.6 ± 3.6%
+36.0 ± 2.4%
+46.3 ± 1.9%
+5.3%
+Ours
+LMOPD
+90.6 ± 15.0%
+88.6 ± 7.0%
+−6.8 ± 2.7%
+−2.4 ± 2.8%
+28.0 ± 1.1%
+39.6%
+Reference policies (not unified)
+Base
+0%
+0%
+0%
+0%
+0%
+0%
+RQ-Correctness Expert
+100%
+100%
+7.7 ± 3.2%
+−8.9 ± 3.2%
+13.0 ± 0.9%
+42.4%
+RQ-Verification Expert
+79.7 ± 12.5%
+124.4 ± 9.5%
+100%
+−58.5 ± 4.4%
+−44.3 ± 2.1%
+40.3%
+RQ-Efficiency Expert
+−202.8 ± 33.7%
+−118.5 ± 20.7%
+−106.5 ± 4.9%
+100%
+100%
+-45.6%
+Conciseness Expert
+0.7 ± 12.8%
+25.3 ± 9.9%
+−47.6 ± 3.3%
+21.7 ± 2.1%
+51.2 ± 1.2%
+10.2%
+Bold and underlined entries are the best and second-best unified methods in each column; reference policies
+are excluded. LMOPD denotes routing plus priority-aware projection. Best specialist per axis: pass@1 = RQ-
+Correctness Expert (0.7515), RQ-corr = RQ-Correctness Expert (0.8117), RQ-verif = RQ-Verification Expert
+(0.7902), RQ-eff = RQ-Efficiency Expert (0.7827), and Conc = RQ-Efficiency Expert (0.8402).
+Table 3: Routing and projection ablations. Lexicographic routing has higher performance than
+random routing; matched four-expert projection shifts retention toward the top priorities.
+(a) Two experts
+Variant
+pass@1
+RQ
+Conc
+Average
+LMOPD
+102.9 ± 15.5%
+103.3 ± 5.7%
+46.9 ± 2.2%
+84.4%
+LMOPD (routing only)
+95.3 ± 12.5%
+97.3 ± 4.8%
+43.5 ± 1.8%
+78.7%
+LMOPD (random routing)
+30.4 ± 14.0%
+46.8 ± 4.2%
+72.8 ± 2.0%
+50.0%
+(b) Four experts
+Variant
+Composite pass@1
+RQ-corr
+RQ-verif
+RQ-eff
+Composite Conc
+Average
+LMOPD
+90.6 ± 15.0%
+88.6 ± 7.0%
+−6.8 ± 2.7%
+−2.4 ± 2.8%
+28.0 ± 1.1%
+39.6%
+LMOPD (routing only)
+54.0 ± 13.2%
+69.5 ± 11.1%
+−18.4 ± 2.9%
+4.3 ± 3.4%
+39.7 ± 1.0%
+29.8%
+LMOPD (random routing)
+−53.7 ± 14.2%
+−2.0 ± 13.6%
+−39.6 ± 3.6%
+53.8 ± 2.7%
+75.6 ± 1.6%
+6.8%
+Projection exposure differs sharply by setting. In the two-expert run, only 0.6% of rows carry a
+higher-priority constraint, corresponding to 0.003–0.005 constraints per token and a projected-to-
+original norm ratio of 0.9989. Projection is therefore effectively inert there, so the performance shifts
+from routing only to full LMOPD are modest relative to their uncertainty. In the four-expert run,
+projection is materially engaged: it processes 0.26 constraints per token, adds constraint forwards
+for 13.7% of rows, and yields a norm ratio of 0.91. At the matched step-80 checkpoint, projection
+shifts the retained-gain point estimates for accuracy and reasoning correctness from 54.0% to 90.6%
+and from 69.5% to 88.6%, respectively, while reducing later-axis gains.
+6
+LIMITATIONS
+LMOPD serves as a local heuristic rather than global lexicographic optimality: its function-space
+test approximates parameter-gradient compatibility, and one sweep may leave residual conflicts.
+Strict routing can starve later experts (Appendix A.4), and outcomes ultimately depend on reward
+and teacher quality. We evaluate only proprietary-model mathematical reasoning; open-weight and
+cross-domain validation remain future work. Because 30B-scale post-training is costly, multi-seed
+replication is limited to two-expert LMOPD: three 40 step runs (see Appendix C.4). The main-table
+run is the median seed by average retained gain (84.4%; the other seeds obtain 81.2% and 95.1%);
+Table 5 and fig. 2 give the complete results. Except for this replication study, reported SEs quantify
+evaluation sampling, not training-run variation.
+9
+
+
+7
+CONCLUSION
+We introduced LMOPD, which routes each rollout to the specialist for its highest-priority unmet ob-
+jective and projects that specialist’s token-level correction against earlier experts. With two experts,
+LMOPD retains specialist-level accuracy and aggregate reasoning quality while acquiring concise-
+ness; with four, it retains 90.6% of the accuracy gain and 88.6% of the gain in reasoning correctness,
+with higher point estimates than multi-objective baselines on both top priorities. Ablations show that
+deficiency-aware routing is essential and that, when materially engaged with four experts, projection
+shifts point estimates toward these priorities. Together, these results position rollout-conditioned dis-
+tillation as a practical path to integrating specialists without collapsing prioritized capabilities into a
+single global trade-off.
+AI USE STATEMENT
+In this work, we used generative AI tools for coding assistance in implementing methods, designing
+and providing feedback on methods and experiments, refining hypotheses, and supporting qualita-
+tive data analysis. We have not used generative AI tools for interpreting results, cleaning and refor-
+matting datasets, and generating synthetic datasets, developing theoretical models or frameworks,
+formulating mathematical claims, providing critical ingredients for proving mathematical claims,
+writing of proofs, translation are not applicable to this work. Additionally, we used generative AI
+tools for modifying scientific figures, editing the research paper, analyzing existing literature. We
+have reviewed all AI-assisted work. LLM-generated code, experiment feedback, and paper modifi-
+cations were verified by the main author for correctness. We take responsibility for the final content
+of this work, including text, claims or artifacts produced with the aid of generative AI.
+REPRODUCIBILITY STATEMENT
+The LMOPD routing rule is given in Eqs. 4–7 and Algorithm 1; the priority-aware target is specified
+in Eqs. 8–10, Algorithm 2, and the Gram-space implementation in Appendix B; and the distillation
+objective is specified in Eqs. 13–15. The experimental setup, baselines, and retained-gain metric
+are summarized in Section 4, with reward definitions, training schedules, batch construction, and
+evaluation details in Appendix C. The base checkpoint and training corpus used in our experiments
+are proprietary, so those exact assets cannot be released. The method itself requires only a student
+policy, white-box access to reward-specialized teacher distributions, and the stated reward functions,
+and can therefore be reproduced with open-weight models by training specialists from a common
+initialization. The paper provides implementation-level pseudocode and configuration details suffi-
+cient to reproduce the algorithm independently of the proprietary checkpoint.
+REFERENCES
+Rishabh Agarwal, Nino Vieillard, Yongchao Zhou, Piotr Stanczyk, Sabela Ramos Garea,
+Matthieu Geist, and Olivier Bachem.
+On-policy distillation of language models:
+Learn-
+ing from self-generated mistakes.
+In International Conference on Learning Representations,
+2024. URL https://proceedings.iclr.cc/paper_files/paper/2024/hash/
+5be69a584901a26c521c2b51e40a4c20-Abstract-Conference.html.
+Mislav Balunovi´c, Jasper Dekoninck, Ivo Petrov, Nikola Jovanovi´c, and Martin Vechev. MathArena:
+Evaluating LLMs on uncontaminated math competitions. arXiv preprint arXiv:2505.23281, 2025.
+URL https://arxiv.org/abs/2505.23281.
+Hunar Batra, Haoqin Tu, Hardy Chen, Yuanze Lin, Cihang Xie, and Ronald Clark.
+Spatial-
+Thinker: Reinforcing 3d reasoning in multimodal LLMs via spatial rewards, 2025.
+URL
+https://arxiv.org/abs/2511.07403.
+Yuxian Gu, Li Dong, Furu Wei, and Minlie Huang.
+MiniLLM: Knowledge distillation
+of large language models.
+In International Conference on Learning Representations,
+2024. URL https://proceedings.iclr.cc/paper_files/paper/2024/hash/
+8ac015d409635f196f9e3e9dcfb9a94e-Abstract-Conference.html.
+10
+
+
+Harvard-MIT Mathematics Tournament. February 2025 tournament archive. HMMT Archive, 2025.
+URL https://www.hmmt.org/www/archive/282.
+Geoffrey Hinton, Oriol Vinyals, and Jeff Dean. Distilling the knowledge in a neural network. arXiv
+preprint arXiv:1503.02531, 2015.
+Shih-Yang Liu, Xin Dong, Ximing Lu, Shizhe Diao, Peter Belcak, Mingjie Liu, Min-Hung Chen,
+Hongxu Yin, Yu-Chiang Frank Wang, Kwang-Ting Cheng, Yejin Choi, Jan Kautz, and Pavlo
+Molchanov. GDPO: Group reward-decoupled normalization policy optimization for multi-reward
+RL optimization, 2026a. URL https://arxiv.org/abs/2601.05242.
+Xiaojian Liu, Han Xu, Jianqiang Xia, Zhixuan Li, Ke Xu, Yiwei Dai, Xinran Chen, Changwo Wu,
+and Yuchen Li. SCOPE-RL: Optimizing reasoning paths before and after success, 2026b. URL
+https://arxiv.org/abs/2607.11506.
+Wenhan Ma, Jianyu Wei, Liang Zhao, Hailin Zhang, Bangjun Xiao, Lei Li, Qibin Yang, Bofei
+Gao, Yudong Wang, Rang Li, Jinhao Dong, Zhifang Sui, and Fuli Luo. MOPD: Multi-teacher
+on-policy distillation for capability integration in LLM post-training, 2026. URL https://
+arxiv.org/abs/2606.30406.
+Alexandre
+Ram´e,
+Guillaume
+Couairon,
+Mustafa
+Shukor,
+Corentin
+Dancette,
+Jean-
+Baptiste
+Gaya,
+Laure
+Soulier,
+and
+Matthieu
+Cord.
+Rewarded
+soups:
+Towards
+pareto-optimal
+alignment
+by
+interpolating
+weights
+fine-tuned
+on
+diverse
+rewards.
+In Advances in Neural Information Processing Systems,
+volume 36,
+2023.
+URL
+https://proceedings.neurips.cc/paper_files/paper/2023/hash/
+e12a3b98b67e8395f639fde4c2b03168-Abstract-Conference.html.
+John Schulman, Filip Wolski, Prafulla Dhariwal, Alec Radford, and Oleg Klimov. Proximal policy
+optimization algorithms. arXiv preprint arXiv:1707.06347, 2017. URL https://arxiv.
+org/abs/1707.06347.
+Zhihong Shao, Peiyi Wang, Qihao Zhu, Runxin Xu, Junxiao Song, Xiao Bi, Haowei Zhang,
+Mingchuan Zhang, Y. K. Li, Y. Wu, and Daya Guo. DeepSeekMath: Pushing the limits of math-
+ematical reasoning in open language models.
+arXiv preprint arXiv:2402.03300, 2024.
+URL
+https://arxiv.org/abs/2402.03300.
+Gemma Team, Sherif El Abd, Vaibhav Aggarwal, Robin Algayres, Alek Andreev, Olivier Bachem,
+Ian Ballantyne, Cormac Brick, Victor C˘arbune, Michelle Casbon, Mayank Chaturvedi, Aditya
+Chawla, Victor Cotruta, Alice Coucke, Phil Culliton, Robert Dadashi, Lucas Dixon, Mohamed
+Elhawaty, Utku Evci, Cl´ement Farabet, Johan Ferret, Filippo Galgani, Sertan Girgin, Jean-Bastien
+Grill, Maarten Grootendorst, Jiaxian Guo, Cassidy Hardin, Yanzhang He, Steven M. Hernandez,
+Omri Homburger, L´eonard Hussenot, Juyeong Ji, Armand Joulin, Aishwarya Kamath, Parnian
+Kassraie, Olivier Lacombe, Preethi Lahoti, Ga¨el Liu, Gus Martins, Luciano Martins, Tatiana
+Matejovicova, Ramona Merhej, Nikola Momchev, Sneha Mondal, Ryan Mullins, Sindhu Raghu-
+ram Panyam, Shreya Pathak, Sarah Perrin, Andr´e Susano Pinto, Etienne Pot, Ang´eline Pouget,
+Alexandre Ram´e, Sabela Ramos, Douglas Reid, David Rim, Morgane Rivi`ere, Karsten Roth,
+Louis Rouillard, Omar Sanseviero, Pier Giuseppe Sessa, Shane Settle, Danila Sinopalnikov, Sara
+Smoot, Piotr Stanczyk, Andreas Steiner, Lawrence Stewart, Ilya Tolstikhin, Michael Tschannen,
+Anton Tsitsulin, Nino Vieillard, Renjie Wu, Pingmei Xu, Haichuan Yang, Edouard Yvinec, Biao
+Zhang, Li Zhang, Joe Zou, Nicolas Aagnes, Abdelrahman Abdelhamed, Jakub Adamek, Shivani
+Agrawal, Shubham Agrawal, Ibrahim Alabdulmohsin, Jean Baptiste Alayrac, Uri Alon, Chan-
+dramouli Amarnath, Ankesh Anand, Chrysovalantis Anastasiou, Setareh Ariafar, Franc¸ois-Xavier
+Aubet, Kyriakos Axiotis, Federico Barbero, Joelle Barral, Alexei Bendebury, Urs Bergmann,
+Stanley Bileschi, Kat Black, Mathieu Blondel, Sebastian Borgeaud, Arthur Braˇzinskas, Ryan Bur-
+nell, Robert Busa-Fekete, Mu Cai, Daniele Calandriello, Glenn Cameron, Charlotte Caucheteux,
+Rahma Chaabouni, Garima Chadha, Jetha Chan, Blake Jianhang Chen, Jesse Chen, Lin Chen,
+Xu Chen, Derek Cheng, Tzu hsiang Chien, Nikolai Chinaev, Yi Chou, Zhaohui Chu, Benjamin
+Coleman, Pooja Consul, Sam Conway-Rahman, Scott Crowell, Dylan Cutler, Vivek Dani, Samira
+Daruki, Anil Das, Daniel Deutsch, Nishanth Dikkala, Li Ding, Qiuhan Ding, Shenil Dodhia,
+Konstantin Donhauser, Tulsee Doshi, Anca Dragan, Alex Druinsky, Sahil Dua, Zoltan Egyed,
+Danielle Eisenbud, Daniel Eppens, Cindy Fan, Bahare Fatemi, Yassir Fathullah, Vlad Feinberg,
+11
+
+
+Milen Ferev, Sebastian Flennerhag, Takumi Fujimoto, Jo˜ao Gabriel Oliveira, Isaac Galatzer-
+Levy, Jo˜ao Gante, Simon Geisler, Soham Ghosal, Antonious M. Girgis, Tamara von Glehn,
+Alec Go, Alhaad Gokhale, Alex Grills, Yiming Gu, Mayank Gupta, Pramod Gupta, Guru Gu-
+ruganesh, Raia Hadsell, Hamza Harkous, Jitendra Harlalka, Demis Hassabis, Anja Hauth, Joe
+Heyward, Arian Hosseini, Chih-Yang Hsia, I-Hung Hsu, Xiaopeng Huang, Yangsibo Huang,
+Kevin Hui, Adrian Hutter, Te I, Fotis Iliopoulos, Advait Jain, Ganesh Jawahar, Ziwei Ji, Qilin
+Jin, Melvin Johnson, Kandarp Joshi, Arun Kandoor, Wang-Cheng Kang, Koray Kavukcuoglu,
+Mehran Kazemi, Kathleen Kenealy, Amr Khalifa, Phoebe Kirk, Ivan Korotkov, Suraj Kothawade,
+Vitaly Kovalev, Neel Kovelamudi, Adam Kraft, Ravin Kumar, Vivek Kumar, Harish Kuppam,
+Justin Lannin, Chen-Yu Lee, Seungji Lee, Dmitry Lepikhin, Alon Levkovitch, Dongdong Li, Qi-
+ujia Li, Valentin Li´evin, Ethan Lin, Ziqian Lin, Casper Liu, Tianlin Liu, Tianqi Liu, Xin Liu,
+Ivan Lobov, Mayank Lunayach, Min Ma, Gagan Madan, Andrii Maksai, Eric Malmi, Michal
+Matuszak, Daniel McDuff, Gaurav Menghani, Maciej Mikuła, Daniil Mirylenka, Karolis Misi-
+unas, Vedant Misra, Andreea Mitran, Kareem Mohamed, Maksim Mukha, Eric Noland, James
+O’Donnell, Brendan O’Donoghue, Kate Olszewska, Bernett Orlando, Wanqiong Pan, Rina Pan-
+igrahy, Unnati Parekh, Nicolas Perez-Nieves, Chunjong Park, Eric Paskie, Liqian Peng, Bryce
+Petrini, Slav Petrov, Jonas Pfeiffer, Bilal Piot, Martyna Plomecka, Siim Poder, Octavio Ponce,
+Arijit Pramanik, David Racz, Anish Rajan, Michelle Ramanovich, Anand Rao, Marvin Ritter,
+Vitor Rodrigues, Evan Rosen, Mikołaj Rybi´nski, Noveen Sachdeva, Micha¨el E. Sander, Rohit
+Sathyanarayana, Sagar Savla, Samuel Schmidgall, Tal Schuster, George Scrivener, Benoit Seguin,
+Andrew Sellergren, Aliaksei Severyn, Izhak Shafran, Dhruv Shah, Bobak Shahriari, Yuan Shang-
+guan, Ashish Shenoy, Pradeep Shenoy, Rakesh Shivanna, Pauline Sho, Lucas Spangher, Woj-
+ciech Stokowiec, Tim Strother, Yao Su, Yinghao Sun, Mukund Sundararajan, Andrea Tacchetti,
+Mor Hazan Taege, Pouya Tafti, Jean Tarbouriech, Chetan Tekur, Shantanu Thakoor, Rahul Thapa,
+Madeleine Traverse, Lenart Treven, Tao Tu, Chien Te Tung, C¸ a˘glar ¨Unl¨u, Petar Veliˇckovi´c, Ma-
+lini Pooni Venkat, Sagar Gubbi Venkatesh, Vidya Venkiteswaran, Francesco Visin, Alex Vitvit-
+skyi, Kiran Vodrahalli, Weiyi Wang, Xin Wang, Tris Warkentin, Jan Wassenberg, John Wieting,
+Cindy Wu, Lechao Xiao, Hao Xu, Yuhui Xu, Fuzhao Xue, Arun Yadav, Jun Yan, Antoine Yang,
+Lin Yang, Ming-Hsuan Yang, Ziyu Ying, Jae Hyeon Yoo, Morteza Zadimoghaddam, Sajjad Zafar,
+Fred Zhang, Jiageng Zhang, Jianyi Zhang, Xiaofan Zhang, Chao Zhao, David Zhou, and Chen
+Zou. Gemma 4 technical report, 2026. URL https://arxiv.org/abs/2607.02770.
+Team Cohere. Introducing North Mini Code: Cohere’s first model for developers, June 2026. URL
+cohere.com/blog/north-mini-code.
+Alperen Tercan and Vinayak S. Prabhu. Thresholded lexicographic ordered multiobjective rein-
+forcement learning. In ECAI 2024, pp. 3006–3014, 2024. doi: 10.3233/FAIA240841.
+Wen Wang, Jiahua Bao, Yongsiqi Tu, Yihao Liu, Haotian Zhou, Haoxuan Ma, Mengyu Zhou,
+Wenkui Fan, Junwei He, Xiaoxi Jiang, and Guanjun Jiang. SMOPD: Multi-reward reinforcement
+learning via specialize-and-merge online policy distillation, 2026.
+URL https://arxiv.
+org/abs/2608.03092.
+Bangjun Xiao, Bingquan Xia, Bo Yang, Bofei Gao, Bowen Shen, Chen Zhang, Chenhong He,
+Chiheng Lou, Fuli Luo, Gang Wang, et al.
+Mimo-v2-flash technical report.
+arXiv preprint
+arXiv:2601.02780, 2026.
+Anyi Xu, Bangcai Lin, Bing Xue, Bingxuan Wang, Bingzheng Xu, Bochao Wu, Bowei Zhang,
+Chaofan Lin, Chen Dong, Chenchen Ling, et al. Deepseek-v4: Towards highly efficient million-
+token context intelligence. arXiv preprint arXiv:2606.19348, 2026.
+Bo Xue, Dake Bu, Ji Cheng, Yuanyu Wan, and Qingfu Zhang. Multi-objective linear reinforcement
+learning with lexicographic rewards. In Proceedings of the 42nd International Conference on
+Machine Learning, volume 267 of Proceedings of Machine Learning Research, pp. 70065–70085.
+PMLR, 2025. URL https://proceedings.mlr.press/v267/xue25a.html.
+An Yang, Anfeng Li, Baosong Yang, Beichen Zhang, Binyuan Hui, Bo Zheng, Bowen Yu, Chang
+Gao, Chengen Huang, Chenxu Lv, Chujie Zheng, Dayiheng Liu, Fan Zhou, Fei Huang, Feng Hu,
+Hao Ge, Haoran Wei, Huan Lin, Jialong Tang, Jian Yang, Jianhong Tu, Jianwei Zhang, Jianxin
+Yang, Jiaxi Yang, Jing Zhou, Jingren Zhou, Junyang Lin, Kai Dang, Keqin Bao, Kexin Yang,
+Le Yu, Lianghao Deng, Mei Li, Mingfeng Xue, Mingze Li, Pei Zhang, Peng Wang, Qin Zhu, Rui
+12
+
+
+Men, Ruize Gao, Shixuan Liu, Shuang Luo, Tianhao Li, Tianyi Tang, Wenbiao Yin, Xingzhang
+Ren, Xinyu Wang, Xinyu Zhang, Xuancheng Ren, Yang Fan, Yang Su, Yichang Zhang, Yinger
+Zhang, Yu Wan, Yuqiong Liu, Zekun Wang, Zeyu Cui, Zhenru Zhang, Zhipeng Zhou, and Zihan
+Qiu. Qwen3 technical report. arXiv preprint arXiv:2505.09388, 2025. URL https://arxiv.
+org/abs/2505.09388.
+Zhuolin Yang, Zihan Liu, Yang Chen, Wenliang Dai, Boxin Wang, Sheng-Chieh Lin, Chankyu
+Lee, Yangyi Chen, Dongfu Jiang, Jiafan He, et al. Nemotron-cascade 2: Post-training llms with
+cascade rl and multi-domain on-policy distillation. arXiv preprint arXiv:2603.19220, 2026.
+Tianhe Yu, Saurabh Kumar, Abhishek Gupta, Sergey Levine, Karol Hausman, and Chelsea Finn.
+Gradient surgery for multi-task learning. In Advances in Neural Information Processing Systems,
+volume 33, pp. 5824–5836, 2020. URL https://proceedings.neurips.cc/paper/
+2020/hash/3fe78a8acf5fda99de95303940a2420c-Abstract.html.
+Aohan Zeng, Xin Lv, Zhenyu Hou, Zhengxiao Du, Qinkai Zheng, Bin Chen, Da Yin, Chendi Ge,
+Chenghua Huang, Chengxing Xie, et al. Glm-5: from vibe coding to agentic engineering. arXiv
+preprint arXiv:2602.15763, 2026.
+A
+ADDITIONAL METHOD DETAILS
+A.1
+ON-POLICY DISTILLATION OBJECTIVE
+At the start of an update, we freeze an anchor ¯πθ ←πθ and sample rollouts from this snapshot.
+On-policy distillation evaluates its target on prefixes produced by the student rather than on a fixed
+teacher-generated corpus (Agarwal et al., 2024). For rollout n, define
+s(n)
+t
+= (x(n), y(n)
+<t ),
+y(n) ∼¯πθ(· | x(n)).
+(12)
+Let q(n)
+t
+(· | s(n)
+t
+) be a fixed token-level target distribution. Depending on the method variant, it
+is either the routed specialist, the anchor itself, or the projected virtual teacher. We use a token-
+averaged reverse-KL distillation loss
+L(n)
+KD = 1
+Tn
+Tn
+X
+t=1
+DKL
+
+πθ(· | s(n)
+t
+) ∥q(n)
+t
+(· | s(n)
+t
+)
+
+.
+(13)
+Following our training implementation, we add a regularizing hard-label cross-entropy term on the
+student-generated trajectory,
+L(n)
+hard = −1
+Tn
+Tn
+X
+t=1
+log πθ
+
+y(n)
+t
+| s(n)
+t
+
+,
+(14)
+and optimize
+LOPD = 1
+N
+N
+X
+n=1
+
+L(n)
+KD + βhardL(n)
+hard
+
+,
+θ ←θ −η∇θLOPD.
+(15)
+We use βhard = 1 −βm∗= 0.1 for all experiments. Reverse KL is well suited to mode-seeking
+generative distillation (Gu et al., 2024); the hard-label cross-entropy term regularizes the update
+toward the sampled on-policy behavior.
+A.2
+ROUTING CONSTRAINT CONSTRUCTION
+Routing intuition.
+The priority ordering gives each objective a “first right of refusal” over the
+rollout. With correctness first, an incorrect response is always corrected by the capability expert
+and cannot be pushed toward conciseness merely because it is short. Once correctness passes, the
+next objective is allowed to inspect the rollout, and so on. Continuous objectives use group-relative
+advantage so that the method asks whether a rollout is unusually weak on that dimension compared
+with alternative completions of the same prompt. Self-distillation prevents trajectories that already
+satisfy every gate from being arbitrarily pulled toward a specialist. The resulting update is still dense
+at the token level; only the identity of the teacher is selected lexicographically.
+13
+
+
+Higher-priority constraint list.
+Routing records the ordered list of distinct experts associated
+with objectives above k∗,
+C(k∗) = ordered unique (e(1), . . . , e(k∗−1)) \ {m∗}.
+(16)
+The order is the objective-priority order, not checkpoint order. Removing m∗is important when
+one expert serves multiple objectives: an expert is never projected against itself, while other distinct
+experts attached to earlier objectives remain constraints, including experts that occur between two
+objectives served by m∗.
+Algorithm 1 Lexicographic rollout routing
+Require: Rollout (xb, yb,g); gates g1, . . . , gK; reward-to-expert map e
+1: C ←()
+▷ordered list of passed experts
+2: for i = 1, . . . , K do
+3:
+if gi(xb, yb,g) = 1 then
+4:
+m∗←e(i)
+5:
+Remove m∗from C if present
+6:
+return (m∗, C)
+7:
+end if
+8:
+if e(i) /∈C then
+9:
+Append e(i) to C
+10:
+end if
+11: end for
+12: return (∅, ())
+▷all gates pass: self-distill
+A.3
+PROJECTION DERIVATION AND ALGORITHM
+Parameter-gradient motivation.
+Let zθ,t be the student logits at prefix st, pθ,t = softmax(zθ,t),
+and Jt = ∂zθ,t/∂θ. At the frozen anchor, define the categorical Fisher matrix
+F0,t = diag(p0,t) −p0,tp⊤
+0,t.
+(17)
+For a detached virtual-teacher target qm,t = softmax(log p0,t + τdm,t), the teacher-dependent
+reverse-KL descent direction at the anchor is
+gKD
+m,t := −∇θDKL(pθ,t ∥qm,t)|θ=¯θ = τJ⊤
+t F0,tdm,t.
+(18)
+Consequently, exact token-local compatibility between two such KD components is
+
+gKD
+m,t, gKD
+j,t
+
+= τ 2d⊤
+m,tMtdj,t,
+Mt = F0,tJtJ⊤
+t F0,t.
+(19)
+Centering does not remove the Fisher factor:
+for a p0,t-centered direction, F0,tdm,t
+=
+diag(p0,t)dm,t.
+A full trajectory-gradient comparison additionally contains cross-token blocks
+F0,tJtJ⊤
+u F0,u. The hard-label cross-entropy term is not included here because it is independent
+of teacher identity; LMOPD modifies only the teacher-dependent KD component.
+Computing the parameter directions requires an expert-specific vector–Jacobian product. LMOPD
+instead tests d⊤
+m,tdj,t, thereby replacing the complete pullback metric Mt with the identity and en-
+forcing compatibility separately at each token. It is a heuristic on centered log-policy displacements
+and does not guarantee parameter-gradient or reward-level compatibility. Because its vocabulary in-
+ner product is unweighted, low-probability and high-probability actions have equal geometric weight
+even though the exact reverse-KL direction is Fisher-weighted.
+Limiting cases.
+When C is empty and τ = 1, Eq. 10 is exactly the routing-only logit pool in
+Eq. 7; when βm∗= 1, both reduce to the routed expert distribution. Centering does not change
+this equality because it adds only an action-independent constant. Rows for which every gate passes
+retain all-zero expert coefficients, remain equal to p0,t, and never enter the projection. Consequently,
+disabling projection does not change rollout selection or the unprojected target.
+14
+
+
+Algorithm 2 Priority-aware target for one routed rollout
+Require: Frozen anchor p0; routed expert m∗; ordered constraints C = (c1, . . . , cL); coefficients
+βm∗, τ
+1: if m∗= ∅then
+2:
+return qt ←p0,t for every token t
+3: end if
+4: for completion token t = 1, . . . , T do
+5:
+Compute centered deltas e∆m∗,t and {e∆cℓ,t}L
+ℓ=1 using Eq. 8
+6:
+dt ←βm∗e∆m∗,t
+7:
+for ℓ= 1, . . . , L do
+8:
+u ←⟨dt, e∆cℓ,t⟩
+9:
+if u < 0 then
+10:
+dt ←dt −
+u
+∥e∆cℓ,t∥2
+2 + ϵ
+e∆cℓ,t
+11:
+end if
+12:
+end for
+13:
+qt ←softmax(log p0,t + τdt)
+14: end for
+15: return {qt}T
+t=1
+One sweep versus exact feasibility.
+With at most one active constraint, the update is the exact
+orthogonal projection onto the corresponding half-space, up to ϵ and numerical guards. With two or
+more non-orthogonal constraints, a later step can reintroduce a negative inner product with an earlier
+expert. Repeated sweeps converge toward the intersection of the half-spaces, but our implementation
+uses one sweep by default because most routed rows have zero or one constraint.
+Efficient implementation.
+Because the projected direction remains in the span of the expert cor-
+rections, we implement the same function-space sweep in coefficient space using streamed per-token
+M ×M Gram matrices. This avoids both vocabulary-sized correction tensors and additional student
+backward passes. Appendix B gives the algebraic construction, streaming procedure, and numerical
+safeguards.
+A.4
+ROUTING STARVATION
+An expert at position i is selected only when all higher-priority gates pass and its own gate fails.
+Abstractly,
+Pr[z = e(i)] = Pr[g1 = 0, . . . , gi−1 = 0, gi = 1] .
+(20)
+As the number of priorities grows, later experts may receive fewer rollouts, especially early in train-
+ing. This is an inherent consequence of strict routing and suggests extensions such as minimum
+routing quotas, softened priority constraints, or adaptive gate thresholds when scaling to many ob-
+jectives.
+B
+GRAM-SPACE PROJECTION IMPLEMENTATION
+The dense presentation in Section 3.4 would require a [batch, sequence, vocabulary] correction ten-
+sor. The production implementation instead observes that every projected direction remains in the
+span of the centered expert deltas. Define the per-token Gram matrix
+Gt,mj =
+D
+e∆m,t, e∆j,t
+E
+.
+(21)
+If dt = P
+m am,t e∆m,t, then
+∥dt∥2
+2 = a⊤
+t Gtat,
+D
+dt, e∆j,t
+E
+= (a⊤
+t Gt)j.
+(22)
+A projection against expert j therefore changes only its coefficient,
+aj,t ←aj,t −clip
+ (a⊤
+t Gt)j
+Gt,jj + ϵ, −cmax, cmax
+
+,
+(23)
+15
+
+
+whenever the numerator is negative and the norm guards pass.
+Because dt stays in this span, the protected target remains a linear logit pool:
+log qproj
+t
++C
+=
+ 
+1 −τ
+X
+m
+am,t
+!
+log p0,t + τ
+X
+m
+am,t log pm,t,
+(24)
+where
++C
+= denotes equality up to an action-independent constant. The existing OPD kernel can
+therefore reconstruct the target from per-token pool coefficients rather than materializing the dense
+direction.
+We compute Gt in two streamed passes over vocabulary blocks: one pass for the student and expert
+log-normalizers and one for the raw first and second moments needed to form the centered Gram
+matrix. The projection sweep itself is O(M 2) per token after this computation and stores only the
+M ×M Gram matrix, rather than a vocabulary-sized delta. Selective teacher forwarding is expanded
+from the routed expert to the union of the routed and higher-priority constraint experts for each row;
+lower-priority experts are never forwarded.
+Numerical safeguards.
+Before the sweep, the implementation normalizes at by
+p
+a⊤
+t Gtat and
+restores its original scale afterward, making guard behavior invariant to the routed coefficient’s mag-
+nitude. Reported runs use centered deltas, ϵ = 10−8, an absolute constraint-norm floor of 10−10,
+a relative floor Gt,jj ≥10−6∥dt∥2
+2, cmax = 10, and a final direction-preserving rescaling when
+∥τat∥1 > 20. These guards bound unstable coefficient representations: the per-step guards skip or
+cap unsafe corrections, while the final rescaling preserves the resulting direction.
+C
+EXPERIMENTAL DETAILS
+C.1
+TRAINING PROTOCOL
+We study LMOPD on mathematical reasoning using a proprietary internal training set. All poli-
+cies start from the same post-SFT checkpoint: a roughly 30B-parameter mixture-of-experts model
+with approximately 3B active parameters per token. The checkpoint is an internal predecessor of
+Cohere’s North Mini Code (Team Cohere, 2026). The checkpoint has completed general pretrain-
+ing and supervised post-training on multiple domains, including mathematical reasoning, code, and
+instruction following. We train and evaluate with a maximum context length of 32K tokens.
+Because LMOPD distillation dynamics differ from RLVR and with the number of experts to be
+distilled from, we run 40 training steps for all 2 expert LMOPD variants, and 80 steps for 4 expert
+LMOPD variants. Each step uses 64 prompts with 8 freshly sampled rollouts per prompt, giving
+512 fully on-policy trajectories per update. We only filter out empty responses. We use a two-
+stage learning-rate schedule: 4 × 10−6 for the first 40 steps and 4 × 10−7 thereafter. All reward-
+specialist and direct multi-reward RL runs use a common 300-step horizon and their final step-300
+checkpoints, with additional filters for zero-variance groups.
+C.2
+EVALUATION PROTOCOL
+Our final evaluation suite contains AIME 2024, AIME 2025, and HMMT February 2025. AIME
+is a standard short-answer competition benchmark used extensively in recent LLM reasoning re-
+ports, including Qwen3 (Yang et al., 2025). HMMT February 2025 provides a distinct set of recent
+competition problems from the Harvard–MIT Mathematics Tournament (Harvard-MIT Mathematics
+Tournament, 2025) and is included in the MathArena evaluation ecosystem (Balunovi´c et al., 2025).
+None of these benchmarks is used for training or checkpoint selection. We evaluate each problem
+with 50 stochastic rollouts at temperature 0.6. Repeated rollouts reduce Monte Carlo noise for each
+problem but do not create additional independent benchmark items, so uncertainty estimates and sig-
+nificance tests treat problems, rather than individual sampled completions, as the primary evaluation
+units. We note that public competition benchmarks can be vulnerable to pretraining contamination;
+MathArena reports evidence of this issue for AIME 2024 (Balunovi´c et al., 2025), motivating the
+inclusion of the more recent HMMT set and appropriately scoped claims.
+16
+
+
+Uncertainty and table conventions.
+Retained-gain SEs use the delta method for the ratio, includ-
+ing the shared-base term. In the four-expert results, the shared base has five replicates, while the
+reasoning-correctness specialist endpoint has four because one replicate lacks AIME-2024/HMMT
+judge data. We omit an SE for the macro-average because its axes are dependent. Except for the
+multi-seed experiment in Section C.4, all reported policies come from one training seed and their
+SEs reflect evaluation sampling only.
+17
+
+
+C.3
+RAW OBJECTIVE SCORES
+Table 4: Raw objective scores for the evaluated configurations and reference policies associated
+with Tables 1 and 2, including the intermediate GDPO (5, 1, 1) tuning runs. All objectives are
+composites over AIME 2024, AIME 2025, and HMMT February 2025. Entries are mean ± SEM
+over five evaluation-suite replicates. The RQ-Correctness Expert’s RQ subaxes use four replicates.
+Every Conc column reports raw Sconc. Correctness-Gated RLVR and GDPO reuse the same policy
+checkpoints in panels (a) and (b); panel (b) decomposes aggregate reasoning quality into subaxes
+only for evaluation.
+(a) Two experts
+Model
+pass@1
+RQ
+Conc
+Rewarded Soup (uniform; 1:1)
+0.7311 ± 0.0009
+0.7501 ± 0.0010
+0.8038 ± 0.0002
+Rewarded Soup (correctness-emphasized; 2:1)
+0.7349 ± 0.0013
+0.7618 ± 0.0008
+0.7973 ± 0.0003
+Correctness-Gated RLVR (1,1,1)
+0.7340 ± 0.0025
+0.7392 ± 0.0032
+0.7987 ± 0.0009
+GDPO (1,1,1)
+0.5592 ± 0.0049
+0.6397 ± 0.0016
+0.8858 ± 0.0004
+GDPO (5,1,1)
+0.6074 ± 0.0069
+0.6734 ± 0.0028
+0.8623 ± 0.0007
+GDPO (25,1,1)
+0.7004 ± 0.0044
+0.7174 ± 0.0010
+0.8104 ± 0.0009
+LMOPD
+0.7450 ± 0.0019
+0.7715 ± 0.0006
+0.7980 ± 0.0003
+Base
+0.7109 ± 0.0027
+0.7186 ± 0.0029
+0.7847 ± 0.0004
+Reasoning Quality + Correctness Expert
+0.7440 ± 0.0043
+0.7698 ± 0.0019
+0.7959 ± 0.0007
+Conciseness Expert
+0.7111 ± 0.0044
+0.7082 ± 0.0016
+0.8131 ± 0.0005
+(b) Four experts
+Model
+Composite pass@1
+RQ-corr
+RQ-verif
+RQ-eff
+Composite Conc
+Rewarded Soup (uniform; 1:1:1:1)
+0.7236 ± 0.0053
+0.7843 ± 0.0031
+0.6469 ± 0.0016
+0.6830 ± 0.0017
+0.8071 ± 0.0007
+Rewarded Soup (correctness-emphasized; 2:1:1:1)
+0.7233 ± 0.0041
+0.7910 ± 0.0052
+0.6560 ± 0.0027
+0.6698 ± 0.0011
+0.8005 ± 0.0002
+Correctness-Gated RLVR (1,1,1)
+0.7340 ± 0.0025
+0.7866 ± 0.0033
+0.6545 ± 0.0017
+0.6860 ± 0.0057
+0.7987 ± 0.0009
+GDPO (1,1,1)
+0.5592 ± 0.0049
+0.6052 ± 0.0051
+0.4237 ± 0.0005
+0.7759 ± 0.0013
+0.8858 ± 0.0004
+GDPO (5,1,1)
+0.6074 ± 0.0069
+0.6644 ± 0.0066
+0.5010 ± 0.0026
+0.7540 ± 0.0029
+0.8623 ± 0.0007
+GDPO (25,1,1)
+0.7004 ± 0.0044
+0.7583 ± 0.0026
+0.6002 ± 0.0028
+0.6932 ± 0.0026
+0.8104 ± 0.0009
+LMOPD
+0.7476 ± 0.0042
+0.8053 ± 0.0024
+0.6405 ± 0.0017
+0.6396 ± 0.0021
+0.8003 ± 0.0005
+Base
+0.7109 ± 0.0027
+0.7551 ± 0.0047
+0.6501 ± 0.0031
+0.6429 ± 0.0032
+0.7847 ± 0.0004
+RQ-Correctness Expert
+0.7515 ± 0.0048
+0.8117 ± 0.0035
+0.6609 ± 0.0035
+0.6304 ± 0.0028
+0.7919 ± 0.0003
+RQ-Verification Expert
+0.7432 ± 0.0033
+0.8255 ± 0.0030
+0.7902 ± 0.0017
+0.5612 ± 0.0032
+0.7602 ± 0.0009
+RQ-Efficiency Expert
+0.6285 ± 0.0049
+0.6881 ± 0.0036
+0.5008 ± 0.0019
+0.7827 ± 0.0026
+0.8402 ± 0.0009
+Conciseness Expert
+0.7111 ± 0.0044
+0.7694 ± 0.0043
+0.5834 ± 0.0007
+0.6732 ± 0.0015
+0.8131 ± 0.0005
+C.4
+MULTI-SEED REPLICATION
+We replicate full two-expert LMOPD (routing plus priority-aware projection) at the fixed step-40
+endpoint with three independent training seeds. All runs start from the same SFT checkpoint and
+use the same configuration; only run.seed changes, which changes RL-dataloader ordering and
+therefore the rollout and routing sequence. Each trained model is evaluated with 50 replicates of the
+AIME 2024, AIME 2025, and Feb HMMT 2025 benchmarks, identical to other runs. Every other
+reported policy uses the original seed, 13207799.
+Table 5: Three-seed replication of full two-expert LMOPD at step 40. Raw objective entries are
+mean ± SEM; RG denotes retained gain. Seed 1 is the run reported in the main tables and is the
+median seed by average retained gain. Between-seed SD measures training-run variation across the
+three trained models.
+Training seed
+Composite pass@1
+Composite RQ
+Composite Conc
+pass@1 RG
+RQ RG
+Conc RG
+Average RG
+Seed 1 (13207799; median, main-table run)
+0.7450 ± 0.0042
+0.7715 ± 0.0014
+0.7980 ± 0.0006
+102.9%
+103.3%
+46.9%
+84.4%
+Seed 2 (24681357)
+0.7405 ± 0.0032
+0.7720 ± 0.0016
+0.7989 ± 0.0002
+89.4%
+104.3%
+50.0%
+81.2%
+Seed 3 (98765431)
+0.7507 ± 0.0039
+0.7760 ± 0.0033
+0.7997 ± 0.0007
+120.2%
+112.1%
+52.8%
+95.1%
+Three-seed mean
+0.7454
+0.7732
+0.7989
+104.2%
+106.6%
+49.9%
+86.9%
+Between-seed SD
+0.0051
+0.0025
+0.0009
+15.4 pt
+4.8 pt
+3.0 pt
+–
+18
+
+
+Figure 2: Reverse-KL distillation loss for the three two-expert LMOPD training runs. Thin lines
+show per-step loss and thick lines show a five-step moving average. All three runs converge to
+similar loss values by the fixed step-40 evaluation endpoint.
+C.5
+REWARD DEFINITIONS
+We use one verifiable outcome reward, four process-quality axes, and a length-based conciseness
+reward.
+Correctness.
+RC(x, y) ∈{0, 1} indicates whether the model’s final answer exactly matches the
+gold answer after answer normalization.
+Reasoning quality.
+A frozen 31B Gemma 4 judge model (Team et al., 2026) evaluates four axes:
+reasoning correctness (whether the derivation steps are valid), verification (whether the response
+checks or validates its answer), clarity (whether the reasoning is understandable and well organized),
+and efficiency (whether the reasoning avoids unnecessary dead ends). The full prompt for the judge
+is included in section E For each axis a, the judge emits a penalty
+pa ∈{0, 0.3, 0.7, 1.0},
+Ra = 1 −pa,
+(25)
+where larger reward is better. We define aggregate reasoning quality as
+RRQ = 1
+4 (RRC + RRV + RRCl + RRE) ,
+(26)
+for reasoning correctness, verification, clarity, and efficiency, respectively.
+Conciseness.
+Let L(y) be the number of completion tokens. We first define an intrinsic concise-
+ness score
+Sconc(y) = 1 −λ
+L(y)
+KL + L(y),
+(27)
+with KL = 16,384 and λ = 0.5. This bounded penalty discourages unnecessary length without
+making long but correct solutions arbitrarily poor. All reported Conc metrics evaluate Sconc directly,
+independent of correctness. The conciseness specialist is instead trained with the correctness-gated
+reward to mitigate reward hacking:
+Rconc(x, y) = RC(x, y) Sconc(y),
+(28)
+so an incorrect short answer cannot obtain a high specialist-training reward. GDPO is the exception
+during training: its conciseness dimension is the raw Sconc score as the objective weights should
+serve to mitigate reward hacking.
+19
+
+
+C.6
+SPECIALIST TRAINING AND SELECTION
+We train candidate specialists from the same base checkpoint for 300 RL steps, separately targeting
+correctness, each of the four reasoning-quality subaxes, aggregate reasoning quality, and concise-
+ness. This specialization stage intentionally isolates objectives before any capability integration is
+attempted. We retain specialists based on their target-reward validation performance rather than
+assuming one usable expert per reward. In pilot specialist training, the specialists for aggregate rea-
+soning quality and reasoning correctness are stronger capability teachers than the binary-correctness
+specialist, consistent with the denser feedback supplied by the process reward. We therefore allow
+these experts to serve the correctness gate as well. We omit a separate clarity expert from the integra-
+tion experiments because specialist training does not provide a meaningful benchmark improvement
+on clarity over the starting model.
+C.7
+BASELINE OBJECTIVES
+GDPO.
+For each reward dimension i, GDPO independently computes a group-normalized advan-
+tage
+Ai = ri −µi
+σi + ϵ ,
+(29)
+aggregates the reward-specific advantages,
+eA =
+K
+X
+i=1
+wiAi,
+(30)
+and applies a final batch-wise normalization before the policy-gradient update. Unlike LMOPD,
+this combines all reward signals into a single policy-gradient direction. In our implementation, the
+conciseness reward dimension is raw Sconc, without a correctness gate; we evaluate equal weights
+and 5:1 and 25:1 emphases on correctness. GDPO receives the same three dimensions—RC, aggre-
+gate RRQ, and raw Sconc—in both experimental settings, so each weighting reuses the same trained
+checkpoint; the four-expert table decomposes RRQ only for evaluation.
+Correctness-Gated RLVR.
+The correctness-gated objective used in both settings is
+Rmulti(x, y) = RC(x, y) (wc + wrRRQ(x, y) + wkSconc(y))
+wc + wr + wk
+.
+(31)
+The gate prevents an incorrect response from being compensated by aggregate reasoning quality
+or conciseness scores, but lower-priority objectives are still scalarized together once correctness is
+satisfied. Because RRQ already averages reasoning correctness, verification, clarity, and efficiency,
+the same trained policy is evaluated in both experimental settings; the four-expert results report those
+subaxes separately only for diagnosis.
+20
+
+
+D
+QUALITATIVE CASE STUDY
+Problem 62.
+Rotate y
+=
+x2 −4 by 60◦counterclockwise. At its unique fourth-quadrant intersection with
+the original, write y
+=
+(a −
+√
+b)/c with a, b, c
+>
+0 and gcd(a, c)
+=
+1; find a + b + c.
+RQ + correctness expert
+Incorrect: 44
+Total: ∼20k tok.
+Conciseness expert
+Incorrect: 44
+Total: ∼18k tok.
+LMOPD
+Correct: 62
+Total: ∼15k tok.
+SETUP
+KEY STEP
+OUTCOME
+Source-point setup
+∼2k tok.
+“Given y = x2 −4. Define X = 1
+2 x−
+√
+3
+2 y,
+Y =
+√
+3
+2 x + 1
+2 y. Require: Y = X2 −4.”
+Forward source parameterization ∼8k tok.
+“Let (x′, y′) = Rθ(x, y). Then require
+y′ = (x′)2 −4 . . . given y = x2 −4.”
+Inverse equation; factor search ∼11k tok.
+“u =
+1
+2 x +
+√
+3
+2 y, v = −
+√
+3
+2 x + 1
+2 y. . . .
+impose v = u2 −4.”
+Solves for source ordinate
+∼3k tok.
+“The unique point in fourth quadrant cor-
+responds to u = (−1 +
+√
+41)/6. . . .
+y = (−3 −
+√
+41)/6.”
+Quadrant test on source
+∼1k tok.
+“x3 = (−
+√
+3 +
+√
+123)/6 . . . So [the]
+point [is] in the fourth quadrant. . . . y =
+(−3 −
+√
+41)/6.”
+Exact root + quadrant
+∼3k tok.
+“(x2 +
+√
+3x−4)(3x2 −
+√
+3x−10) = 0. . . .
+x = (
+√
+19 −
+√
+3)/2, y = (3 −
+√
+57)/2.”
+Contradiction ignored
+∼15k tok.
+“No representation with a positive integer
+exists. . . . I recall a problem where answer
+was 44. . . . Thus answer is 44.”
+Constraint ignored →44
+∼9k tok.
+“Something’s off. . . . Thus perhaps [the
+statement is] a misprint. . . . Thus answer
+likely 44.”
+Independent rotation check
+∼1k tok.
+“Thus u = −x . . . and v = y. . . . v =
+u2 −4 holds because y = x2 −4.”
+Figure 3: Contrastive trajectories on Problem 62. We deliberately select completed trajectories
+that expose distinct run-level outcomes: the Reasoning Quality + Correctness Expert performs an
+extended search and encounters evidence that its candidate answer is inconsistent, but does not re-
+vise it, leading to the wrong answer. The Conciseness Expert reaches an answer more directly, but
+an early setup error remains unchecked, leading to the same wrong answer. LMOPD abandons an
+unproductive intermediate path, recovers the correct answer, and validates it through an independent
+check. In the original ten-rollout trace sets, exact-answer counts are 4/10, 6/10, and 8/10, respec-
+tively. Ellipses and bracketed text denote omissions and light editing, respectively.
+E
+LLM JUDGE PROMPTS
+We use the following prompt to evaluate the reasoning quality of each generated response. The full
+generated response is sent afterwards as a user message.
+Reasoning Quality Judge Prompt
+You are judging the REASONING-PROCESS QUALITY of a math solution.
+You do NOT know the official gold answer. Do NOT score whether the
+final number matches gold.
+Score HOW the solution reasons: whether it derives a coherent
+finished answer, and how verified,
+clear, and efficient that reasoning is.
+The candidate solution may contain two parts:
+- [Reasoning]: internal scratch work / exploration
+- [Final answer]: the answer shown to the user
+Evaluate BOTH. A flaw anywhere counts, including in [Reasoning], even
+if [Final answer] looks clean.
+Score exactly FOUR criteria. Assign each its OWN penalty in {0.0,
+0.3, 0.7, 1.0}:
+0.0 = no flaw on this criterion
+0.3 = minor flaw
+0.7 = major flaw
+1.0 = fatal flaw
+Judge criteria independently: a failure on one must not automatically
+raise the others, and a
+21
+
+
+clean final answer must not automatically clear the style criteria.
+Split of labor (keep these boundaries sharp):
+- reasoning_correctness = derivation + answer validity (sound,
+justified, complete, supported,
+consistent, not guessed). This is NOT gold-correctness.
+- verification_self_check / conceptual_clarity /
+efficiency_conciseness = STYLE among solutions
+that already look derived. Prefer verified, early-clear,
+high-signal paths over unchecked,
+opaque, or bloated ones.
+Boundary examples:
+- Answer obtained by guessing / recall / vibes with no valid
+derivation -> reasoning_correctness
+(not efficiency).
+- Valid derivation, but via an unnecessarily long grind / abandoned
+detours -> efficiency
+(and possibly conceptual_clarity), not reasoning_correctness alone.
+- Post-answer self-check (or its absence) -> verification_self_check
+only; never "buy" a lower
+reasoning_correctness penalty with a check, and never treat a check
+as fixing an inconsistent
+or unsupported answer.
+CRITERIA
+1. reasoning_correctness
+ONE penalty for whether the solution DERIVES a coherent, finished
+answer. Cover ALL facets
+below; set the penalty to the severity of the WORST material flaw
+(do not average a fatal
+flaw down with milder ones):
+(a) Soundness - algebraic / arithmetic / symbolic / geometric /
+probabilistic / theorem steps
+correct? A wrong intermediate that propagates IS a flaw.
+(b) Justification - major claims derived, or unexplained jumps /
+miracle formulas?
+(c) Completeness - necessary cases, domains, boundaries,
+degeneracies, extraneous roots handled?
+(d) Answer support / completion - clear final answer (e.g.
+well-formed \\boxed{...} when
+required) actually supported by the preceding reasoning?
+Incomplete / non-terminating /
+stuck traces: at least 0.7. No real answer: 1.0.
+(e) Internal consistency - [Reasoning] and [Final answer] agree?
+Contradictions, or talking
+oneself into a different number after failed attempts without
+a repaired derivation: 1.0.
+Mid-trace self-corrections that ARE repaired into a consistent
+derivation do not by
+themselves force a high penalty here.
+(f) Rigor vs guessing - answer DERIVED, or guessed / recalled /
+vibes ("I recall", "plausibly",
+guess-and-check used in place of a proof)? Luck with no valid
+derivation: 0.7-1.0.
+Defaults: a clean, fully derived, internally consistent writeup is
+0.0 here even if long,
+opaque, or unverified (those costs belong on criteria 2-4). A
+confident-looking but
+inconsistent, unsupported, or guessed answer is usually 0.7-1.0
+here.
+2. verification_self_check
+22
+
+
+AFTER a candidate answer is derived, did the solution run an
+INDEPENDENT check that could have
+FALSIFIED a wrong answer? Be STRICT.
+Award 0.0 ONLY for a clearly separate post-answer check that uses
+a method DIFFERENT from the
+derivation path (second method; reverse derivation from the
+claimed answer; bound / parity /
+mod check not already implied by the derivation steps).
+Same-path rechecking is NOT independent (at least 0.3), including:
+plugging candidates back
+into the same equation/condition that produced them; re-doing the
+same arithmetic; re-deriving
+with the same method "as a check"; enumerating the same finite
+cases already counted;
+numerically approximating a sum already obtained in closed form.
+Also insufficient for 0.0 (at least 0.3 even if present):
+mid-trace self-corrections without a
+final independent check; "so the answer is N" / confidence
+language; a special case that does
+not stress the claimed general answer.
+Defaults: typical LM AIME writeup -> 0.3 unless the
+independent-check bar is clearly met; no
+check at all -> 0.7. Do not award 0.0 merely because the number
+looks confident.
+3. conceptual_clarity
+Is the KEY INSIGHT named as a strategy early and then used, or
+buried in opaque algebra / case
+soup? Be STRICT.
+Award 0.0 ONLY if, near the start (before most of the
+calculation), the solution states a short
+strategy/principle a reader could quote in 1-2 sentences, then
+executes that plan.
+At least 0.3 when: the idea is clear only after most of the grind;
+the idea is never named
+(only executed); insight appears after long exploration; or the
+"insight" merely restates the
+setup. 0.7 when the path is an opaque case/coordinate grind with
+no recoverable principle.
+Naming a principle only after long trial does NOT earn 0.0.
+Defaults: typical correct LM writeup -> 0.3 unless the
+early-named-strategy bar is clearly met.
+Do not confuse with verbosity: a short opaque grind is worse than
+a slightly longer explanation
+that leads with the idea.
+4. efficiency_conciseness
+Is the trace an efficient, high-signal path to the answer?
+Penalize:
+(a) Bloat / repetition - repeated calculations or phrases;
+re-deriving the same fact;
+redundant answer restatement / boxing padding: at least 0.3.
+Doom loops or near-duplicated
+blocks that dominate the trace: 1.0.
+(b) Path economy - brute force, exhaustive casework, or
+exploratory grind when a short
+structural argument (symmetry, invariant, closed form, clever
+substitution) would do.
+(If there is no valid derivation at all, that is
+reasoning_correctness (f), not only this.)
+(c) Claim density - throat-clearing, problem restatement, or
+non-advancing paraphrase; large
+23
+
+
+deletable stretches. Abandoned approaches more than about
+one-third of the reasoning: at
+least 0.3; majority of the trace: at least 0.7.
+Full re-derivation of the same result "as a check" costs
+efficiency here and does NOT earn
+verification_self_check = 0.0.
+Defaults: crisp, mostly load-bearing path -> 0.0; mild padding or
+mild over-casework -> 0.3;
+heavy bloat / brute force / low signal -> 0.7-1.0. Do not penalize
+length if every part does
+necessary work - penalize wasted, repeated, or structurally
+inefficient work.
+CALIBRATION
+- Use only the anchors {0.0, 0.3, 0.7, 1.0}. If you can point to a
+concrete flaw, give a nonzero
+penalty (do not be conservative).
+- If uncertain between two adjacent penalties on ANY criterion,
+choose the HIGHER one.
+- Standard correct, complete LM AIME writeup (default prior):
+reasoning_correctness = 0.0
+each of verification_self_check, conceptual_clarity,
+efficiency_conciseness = 0.3
+unless that style criterion clearly meets its 0.0 bar. Expect
+nonzero on at least TWO of the
+three style criteria. Reserve 0.0 on ALL three style criteria only
+for rare textbook traces:
+independent different-method check + early named strategy + high
+load-bearing fraction.
+- Before clearing all three style criteria to 0.0, re-check: (i) is
+the "second method" truly
+different, or just finishing/enumerating the same argument? (ii) is
+there answer-format padding,
+repeated summary, or exploratory aside? If unclear, keep at least
+0.3 on the weak style criterion.
+- Incomplete / non-terminating / doom-loop traces:
+reasoning_correctness usually 0.7-1.0, and also
+penalize verification_self_check and efficiency_conciseness.
+- Confident tone does not excuse unsupported formulas, inconsistent
+answers, or guessing.
+Return JSON ONLY, with a penalty AND a one-clause reason for every
+criterion:
+{
+"criteria": {
+"reasoning_correctness":
+{"penalty": 0.0, "reason": ""},
+"verification_self_check":
+{"penalty": 0.0, "reason": ""},
+"conceptual_clarity":
+{"penalty": 0.0, "reason": ""},
+"efficiency_conciseness":
+{"penalty": 0.0, "reason": ""}
+},
+"worst_criterion": "reasoning_correctness | verification_self_check
+| conceptual_clarity | efficiency_conciseness | none",
+"brief_reason": "One sentence naming the dominant reasoning
+weakness, or ’Clean, direct, verified solution.’"
+}
+24
