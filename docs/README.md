@@ -7,42 +7,55 @@
 
 ## 每次日报
 - 最新运行日期：2026-10-06
-- 运行时间：2026-10-06 00:48:58 UTC
+- 运行时间：2026-10-06 23:41:26 UTC
 - 运行状态：成功
-- 本次总论文数：7
-- 精读区：6
-- 速读区：1
+- 本次总论文数：12
+- 精读区：10
+- 速读区：2
 
 ### 今日简报（AI）
-今天筛读7篇，精读6篇、速读1篇，重点锁定“策略蒸馏”这条线。
-最值得看的是两篇9.0分精读：《Slow-Fast Multi-Teacher On-Policy Distillation for Capability Preservation》与《Lexicographic Multi-Objective On-Policy Distillation》，分别指向能力保持和多目标权衡；速读可补《Harness-Aware Distillation for Small Language Model Agents》。
-普通读者建议先读两篇9分精读，抓住“能力不退化”和“多目标排序”两个关键词，再按需看8分智能体蒸馏速读。
+2026-10-06 日报精选12篇、精读10篇，焦点集中在"On-Policy Distillation"这一条线上。最值得看的是两篇满分工作：《Learning to Revise Reasoning with Segment-wise On-Policy Distillation》提出分段式修正推理，以及《Gains and Collapse in On-Policy Distillation》从强化学习视角解释其收益与崩溃边界。普通读者可先读这两篇建立直觉，再用两篇速读（Off-Policy Merging 与 Harness-Aware Distillation）了解离线合并与小模型智能体的落地差异。
 - 详情：[/202610/06/README](/202610/06/README)
 
 ### 精读区论文标签
-1. [Slow-Fast Multi-Teacher On-Policy Distillation for Capability Preservation](/202610/06/2610.02324v1-slow-fast-multi-teacher-on-policy-distillation-for-capability-preservation)  
+1. [Learning to Revise Reasoning with Segment-wise On-Policy Distillation](/202610/06/2610.02703v1-learning-to-revise-reasoning-with-segment-wise-on-policy-distillation)  
+   标签：评分：10.0/10、query:policy-dist
+   evidence：用于修正大模型推理的分段式同策略蒸馏
+2. [Gains and Collapse in On-Policy Distillation:A Reinforcement Learning Perspective](/202610/06/2610.03185v1-gains-and-collapse-in-on-policy-distillationa-reinforcement-learning-perspective)  
+   标签：评分：10.0/10、query:policy-dist
+   evidence：从强化学习视角解释在线策略蒸馏的收益与崩塌
+3. [DiffGate: Difficulty-Gated Teacher Guidance for On-Policy Distillation](/202610/06/2610.04596v1-diffgate-difficulty-gated-teacher-guidance-for-on-policy-distillation)  
+   标签：评分：10.0/10、query:policy-dist
+   evidence：面向后训练在线蒸馏的难度门控教师引导，结合可验证奖励强化学习
+4. [How Should Teachers Be Prepared? RL on Student-Induced States for On-Policy Distillation](/202610/06/2610.04950v1-how-should-teachers-be-prepared-rl-on-student-induced-states-for-on-policy-distillation)  
+   标签：评分：10.0/10、query:policy-dist
+   evidence：用强化学习在学生对态上训练教师以服务在线蒸馏
+5. [Slow-Fast Multi-Teacher On-Policy Distillation for Capability Preservation](/202610/06/2610.02324v1-slow-fast-multi-teacher-on-policy-distillation-for-capability-preservation)  
    标签：评分：9.0/10、query:policy-dist
-   evidence：多教师在策略蒸馏将领域专长整合到单一学生模型
-2. [Lexicographic Multi-Objective On-Policy Distillation](/202610/06/2610.02359v1-lexicographic-multi-objective-on-policy-distillation)  
+   evidence：慢快多教师在线策略蒸馏以保持通用能力
+6. [Lexicographic Multi-Objective On-Policy Distillation](/202610/06/2610.02359v1-lexicographic-multi-objective-on-policy-distillation)  
    标签：评分：9.0/10、query:policy-dist
-   evidence：用于后训练的词典序多目标在线策略蒸馏
-3. [Latent-MOPD: Latent Multi-Teacher On-Policy Distillation](/202610/06/2610.02381v1-latent-mopd-latent-multi-teacher-on-policy-distillation)  
+   evidence：字典序多目标在线策略蒸馏
+7. [Latent-MOPD: Latent Multi-Teacher On-Policy Distillation](/202610/06/2610.02381v1-latent-mopd-latent-multi-teacher-on-policy-distillation)  
    标签：评分：9.0/10、query:policy-dist
-   evidence：首个面向大模型表示级多教师在策略蒸馏
-4. [Learning to Revise Reasoning with Segment-wise On-Policy Distillation](/202610/06/2610.02703v1-learning-to-revise-reasoning-with-segment-wise-on-policy-distillation)  
+   evidence：面向大模型的表示级多教师在线策略蒸馏
+8. [Rethinking Self-Distillation for Multi-Teacher Capability Merging](/202610/06/2610.04272v1-rethinking-self-distillation-for-multi-teacher-capability-merging)  
    标签：评分：9.0/10、query:policy-dist
-   evidence：分段式在策略蒸馏改写中间推理步骤
-5. [Gains and Collapse in On-Policy Distillation:A Reinforcement Learning Perspective](/202610/06/2610.03185v1-gains-and-collapse-in-on-policy-distillationa-reinforcement-learning-perspective)  
+   evidence：面向大模型后训练能力合并的多教师在线策略蒸馏受控研究
+9. [Learning without Overwriting: A Theory of Self-Distillation and Supervised Fine-Tuning in Continual Reasoning](/202610/06/2610.05200v1-learning-without-overwriting-a-theory-of-self-distillation-and-supervised-fine-tuning-in-continual-reasoning)  
    标签：评分：9.0/10、query:policy-dist
-   evidence：从强化学习视角解释在线策略蒸馏的收益与崩溃
-6. [ROSS: Relearning from Self-Generated Rollouts through Selective Supervision](/202610/06/2609.35954v1-ross-relearning-from-self-generated-rollouts-through-selective-supervision)  
-   标签：评分：8.0/10、query:policy-dist
-   evidence：复用RL与on-policy蒸馏后训练的自生成rollout
+   evidence：持续推理后训练中在线自蒸馏与监督微调的统一理论
+10. [Towards Unbiased On-Policy Distillation for Block Diffusion Language Models](/202610/06/2610.05373v1-towards-unbiased-on-policy-distillation-for-block-diffusion-language-models)  
+   标签：评分：9.0/10、query:policy-dist
+   evidence：面向块扩散语言模型的无偏在线策略蒸馏
 
 ### 速读区论文标签
-1. [Harness-Aware Distillation for Small Language Model Agents](/202610/06/2610.02858v1-harness-aware-distillation-for-small-language-model-agents)  
+1. [Off-Policy Merging Beats On-Policy Self-Distillation for Continual Learning](/202610/06/2610.05872v1-off-policy-merging-beats-on-policy-self-distillation-for-continual-learning)  
    标签：评分：8.0/10、query:policy-dist
-   evidence：与在线策略蒸馏互补的工具架感知智能体蒸馏
+   evidence：比较离线策略合并与在线策略自蒸馏的持续学习
+2. [Harness-Aware Distillation for Small Language Model Agents](/202610/06/2610.02858v1-harness-aware-distillation-for-small-language-model-agents)  
+   标签：评分：7.0/10、query:policy-dist
+   evidence：面向语言模型智能体、补充同策略蒸馏的框架感知蒸馏
 
 
 <div class="dpr-home-promo-card">

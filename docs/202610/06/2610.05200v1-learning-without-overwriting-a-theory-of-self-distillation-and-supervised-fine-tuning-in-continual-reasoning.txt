@@ -1,0 +1,4360 @@
+Title: Learning without Overwriting: A Theory of Self-Distillation and Supervised Fine-Tuning in Continual Reasoning
+
+URL Source: https://arxiv.org/pdf/2610.05200v1
+
+Published Time: Tue, 06 Oct 2026 01:38:32 GMT
+
+Number of Pages: 55
+
+Markdown Content:
+# Learning without Overwriting: A Theory of Self-Distillation and Supervised Fine-Tuning in Continual Reasoning 
+
+Shinichi Uemura ∗1, Taiji Suzuki †1, 2 1Department of Mathematics Informatics, The University of Tokyo 
+
+> 2
+
+Center for Advanced Intelligence Project, RIKEN, Tokyo, Japan 
+
+> ∗
+
+uemura-shinichi666@g.ecc.u-tokyo.ac.jp 
+
+> †
+
+taiji@mist.i.u-tokyo.ac.jp 
+
+Abstract 
+
+On-policy self-distillation (OPSD) of large language models (LLMs) has demonstrated the ability to improve reasoning capabilities while preserving previously acquired knowledge. Despite substantial empirical success, the dynamics of OPSD in continual reasoning remain incompletely understood. Mod-eling LLM reasoning as search over a directed acyclic graph, we provide a unified theoretical analysis of both the dynamics of post-training—OPSD and supervised fine-tuning (SFT) in continual learning—and the impact of pre-training on subsequent performance. Our findings establish three key insights with an optimization guarantee: (i) OPSD with hints from correct outputs enables continual learning without for-getting by sparse yet effective gradient descent updates induced by the hint structure. (ii) SFT on correct reasoning paths can lead to catastrophic forgetting due to dense updates along the training paths, which overwrite the information previously acquired. (iii) Diversity in pre-training is crucial for enabling a post-trained model to reach a correct output when a rollout starts from an intermediate state. Our results, supported by theoretical analysis, show that reliable continual reasoning depends on how post-training updates interact with the reasoning structure established during pre-training. 
+
+# 1 Introduction 
+
+Post-training has substantially improved the task-solving capabilities of large language models through su-pervised fine-tuning (Chung et al., 2022; Luo et al., 2025; Zhang et al., 2024) and reinforcement fine-tuning (Guo et al., 2025; Jin et al., 2025; Zeng et al., 2025). A central distinction between common implementa-tions lies in the source of training trajectories: off-policy SFT learns from fixed demonstrations (Zhao et al., 2023; Zhang et al., 2023), whereas on-policy reinforcement learning (RL) uses reward feedback on trajec-tories sampled from the current model (Wang et al., 2023d; Zhao et al., 2026a). In the latter, the generation distribution determines which experiences are encountered during training, while itself evolving through subsequent updates (Kaufmann et al., 2025; Li et al., 2026). The distribution inherited from pre-training therefore influences which reasoning paths are sampled: even models with the same initial task accuracy can distribute probability differently across paths and risk missing some useful reasoning steps. Using a Marko-vian model of reasoning, Bu et al. (2025) showed that RL fine-tuning can favor high-probability paths while suppressing rare but useful ones. For SFT, preserving existing capabilities is a central challenge: sequential fine-tuning can cause catastrophic forgetting of earlier tasks and degrade general capabilities (Wang et al., 2023b; Li et al., 2024). Efforts to mitigate this problem include learning successive tasks in orthogonal 1arXiv:2610.05200v1 [cs.LG] 4 Oct 2026 low-rank subspaces (Wang et al., 2023a) and applying sharpness-aware minimization to favor flatter loss landscapes (Li et al., 2024). Furthermore, in code instruction tuning, Biderman et al. (2024) reported both reduced forgetting and better preservation of output diversity with LoRA than with full fine-tuning. Self-distillation (SD) has also been explored as a means of learning new tasks while preserving previously acquired capabilities. In recent on-policy variants, the student generates a trajectory, and the same model— conditioned on an expert demonstration or informative feedback unavailable to the deployed student—acts as a teacher. By deriving supervision from the model’s own behavior, self-distillation can reduce forgetting during adaptation (Yang et al., 2024; Shenfeld et al., 2026a). They also provide token-level supervision on student rollouts, with reported improvements in reasoning accuracy over off-policy SFT and training efficiency over GRPO (Hübotter et al., 2026; Zhao et al., 2026b). These methods leverage the pre-trained model’s in-context learning abilities (Shenfeld et al., 2026a; Hübotter et al., 2026), although SD can under-perform RL in some settings (Yang et al., 2026; Kim et al., 2026). Their reliance on student trajectories also makes the diversity of the pre-trained policy relevant to learning. Despite empirical successes, the dynamics of SD and their dependence on the pre-trained policy remain only partially understood. Wang et al. (2026a), the general analysis of self-improvement, established high-probability guarantees for true-risk improvement and finite-sample generalization under self-modification. Existing analyses for self-distillation characterize specific aspects of post-training. Using a Gaussian mix-ture model, Balasubramanian and Kasiviswanathan (2026) showed that SFT on new-task data alone drives the mixture weight associated with previously learned behavior to zero. For autoregressive models, Sang et al. (2026) bounded policy drift within each fixed-teacher window in terms of the distillation loss and the shift induced by a conciseness instruction. However, these analyses directly assume the teacher distribu-tion rather than derive it from hint information. They consequently leave unresolved how hints—unique to self-distillation—shape learning dynamics, which is more difficult because hint-based analysis requires ob-servations of the teacher behavior and its effect on the evolving student policy through multi-step reasoning. Our objective is, therefore, to explain the difference in forgetting between on-policy SD and off-policy SFT, while considering their ability to learn new tasks. We model Chain-of-Thought (CoT) reasoning as a prob-lem of reaching a task-specific goal in a DAG. This model links the sparsity of hint information to localized updates and retention, and provides a quantitative comparison with SFT. We evaluate this comparison nu-merically in Section 4. Although existing studies suggest that pre-training is important for the successful SD, there are few theoretical analyses on its role in on-policy SD. Hence, as a complementary theoretical discussion, we examine in Section 3.3 how limited diversity in the pre-training can leave relevant transitions unlearned and thereby impair reasoning from intermediate states. 
+
+Summary of contributions Our contributions are summarized as follows: • We model the continual learning scenario in Section 2 with a graph-based approach, which is often used to explain LLM reasoning process such as CoT reasoning (Abbe et al. (2024); Yang et al. (2025); Kim et al. (2025)). In particular, we introduce a path-conflict setting to analyze the interference between tasks. • We prove the learnability of a single task under both SD and SFT in Section 3.1 (Theorems 1 and 2, respectively). Notably, Lemma 4 in Appendix B.2 shows that SD with a hint in Equation 9 can realize a sparse update that preserves the performance of the pre-trained model. Furthermore, we show that SD can learn new tasks while preserving previously acquired capabilities, whereas SFT can forget them in Theorem 3 and Theorem 4. These results are aligned with the empirical findings of Shenfeld et al. (2026a). 2• We conduct numerical experiments in Section 4 to support our theoretical bounds. The results confirm that tracing the hint-based sparse updates of SD and the overwriting properties of SFT is helpful to explain the observed learning dynamics. • As a complementary theoretical analysis, we study the effect of pre-training diversity on reasoning from intermediate states in Section 3.3 (Proposition 1). We show that limited coverage in the pre-trained policy can leave relevant transitions unlearned even after SD succeeds from the original start. These results explain how the sparsity of hint information translates into localized updates and retention in continual reasoning. The complementary pre-training analysis gives a theoretical implication for reasoning from intermediate states. 
+
+1.1 Related work 
+
+In the following, we briefly discuss related work on self-distillation and diversity in LLM reasoning. Addi-tional related work is discussed in Appendix A. 
+
+Self-distillation for LLMs. Recent methods differ in the information supplied to the self-teacher. Shen-feld et al. (2026a) introduced SDFT, conditioning the teacher on pre-existing expert demonstrations to su-pervise student-generated trajectories. Their experiments demonstrated new-task acquisition with reduced forgetting relative to SFT. Hübotter et al. (2026) instead conditioned the SDPO teacher on feedback ob-tained after evaluating the student’s own attempts, such as execution errors, improving reasoning accuracy and training efficiency. Zhao et al. (2026b) proposed OPSD, providing the teacher with reference answers or verified reasoning traces, and demonstrated improved mathematical reasoning with greater token effi-ciency than GRPO. Ye et al. (2026) introduced OPCD, including a self-distillation setting, using knowledge extracted from past solution traces or optimized system prompts as teacher context. Despite substantial empirical evidence, the learning dynamics of SD remain theoretically underexplored. 
+
+Diversity in LLM reasoning. Wang et al. (2023c) demonstrated that aggregating answers across diverse reasoning paths improves reasoning accuracy with numerical experiments. Yao et al. (2025) proposed diversity-aware policy optimization, which promotes token-level diversity selectively on correct responses. Their experiments showed improvements in both solution diversity and performance on mathematical rea-soning benchmarks. Using a Markovian model, Bu et al. (2025) theoretically showed that post-training can suppress rare but useful reasoning paths and emphasize the role of exploration in preserving rare but useful reasoning paths already present in the pre-trained model. 
+
+# 2 Problem Setup 
+
+2.1 Continual learning on CoT graph 
+
+Following the reasoning-graph construction of Kim et al. (2025), we model the LLM chain-of-thought process as Markov transitions on a directed acyclic graph ( DAG ). Let the LLM CoT graph be G = ( V, E ),where V is the node set and E is the directed edge set. A model receives input x ∈ Rd and generates a CoT sequence y = ( y0, . . . , y t, . . . , y T ), where yt ∈ V , (yt, y t+1 ) ∈ E, and T denotes a rollout-dependent termination time. Note that y is node-simple since the graph is acyclic. We consider a correspondence 3✔ Correct terminal   
+
+> ✘Incorrect terminal
+> Interior node
+> Valid boundary
+> Invalid boundary
+> Intra-cluster
+> Correct
+> Inter-cluster
+> Incorrect
+> Inter-cluster
+> Start:
+
+y0Figure 1: Example of the CoT graph we considered in Section 2. Each node represents a reasoning state, and edges correspond to reasoning transitions. Black edges indicate easy intra-cluster transitions, while red and green ones mean difficult inter-cluster transitions. The goal of training is to improve difficult transitions and to reach the correct terminal. Therefore, the model is required to learn the inter-cluster transitions while preserving the diversity within clusters. between these states and the graph nodes; that is, each node in the graph is regarded as a reasoning state yt
+
+like a logical sentence or a mathematical expression rather than a simple token. Thus, the prediction goal is to reach a proper node or cluster through logical reasoning transitions. The graph G consists of K clusters denoted by C1 . . . C K , and it is free from multiple edges. A cluster is a set of similar reasoning states like equivalent reformulations obtained by straightforward manipulation. Hence, we consider the inter-cluster edges represent the essential and conceptual transitions, while intra-cluster edges are something trivial. For every node u ∈ Ck and every cluster Ck′ with k′̸ = k, there is at most one node v ∈ Ck′ such that (u, v ) ∈ E.We separate the cluster nodes in Ck into two types: one is the interior nodes denoted by ˚Ck, and the other is the boundary nodes denoted by ∂C k
+
+˚Ck := {u ∈ Ck : ∀v ∈ V, (u, v ) ∈ E ⇒ v ∈ Ck}, ∂C k := Ck\˚Ck. (1) For preserving the inner-cluster transition diversity, we assume that all destinations of inter-cluster edges are interior nodes. 
+
+Continual learning. We study continual learning of L tasks D1, . . . , DL. The task Dℓ consists of a fixed input xℓ ∈ { 0, 1}d, a fixed CoT startpoint yℓ, 0 ∈ ˚Ckℓ , and a task-specific correct terminal cluster ˜Cℓ ∈{C1, . . . , C K }. We assume that ˜Cℓ has no outgoing inter-cluster transitions. Furthermore, we assume that the tasks can be separated. More precisely, the matrix (x1, . . . , x L) is column full rank and the clusters 
+
+˜C1, . . . , ˜CL are disjoint. A rollout for task Dℓ is defined to be correct if and only if yT ∈ ˜Cℓ. 1 Then, we consider the following assumption. 
+
+Assumption 1 (transition uniqueness and competition between tasks) . Each boundary node has at most one correct cluster transition for each task. Whenever such a transition exists for multiple tasks at the same boundary node, it is identical across any tasks that are not orthogonal in the input. Hence, competition between tasks can arise only through trivial interior transitions. 
+
+> 1We focus on reaching the terminal cluster. For the subsequent search for a particular target node within it, Kim et al. (2025, Lemma B.9) provide hitting-time bounds under additional assumptions on within-cluster mixing and stationary probabilities.
+
+4This assumption is strong, but seems reasonable since similar tasks share underlying reasoning properties, which we model as common inter-cluster transitions. Pℓ is the set of correct paths for task Dℓ, and Eℓ is the union of the inter-cluster transitions appearing in those correct paths. In learning, the model is trained sequentially on the tasks D1, . . . , DL.
+
+2.2 Pre-training and fine-tuning 
+
+Pre-training requirements For each task Dℓ and cluster Ck, define the set of boundary nodes that admit a correct inter-cluster transition by 
+
+∂⋆ℓ Ck = {u ∈ ∂C k | ∃ v ∈ V \Ck, (u, v ) ∈ Eℓ} . (2) Then, we further define M = max k,ℓ |∂⋆ℓ Ck|. We call the initial node or an entry through a valid inter-cluster transition a relevant start s in Ck. For a rollout initialized at Y0 = s under task input xℓ, define 
+
+τ sℓ,k := inf {t ≥ 0 : Yt ∈ ∂C k}, U sℓ,k := Yτ sℓ,k .
+
+Thus U sℓ,k is the first boundary node reached after the rollout starts from the relevant start s. For the model, we consider a softmax predictor: 
+
+πW(· | u, x ) = softmax (x⊤Weu, ·), W ∈ Rd×| E|, (3) where eu, · is the embedded concatenation matrix of one-hot vectors eu,v for all v s.t. (u, v ) ∈ E. The following assumption specifies the required properties of the pre-trained parameter W(0) .
+
+Assumption 2 (Pre-trained diversity) . For every task Dℓ and non-terminal cluster Ck satisfying ∂⋆ℓ Ck̸ = ∅,the first boundary-hitting time after every relevant start s in Ck is almost surely finite. Uniformly over all such s, the pretrained model satisfies 
+
+PW (0) 
+
+ U sℓ,k /∈ ∂⋆ℓ Ck | Y0 = s, x ℓ
+
+ = O(ϵ1), (4) 
+
+PW (0) 
+
+ U sℓ,k = u | Y0 = s, x ℓ
+
+ = Ω(1 /M ), (5) 
+
+for every u ∈ ∂⋆ℓ Ck. Moreover, πW (0) (v | u, x ℓ) = Θ( ϵ2) for every inter-cluster edge (u, v ) and every task input xℓ. ϵ1 and ϵ2 are supposed to be sufficiently small; at least, they satisfy KM ϵ 1 = o(1) and 
+
+M ϵ 2 = o(1) .
+
+The diversity conditions state that (i) the pre-trained model reaches valid boundaries with high probabil-ity, and (ii) every inter-cluster transition initially has small but nonzero probability. In other words, these assumptions suggest that the trivial reasoning steps are sufficiently acquired, but essential transitions are difficult and the model is required further training to learn. Appendix B.1 constructs a finite pre-trained parameter satisfying every condition of Assumption 2 on a family of layered DAGs. 
+
+Fine-tuning settings We use SD and SFT as on- and off-policy fine-tuning methods respectively. The detailed algorithms are described in Algorithm 1. For each task Dℓ, a teacher-forcing path y∗ = ( y∗ 
+
+> 0
+
+, . . . , y ∗ 
+
+> T
+
+)
+
+and a hint c are constructed by sampling 
+
+γ ∼ Unif( Pℓ). (6) 5Across training iterations and across elements within each mini-batch, the teacher paths are sampled inde-pendently according to Equation 6, conditional on the preceding training history. Note that for SD, con-ditional on the same history, each teacher path used to construct the hint and its corresponding unhinted student rollout are sampled independently. We define the teacher path to be y∗ = γ, and the hint c repre-sents all cluster transitions in γ; that is, the hint is c = {ci}Ii=1 , where ci = {(ui, v i) is traversed. }. This hint construction reflects the human instruction that ignores trivial transitions and emphasizes the essential rea-soning steps. At each Dℓ training iteration, the model receives a minibatch of {xℓ, c (b)}Bb=1 or {xℓ, y ∗(b)}Bb=1 
+
+for SD or SFT respectively, and updates the parameter W by minimizing the loss function. Note that such an external hint is consistent with Shenfeld et al. (2026a) and Liu et al. (2026). Since SD uses only hints about specific transitions rather than the more informative full paths used in SFT, pre-training is crucial for its success. We use the same uniform distribution for SD and SFT to compare their performance under a common source of supervision without favoring any correct path. Batch size B is fixed for all tasks and iterations. The mini-batch loss functions for SD and SFT are defined as follows respectively: 
+
+LSD (W; Dℓ) = 1
+
+B
+
+> B
+
+X 
+
+> b=1
+> T(b)−1
+
+X
+
+> t=0
+
+DKL 
+
+
+
+πW(· | y(b) 
+
+> t
+
+, x ℓ) ∥ SG (πW(· | y(b) 
+
+> t
+
+, x ℓ, c (b))) 
+
+
+
+, (7) 
+
+LSFT (W; Dℓ) = − 1
+
+B
+
+> B
+
+X 
+
+> b=1
+> T(b)−1
+
+X
+
+> t=0
+
+log πW(y∗(b) 
+
+> t+1
+
+| y∗(b) 
+
+> t
+
+, x ℓ), (8) where SG denotes stop-gradient. The SD loss sums the per-state KL divergences along each student rollout and averages these sums over the B mini-batch elements, without normalizing by rollout length. Both SD and SFT update the parameters using SGD as W(n+1) → W(n) − ηj ∇WLmethod (W(n); Dℓ), where 
+
+method ∈ { SD, SFT } denotes the corresponding training method. 
+
+# 3 Main results 
+
+If the hint c strictly indicates that the model should follow all cluster shift (ui, v i) in γ, then the teacher support would be strictly subset of the student one, and the KL divergence would diverge. Avoiding this divergence, fix a smoothing parameter ϵrel ∈ (0 , 1) and use a relaxed hint c:
+
+χW(ci | y0: T , x ) ∝
+
+
+
+1 (τi < T, y τi+1 = vi),ϵrel (τi < T, y τi+1 ̸ = vi),ZW,i (x) (τi ≥ T ),
+
+(9) where τi = inf {s ∈ { 0, . . . , T } | ys = ui}, with the convention inf ∅ = ∞, and ZW,i (x) = πW(vi |
+
+ui, x ) + ϵrel (1 − πW(vi | ui, x )) . χW is a likelihood factor for the relaxed hint ci, and ZW,i (x) is equivalent to the expected local feedback before the transition from ui is observed. When ui is not visited, using this expected value as feedback allows us to leave the corresponding transition parameters unchanged, since the current student provides no information about transition out of ui. This edge-level feedback enables the sparse activation, which identifies where mistakes happen and adjusts to the student’s response distribution (Hübotter et al. (2026)). From (9), the teacher distribution is determined by Bayes’ rule: 
+
+πW(y0: T | c, x ) ∝ πW(y0: T | x) · χW(c | y0: T , x ). (10) The step-level teacher distribution πW(yt+1 | yt, c, x ) is derived in Appendix B.2. 6Sparse structure learning. We believe that hint-induced sparse learning mitigates catastrophic forgetting. Indeed, as shown in Lemma 4 in Appendix B.2, the hint in Equation 9 yields a gradient that updates only the parameters associated with outgoing edges from the hint-source nodes. Consequently, SD preserves the interior transition diversity, which is crucial for continual learning, whereas SFT updates the parameters at all source nodes along the teacher path. 
+
+3.1 Single-task learnability 
+
+SD as on-policy training Before analyzing the continual learning performance, we first consider their ability to learn a single task. Theorems 1 and 2 suggest that SD and SFT are both effective for solving one task. It is important to note that there is little difference between the two methods in learning a single task. 
+
+Theorem 1 (Single-task learning under SD) . Fix a task Dℓ and let the stepsize ηj = Θ( j−ν ) for some 
+
+ν ∈ [0 , 1/2) . Suppose Assumptions 1 and 2 hold and ϵ1 is sufficiently small. Define 
+
+ξ(K) 
+
+> ℓ,n
+
+(δ) := 
+
+ϵ2 + ϵ22
+
+
+
+log 1
+
+ϵrel 
+
+ "
+
+e−Θ( K log 1 
+
+> ϵ2)
+
+n1−ν
+
+M K |P ℓ| −
+
+r log( KM/δ )
+
+B n1/2−ν
+
+#+
+
+> −1
+
+. (11) 
+
+Then, with probability at least 1 − δ,
+
+πW(n)
+
+
+
+yT ∈ ˜Cℓ | yℓ, 0, x ℓ
+
+
+
+≥ 1 − O(KM ϵ 1) − O
+
+
+
+KM ξ (K) 
+
+> ℓ,n
+
+(δ)
+
+
+
+. (12) Theorem 1 says that SD can learn a single task with a success probability of 1 − O(KM ϵ 1). The error term arises from visits to invalid boundaries, and in this setting, we reduce this error by assuming ϵ1 is suffi-ciently small. The error O(KM ϵ 1) reflects a trade-off between single-task accuracy and the ability to retain previously acquired knowledge during continual learning. Preserving the student’s pre-trained diversity also leaves some of its initial errors intact. On the other hand, this term might be improved by providing hints that discourage the model from proceeding in an incorrect direction. Indeed, Zhu et al. (2025) show that penaliz-ing incorrect responses alone can improve reasoning performance, and their gradient analysis indicates that these updates suppress incorrect generations and redistribute probability mass toward plausible alternatives favored by the model’s prior. During inference, Yao et al. (2023) use negative evaluations of intermediate reasoning states to prune unpromising branches in Tree of Thoughts, with ablation results showing that re-moving this pruning degrades search performance. Theorem 1 further implies that the strength of the hint controls the convergence rate of the student success probability. In fact, decreasing ϵrel reduces the bound in Equation 11 without increasing the number of iterations n. Thus, the theorem effectively captures how hint strength affects self-distillation dynamics. 
+
+SFT as off-policy learning Theorem 2 is a counterpart of Theorem 1 for SFT. SFT also learns a single task with high probability, and updates the parameters at all source nodes along the teacher. It is a main difference from SD, which only focuses on the source nodes related to the hint. 
+
+Theorem 2 (Single-task learning under SFT) . Fix δ ∈ (0 , 1) . Suppose the stepsize ηj = Θ( j−ν ) for some 
+
+ν ∈ (0 , 1/2) and W(0) SFT = W(0) . Then, with probability at least 1 − δ,
+
+min 
+
+> u∈U ℓ
+
+πW(n)SFT 
+
+(Aℓ(u) | u, x ℓ) ≥ 1 − ˜O
+
+
+
+|P ℓ|
+
+ 1
+
+n1−ν + log( e/δ )
+
+Bn ν
+
+ 
+
+. (13) 
+
+Here Uℓ is the set of nodes appearing in the correct paths except for the terminal, and Aℓ(u) is the set of their correct successors from u. ˜O(·) hides logarithmic factors in n and |P ℓ|.
+
+7Sketch of Proof. Note that the optimal parameter Wopt is not finite because a softmax predictor with a finite parameter cannot assign probability one to any outcome. Thus, we analyze the convergence in two steps: (1) Set parameter WR → Wopt (R → ∞ ), and use it as a reference. (2) Construct the potential function to measure the difference between the current parameter, the reference parameter and the optimal one. A detailed analysis is provided in Appendix B.5. Theorem 2 shows that SFT learns to select correct successors from states on correct paths. Whereas SD carries over some of the pre-trained model’s routing errors, Theorem 2 shows that SFT can learn to generate correct paths with probability approaching one. This difference reflects the scope of the updates. SFT supervises all transitions along the teacher paths, including intra-cluster transitions, and can therefore correct the pre-trained routing errors reflected in the residual term of the SD lower bound. In the next section, we use this overwriting property to explain why SFT can forget previously learned tasks. 
+
+3.2 Continual learning and catastrophic forgetting 
+
+Sustainability of SD In this section, we study the continual learning performance of SD and SFT. A key feature of SD in our framework is that hints localize parameter updates to a small subset of graph nodes while SFT fails and overwrites the parameters of the student model. Intuitively, such localized updates may help preserve existing knowledge and mitigate catastrophic forgetting. Relatedly, Wang et al. (2026b) suggest that self-distillation can mitigate knowledge forgetting by selectively encouraging exploration at reasoning tokens while maintaining stable targets for factual tokens. The following theorem supports our intuition. 
+
+Theorem 3 (No forgetting under SD) . Let W[s]SD denote the parameter after sequentially training D1, . . . , Ds
+
+by SD. Fix ℓ ∈ { 1, . . . , L }, and let nℓ be the number of SD updates used for Dℓ. Suppose Assumptions 1 and 2 hold for all tasks, and the stepsize ηj = Θ( j−ν ) for some ν ∈ [0 , 1/2) . Then, after any numbers of subsequent SD updates on Dℓ+1 , . . . , DL, with probability at least 1 − δ,
+
+πW[L]SD 
+
+
+
+yT ∈ ˜Cℓ | yℓ, 0, x ℓ
+
+
+
+≥ 1 − O(KM ϵ 1) − O
+
+
+
+KM ξ (K) 
+
+> ℓ,n ℓ
+
+(δ)
+
+
+
+. (14) 
+
+Moreover, every correct transition learned for task Dℓ satisfies 
+
+πW[L]SD 
+
+(v | u, x ℓ) ≥ πW[ℓ]SD 
+
+(v | u, x ℓ), (u, v ) ∈ Eℓ. (15) Theorem 3 shows that, after learning task Dℓ, the student can continue learning subsequent tasks through self-distillation while retaining its ability to generate correct rollouts from yℓ, 0 (Equations 14 and 15). Equa-tion 15 also shows that the probability of correct inter-cluster transitions may even increase by subsequent tasks when the tasks share the same correct inter-cluster transitions because the hints associated with these transitions are sampled as well during training on subsequent tasks. 
+
+Forgetting in SFT SFT, on the other hand, is a learning system that forces the student to follow the teacher path, which is a relatively dense graph structure. Therefore, if any path conflict exists between tasks, the student rollout is likely to follow new task paths and forget the old ones. We consider this overwriting is precisely what causes catastrophic forgetting. For the SFT comparison, fix two tasks Dold and Dnew learned in this order. Let W(0) new be the parameter immediately after learning Dold , and let W(n)new be the parameter after n subsequent SFT updates on Dnew . Let θ ∈ [0 , 1] denote the fraction of old correct paths that conflict with the new task. Formal definitions are deferred to Appendix B.7. 8Theorem 4 (Catastrophic forgetting under SFT) . Fix δ ∈ (0 , 1) and set λ := ⟨xold ,x new ⟩∥xnew ∥22
+
+> 0. Suppose 
+
+ηj = Θ( j−ν ) for some ν ∈ (0 , 1/2) . Then, for arbitrary pre-new-task old-path masses, with probability at least 1 − δ,
+
+Π( W(n)new ) ≤ Cold (1 − θ)
+
+| {z }
+
+> upper bound on surviving knowledge
+
++ eO θ|P old ||P new |λ
+
+ 1 + B−1 log(1 /δ )
+
+nν
+
+λ!
+
+, (16) 
+
+Π( W(0) new ) − Cold (θ) ≤ Π( W(n)new ), (17) 
+
+where Π( W) = πW(YT ∈ ˜Cold | Y0 = yold ,0, x old ) and 
+
+Cold (ϕ) := max 
+
+> P⊆P old
+> |P|≤ ϕ|P old |
+
+X
+
+> γ∈P
+
+πW(0) new 
+
+(Y0: T = γ | Y0 = yold ,0, x old ). (18) 
+
+˜O(·) hides logarithmic factors in n and |P new |.
+
+During sequential learning, Theorem 4 shows that SFT drives the probability mass of old correct paths that conflict with the new task toward zero as training proceeds (Equation 16). Despite some forgetting, SFT retains previously acquired knowledge that does not conflict with the new knowledge (Equation 17). Although our current setting excludes conflicts between tasks at inter-cluster transitions, this result may help explain why SD could remain less prone to forgetting than SFT in broader settings that allow such conflicts. Whereas SFT updates transitions along teacher paths, SD restricts its updates only to source nodes selected by hints, which may leave more old correct paths unaffected by subsequent training. If these paths account for most of the old task’s success probability at the start of new task training, their preserved solution paths would alleviate forgetting. 
+
+Remark 1 (Explicit representation of Cold (ϕ)). Let κold max and κold min be the largest and smallest old-path masses normalized by their average mass, as defined in Appendix B.7. Then 
+
+Cold (ϕ) ≤ Π( W(0) new ) min 
+
+n
+
+κold max ϕ, 1 − κold min + κold min ϕ
+
+o
+
+. (19) 
+
+Remark 2 (Error accumulation across tasks) . For multiple later tasks, the union of their conflicted old-path sets can increase, and the fraction of non-conflicted old correct paths can decrease. Consequently, θtotal , the multi-task counterpart of θ, can increase as the number of tasks grows, thereby exacerbating the forgetting effect and further decreasing the corresponding concentration term in the success probability of the old tasks. This suggests an asymptotic upper bound of Cold (1 − θtotal ) on the old-task success probability. 
+
+3.3 A theoretical implication for pre-training diversity 
+
+The preceding results concern new-task learning and retention from each task’s original start. As a com-plementary theoretical discussion, we now ask when the learned policy can also reason successfully from intermediate states. The role of the pre-trained model in SD (Shenfeld et al., 2026a; Hübotter et al., 2026) and the benefits of diverse reasoning paths (Wang et al., 2023c) motivate this question. We examine diversity through the coverage of reasoning states in the pre-trained policy: because SD updates depend on visited states, limited coverage can leave some transitions unlearned that are needed for intermediate restarts. We fix a task Dℓ and run the same SD procedure from its original start; restarts are used only for evaluation. Under the coverage condition of Assumption 2, every correct boundary receives training opportunities and 9they suffice to support all relevant starts simultaneously (Proposition 3 in Appendix B.8). However, if the pre-trained model is not diverse enough, some relevant starts may not pass through proper cluster transitions and thus the model cannot generate a correct path from them. 
+
+Assumption 3 (Existence of a rare entrance) . For the fixed task, retain Assumption 2 except its coverage lower bound at one correct boundary node u∗. The pretrained probability of ever visiting u∗ from the original start is O(1 /M ′), with M ′ = Ω( M ) and a uniform implied constant. Its correct transition is the only incoming edge to a nonterminal cluster Ck that does not contain the original start yℓ, 0.
+
+Proposition 1 (Restart failure beyond a rare entrance) . Suppose Assumptions 1 and 3 hold, ηj = Θ( j−ν )
+
+for fixed ν ∈ [0 , 1/2) , and 0 < ϵ 1, ϵ 2, ϵ rel , δ < 1. If 
+
+n = Ω 
+
+max 
+
+(
+
+log(2 KM/δ )
+
+Bρ 2
+
+> ℓ,K,M
+
+,
+
+"
+
+ϵ−11 − 1
+
+ϵ22 log(1 /ϵ rel )ρℓ,K,M 
+
+#1/(1 −ν) , (20) 
+
+M ′ = Ω 1
+
+ϵ|Eℓ|
+
+> 2
+
+max 
+
+ 1
+
+KM ϵ 1
+
+, Bn δ
+
+!
+
+, (21) 
+
+with sufficiently large uniform constants, then, with probability at least 1 − δ, no training rollout visits u∗,and jointly 
+
+πW(n) (yT ∈ ˜Cℓ | yℓ, 0, x ℓ) = 1 − O(KM ϵ 1) (Misleading high accuracy ), (22) 
+
+sup 
+
+> s∈S ℓ,k
+
+πW(n) (yT ∈ ˜Cℓ | y0 = s, x ℓ) = O(M ϵ 2) (Restart failure ). (23) 
+
+Here Sℓ,k contains the relevant starts in Ck and ρℓ,K,M is specified in Appendix B.3. 
+
+Proposition 1 states that if Ck is a difficult cluster for the student to reach and the amount of training is insufficient, the student may still have a low success probability when restarting from relevant intermediate states in Ck even though the model seems to have highly learned the task from its original start yℓ, 0 (Equa-tion 22). Rare entrances satisfying Assumption 3 make some clusters severely difficult to reach from the original start, and thus leave these clusters unlearned, preventing the success probability from increasing. To overcome this issue, self-distillation requires an amount of training that grows at least linearly with M ′.The gap in success probabilities between the original start and the downstream cluster suggests that limited diversity can pose risks at inference time that are difficult to detect during training. Improved performance from the original start may not translate into better performance when restarting from downstream clusters. Pretrained coverage therefore supports intermediate restartability beyond original-start accuracy. 
+
+Remark 3 (Separation of training times) . Under Assumptions 1 and 2, the model trained by SD can re-sume from any relevant start for a training length satisfying Equation 20 (Proposition 3 in Appendix B.8). Holding other quantities fixed, the nonvisit horizon grows linearly with M ′. If the nonvisit horizon grows asymptotically faster than the sufficient learning scale, there is a range of training lengths for which the two settings exhibit different restart behavior. Under the full-coverage condition, the trained model can reason successfully from every relevant start, whereas under the rare-entrance condition, the cluster beyond the rare entrance remains unlearned. 
+
+# 4 Numerical experiments 
+
+In this section, we evaluate whether the theoretical bounds are effective. The number of tasks is set to L = 4 .Additional experimental details are written in Appendix C. Figure 2 shows training curves for every task 10 0.0 0.5 1.0                       
+
+> Correct generation probability SD: Task 1 SD: Task 2 SD: Task 3 SD: Task 4
+> 02468
+> Total gradient updates
+> £10 6
+> 0.0 0.5 1.0
+> Correct generation probability SFT: Task 1
+> 02468£10 6
+> SFT: Task 2
+> 02468£10 6
+> SFT: Task 3
+> 02468£10 6
+> SFT: Task 4
+
+Training Curves with Theorem Bounds    
+
+> Mean (band: min/max) SD learning (Thm. 1) SD retention (Thm. 3) SFT learning (Thm. 2) SFT lower (Thm. 4) SFT upper (Thm. 4) Limit: ℭold (1 ¡μtotal )(Rem. 2)
+
+Figure 2: Training dynamics under SD (top row) and SFT (bottom row) for Tasks 1–4. Solid curves show the mean correct-generation probability over ten seeds, and shaded regions indicate the minimum–maximum range. Dash-dotted and dashed black curves represent the SD population learning references and conditional retention lower bounds. Dashed and dotted black curves represent the SFT conditional retention lower bounds and population upper references, respectively. Population references use B → ∞ for stabilizing the curves. Purple dash-dotted lines show the concentration-profile term Cold (1 − θtotal ). Vertical gray lines indicate task transitions. between SD and SFT in continual learning. SFT exhibits a significant drop in performance on task 1 to 3 while SD preserves each task’s performance during subsequent-task training. These results confirm that tracing the sparse updates in SD and the conflict between tasks in SFT can explain the observed retention and forgetting 
+
+# 5 Conclusion 
+
+We analyze continual learning under SD and SFT using a CoT reasoning graph. Our theory shows how the sparsity of hint information localizes SD updates to preserve previously acquired capabilities, whereas dense SFT updates along the teacher paths can cause forgetting. As a complementary theoretical implication, we show that limited coverage in the pre-trained policy can prevent successful reasoning from intermediate states even after SD succeeds from the original start. 
+
+Future work. The major improvement is to extend the analysis from the current outcome reward format such as Equation 9 to that of the process reward. As shown in Hübotter et al. (2026), the self-teacher in on-policy self-distillation can act as an implicit process reward model through retrospection when provided with rich feedback. This setting might also be helpful to analyze the importance of in-context learning ability in the pre-training strategy. 11 Acknowledgements 
+
+SU was partially supported by JSPS KAKENHI (24K02905). TS was partially supported by JST CREST (JPMJCR2115). This work was partially supported by JST ERATO (JPMJER2601). This research is sup-ported by the National Research Foundation, Singapore and the Ministry of Digital Development and In-formation under the AI Visiting Professorship Programme (award number AIVP-2024-004). Any opinions, findings and conclusions or recommendations expressed in this material are those of the author(s) and do not reflect the views of National Research Foundation, Singapore and the Ministry of Digital Development and Information. 
+
+# AI use statement 
+
+We used AI, mainly ChatGPT, to assist in the following ways. • To aid and polish writing: We used AI to improve the clarity and grammar of the text, and to help us express our ideas more clearly. • For retrieval of relevant references and related work: Mainly, we used AI to find and summarize relevant works and we incorporated them into this paper. • For research ideation: We used AI to brainstorm ideas and to discuss the research direction. Assump-tion 1, Equations 4 and 5 in Assumption 2 and Section 3.3 is constructed during the discussion with AI. • For the purpose of drafting sections of all contents in the paper: We made AI-generated drafts at all sections, which were then revised and modified repeatedly. • For numerical experiments: We made AI create some code and the graph we used to validate our theoretical results. These codes and graphs were revised and modified by us to fit our purpose. • For proving mathematical claims: AI helped us to check the correctness of the proofs and formalized our ideas to mathematical statements and provided proofs. In particular, the following is a list of the major works of AI in the proofs. 
+
+– Lemma 9: AI helped us to evaluate the times of visitation to the correct boundaries. 
+
+– Lemma 13: AI helped us to define the potential function in Equation 65 and then incorporated it into our original proof to produce the current version. 
+
+– Theorem 4: AI helped us to prove the bounds in Theorem 4. 
+
+# Reproducibility 
+
+The code, configuration files, and saved results for reproducing the numerical experiments are available in the continual-reasoning-experiments GitHub repository. 2 The repository README provides instructions for rerunning training and regenerating the figures from saved checkpoints. The code imple-ments the synthetic CoT graph and the SD and SFT training procedures. Experimental settings and results are given in Appendix C. 
+
+> 2https://github.com/yuukiizayoi/continual-reasoning-experiments
+
+12 References 
+
+Emmanuel Abbe, Samy Bengio, Aryo Lotfi, Colin Sandon, and Omid Saremi. How far can transformers reason? the globality barrier and inductive scratchpad, 2024. URL https://arxiv.org/abs/ 2406.06467 .Gregor Bachmann and Vaishnavh Nagarajan. The Pitfalls of Next-Token Prediction. In Proceedings of the 41st International Conference on Machine Learning , volume 235 of Proceedings of Machine Learning Research , pages 2296–2318, 2024. URL https://proceedings.mlr.press/v235/ bachmann24a.html .Krishnakumar Balasubramanian and Shiva Prasad Kasiviswanathan. A quantitative characterization of for-getting in post-training, 2026. URL https://arxiv.org/abs/2603.12163 .Dan Biderman, Jacob Portes, Jose Javier Gonzalez Ortiz, Mansheej Paul, Philip Greengard, Connor Jen-nings, Daniel King, Sam Havens, Vitaliy Chiley, Jonathan Frankle, Cody Blakeney, and John P. Cunning-ham. LoRA Learns Less and Forgets Less. Transactions on Machine Learning Research , 2024. URL 
+
+https://openreview.net/forum?id=aloEru2qCG .Dake Bu, Wei Huang, Andi Han, Atsushi Nitanda, Bo Xue, Qingfu Zhang, Hau-San Wong, and Taiji Suzuki. Distributional Biases in Post-Training: A Markovian Analysis of Reasoning Trajectories. arXiv preprint arXiv:2511.07368 , 2025. URL https://arxiv.org/abs/2511.07368 . Preprint. Howard Chen, Noam Razin, Karthik Narasimhan, and Danqi Chen. Retaining by doing: The role of on-policy data in mitigating forgetting. arXiv preprint arXiv:2510.18874 , 2025. URL https://arxiv. org/abs/2510.18874 .Hyung Won Chung, Le Hou, Shayne Longpre, Barret Zoph, Yi Tay, William Fedus, Yunxuan Li, Xuezhi Wang, Mostafa Dehghani, Siddhartha Brahma, Albert Webson, Shixiang Shane Gu, Zhuyun Dai, Mirac Suzgun, Xinyun Chen, Aakanksha Chowdhery, Alex Castro-Ros, Marie Pellat, Kevin Robinson, Dasha Valter, Sharan Narang, Gaurav Mishra, Adams Yu, Vincent Zhao, Yanping Huang, Andrew Dai, Hongkun Yu, Slav Petrov, Ed H. Chi, Jeff Dean, Jacob Devlin, Adam Roberts, Denny Zhou, Quoc V. Le, and Jason Wei. Scaling instruction-finetuned language models, 2022. URL https://arxiv.org/abs/2210. 11416 .Daya Guo, Dejian Yang, Haowei Zhang, Junxiao Song, Peiyi Wang, Qihao Zhu, Runxin Xu, Ruoyu Zhang, Shirong Ma, Xiao Bi, Xiaokang Zhang, Xingkai Yu, Yu Wu, Z. F. Wu, Zhibin Gou, Zhihong Shao, Zhuoshu Li, Ziyi Gao, Aixin Liu, Bing Xue, Bingxuan Wang, Bochao Wu, Bei Feng, Chengda Lu, Chenggang Zhao, Chengqi Deng, Chong Ruan, Damai Dai, Deli Chen, Dongjie Ji, Erhang Li, Fangyun Lin, Fucong Dai, Fuli Luo, Guangbo Hao, Guanting Chen, Guowei Li, H. Zhang, Hanwei Xu, Honghui Ding, Huazuo Gao, Hui Qu, Hui Li, Jianzhong Guo, Jiashi Li, Jingchang Chen, Jingyang Yuan, Jinhao Tu, Junjie Qiu, Junlong Li, J. L. Cai, Jiaqi Ni, Jian Liang, Jin Chen, Kai Dong, Kai Hu, Kaichao You, Kaige Gao, Kang Guan, Kexin Huang, Kuai Yu, Lean Wang, Lecong Zhang, Liang Zhao, Litong Wang, Liyue Zhang, Lei Xu, Leyi Xia, Mingchuan Zhang, Minghua Zhang, Minghui Tang, Mingxu Zhou, Meng Li, Miaojun Wang, Mingming Li, Ning Tian, Panpan Huang, Peng Zhang, Qiancheng Wang, Qinyu Chen, Qiushi Du, Ruiqi Ge, Ruisong Zhang, Ruizhe Pan, Runji Wang, R. J. Chen, R. L. Jin, Ruyi Chen, Shanghao Lu, Shangyan Zhou, Shanhuang Chen, Shengfeng Ye, Shiyu Wang, Shuiping Yu, Shunfeng Zhou, Shuting Pan, S. S. Li, Shuang Zhou, Shaoqing Wu, Tao Yun, Tian Pei, Tianyu Sun, T. Wang, Wangding Zeng, Wen Liu, Wenfeng Liang, Wenjun Gao, Wenqin Yu, Wentao Zhang, W. L. Xiao, Wei An, Xiaodong Liu, Xiaohan Wang, Xiaokang Chen, Xiaotao Nie, Xin Cheng, Xin Liu, Xin Xie, Xingchao 13 Liu, Xinyu Yang, Xinyuan Li, Xuecheng Su, Xuheng Lin, X. Q. Li, Xiangyue Jin, Xiaojin Shen, Xiaosha Chen, Xiaowen Sun, Xiaoxiang Wang, Xinnan Song, Xinyi Zhou, Xianzu Wang, Xinxia Shan, Y. K. Li, Y. Q. Wang, Y. X. Wei, Yang Zhang, Yanhong Xu, Yao Li, Yao Zhao, Yaofeng Sun, Yaohui Wang, Yi Yu, Yichao Zhang, Yifan Shi, Yiliang Xiong, Ying He, Yishi Piao, Yisong Wang, Yixuan Tan, Yiyang Ma, Yiyuan Liu, Yongqiang Guo, Yuan Ou, Yuduan Wang, Yue Gong, Yuheng Zou, Yujia He, Yunfan Xiong, Yuxiang Luo, Yuxiang You, Yuxuan Liu, Yuyang Zhou, Y. X. Zhu, Yanping Huang, Yaohui Li, Yi Zheng, Yuchen Zhu, Yunxian Ma, Ying Tang, Yukun Zha, Yuting Yan, Z. Z. Ren, Zehui Ren, Zhangli Sha, Zhe Fu, Zhean Xu, Zhenda Xie, Zhengyan Zhang, Zhewen Hao, Zhicheng Ma, Zhigang Yan, Zhiyu Wu, Zihui Gu, Zijia Zhu, Zijun Liu, Zilin Li, Ziwei Xie, Ziyang Song, Zizheng Pan, Zhen Huang, Zhipeng Xu, Zhongyu Zhang, and Zhen Zhang. DeepSeek-R1 incentivizes reasoning in LLMs through reinforcement learning. 
+
+Nature , 645(8081):633–638, September 2025. ISSN 1476-4687. doi: 10.1038/s41586-025-09422-z. URL http://dx.doi.org/10.1038/s41586-025-09422-z .Jonas Hübotter, Frederike Lübeck, Lejs Behric, Anton Baumann, Marco Bagatella, Daniel Marta, Ido Hakimi, Idan Shenfeld, Thomas Kleine Buening, Carlos Guestrin, and Andreas Krause. Reinforce-ment Learning via Self-Distillation. In International Conference on Machine Learning , 2026. URL 
+
+https://arxiv.org/abs/2601.20802 .Bowen Jin, Hansi Zeng, Zhenrui Yue, Jinsung Yoon, Sercan Arik, Dong Wang, Hamed Zamani, and Jiawei Han. Search-R1: Training LLMs to reason and leverage search engines with reinforcement learning, 2025. URL https://arxiv.org/abs/2503.09516 .Timo Kaufmann, Paul Weng, Viktor Bengs, and Eyke Hüllermeier. A Survey of Reinforcement Learning from Human Feedback. Transactions on Machine Learning Research , 2025. URL https://arxiv. org/abs/2312.14925 .Jeonghye Kim, Xufang Luo, Minbeom Kim, Sangmook Lee, Dohyung Kim, Jiwon Jeon, Dongsheng Li, and Yuqing Yang. Why does self-distillation (sometimes) degrade the reasoning capability of LLMs?, 2026. URL https://arxiv.org/abs/2603.24472 .Juno Kim, Denny Wu, Jason D. Lee, and Taiji Suzuki. Metastable Dynamics of Chain-of-Thought Rea-soning: Provable Benefits of Search, RL and Distillation. In Proceedings of the 42nd International Conference on Machine Learning , pages 30791–30825, 2025. URL https://proceedings.mlr. press/v267/kim25aj.html .Song Lai, Haohan Zhao, Rong Feng, Changyi Ma, Wenzhuo Liu, Hongbo Zhao, Xi Lin, Dong Yi, Qingfu Zhang, Hongbin Liu, Gaofeng Meng, and Fei Zhu. Reinforcement fine-tuning naturally mit-igates forgetting in continual post-training. arXiv preprint arXiv:2507.05386 , 2025. URL https: //arxiv.org/abs/2507.05386 .Hongyu Li, Liang Ding, Meng Fang, and Dacheng Tao. Revisiting Catastrophic Forgetting in Large Lan-guage Model Tuning. In Findings of the Association for Computational Linguistics: EMNLP 2024 , pages 4297–4308. Association for Computational Linguistics, 2024. doi: 10.18653/v1/2024.findings-emnlp. 249. URL https://aclanthology.org/2024.findings-emnlp.249/ .Ziniu Li, Pengyuan Wang, Tian Xu, Tian Ding, Ruoyu Sun, and Yang Yu. Review of Reinforcement Learn-ing for Large Language Models: Formulations, Algorithms, and Opportunities. Transactions on Machine Learning Research , 2026. URL https://www.liziniu.org/docs/RL4LLM_Survey.pdf .Yifeng Liu, Shiyuan Zhang, Yifan Zhang, and Quanquan Gu. Self-distilled policy gradient, 2026. URL 
+
+https://arxiv.org/abs/2606.04036 .14 Zijian Liu and Zhengyuan Zhou. Revisiting the last-iterate convergence of stochastic gradient meth-ods. In The Twelfth International Conference on Learning Representations , 2024. URL https: //openreview.net/forum?id=xxaEhwC1I4 .Yun Luo, Zhen Yang, Fandong Meng, Yafu Li, Jie Zhou, and Yue Zhang. An empirical study of catastrophic forgetting in large language models during continual fine-tuning. arXiv preprint arXiv:2308.08747 , 2023. URL https://arxiv.org/abs/2308.08747 .Ziyang Luo, Can Xu, Pu Zhao, Qingfeng Sun, Xiubo Geng, Wenxiang Hu, Chongyang Tao, Jing Ma, Qingwei Lin, and Daxin Jiang. WizardCoder: Empowering code large language models with Evol-Instruct, 2025. URL https://arxiv.org/abs/2306.08568 .Clayton Sanford, Bahare Fatemi, Ethan Hall, Anton Tsitsulin, Mehran Kazemi, Jonathan Hal-crow, Bryan Perozzi, and Vahab Mirrokni. Understanding Transformer Reasoning Capabilities via Graph Algorithms. In Advances in Neural Information Processing Systems , volume 37, 2024. URL https://proceedings.neurips.cc/paper_files/paper/2024/hash/ 8f395480c04ac6dfb2c2326a639df88e-Abstract-Conference.html .Hejian Sang, Yuanda Xu, Zhengze Zhou, Ran He, Zhipeng Wang, and Jiachen Sun. CRISP: Compressed rea-soning via iterative self-policy distillation, 2026. URL https://arxiv.org/abs/2603.05433 .Idan Shenfeld, Mehul Damani, Jonas Hübotter, and Pulkit Agrawal. Self-Distillation Enables Continual Learning. In International Conference on Machine Learning , 2026a. URL https://arxiv.org/ abs/2601.19897 .Idan Shenfeld, Jyothish Pari, and Pulkit Agrawal. RL’s Razor: Why Online Reinforce-ment Learning Forgets Less. In International Conference on Learning Representations ,2026b. URL https://proceedings.iclr.cc/paper_files/paper/2026/hash/ 618c95f4557c15b253fb0e6f548ea0c0-Abstract-Conference.html .Charles L. Wang, Keir Dorchen, and Peter Jin. On the statistical limits of self-improving agents, 2026a. URL https://arxiv.org/abs/2510.04399 .Hao Wang, Hao Gu, Hongming Piao, Kaixiong Gong, Yuxiao Ye, Xiangyu Yue, Sirui Han, Yike Guo, and Dapeng Wu. Entropy-preserving supervised fine-tuning via adaptive self-distillation for large reasoning models, 2026b. URL https://arxiv.org/abs/2602.02244 .Xiao Wang, Tianze Chen, Qiming Ge, Han Xia, Rong Bao, Rui Zheng, Qi Zhang, Tao Gui, and Xu-anjing Huang. Orthogonal Subspace Learning for Language Model Continual Learning. In Find-ings of the Association for Computational Linguistics: EMNLP 2023 , pages 10658–10671. Associa-tion for Computational Linguistics, 2023a. doi: 10.18653/v1/2023.findings-emnlp.715. URL https: //aclanthology.org/2023.findings-emnlp.715/ .Xiao Wang, Yuansen Zhang, Tianze Chen, Songyang Gao, Senjie Jin, Xianjun Yang, Zhiheng Xi, Rui Zheng, Yicheng Zou, Tao Gui, Qi Zhang, and Xuanjing Huang. TRACE: A Comprehensive Benchmark for Continual Learning in Large Language Models. arXiv preprint arXiv:2310.06762 , 2023b. URL 
+
+https://arxiv.org/abs/2310.06762 .Xuezhi Wang, Jason Wei, Dale Schuurmans, Quoc Le, Ed Chi, Sharan Narang, Aakanksha Chowdhery, and Denny Zhou. Self-Consistency Improves Chain of Thought Reasoning in Language Models. In 
+
+International Conference on Learning Representations , 2023c. URL https://arxiv.org/abs/ 2203.11171 .15 Yufei Wang, Wanjun Zhong, Liangyou Li, Fei Mi, Xingshan Zeng, Wenyong Huang, Lifeng Shang, Xin Jiang, and Qun Liu. Aligning Large Language Models with Human: A Survey. arXiv preprint arXiv:2307.12966 , 2023d. URL https://arxiv.org/abs/2307.12966 .Stanley Wei and Juno Kim. Provable Benefits of RLVR over SFT for Reasoning Models: Learning to Backtrack Efficiently. arXiv preprint arXiv:2606.22938 , 2026. URL https://arxiv.org/abs/ 2606.22938 . Preprint. Chenxu Yang, Chuanyu Qin, Qingyi Si, Minghui Chen, Naibin Gu, Dingyu Yao, Zheng Lin, Weiping Wang, Jiaqi Wang, and Nan Duan. Self-distilled RLVR, 2026. URL https://arxiv.org/abs/2604. 03128 .Tong Yang, Yu Huang, Yingbin Liang, and Yuejie Chi. Multi-head transformers provably learn sym-bolic multi-step reasoning via gradient descent. In D. Belgrave, C. Zhang, H. Lin, R. Pascanu, P. Koniusz, M. Ghassemi, and N. Chen, editors, Advances in Neural Information Processing Sys-tems , volume 38, Main Conference, pages 116194–116285. Curran Associates, Inc., 2025. doi: 10.52202/085713-3875. URL https://proceedings.neurips.cc/paper_files/paper/ 2025/file/a8f123480ede36612314d013aba6340c-Paper-Conference.pdf .Zhaorui Yang, Tianyu Pang, Haozhe Feng, Han Wang, Wei Chen, Minfeng Zhu, and Qian Liu. Self-distillation bridges distribution gap in language model fine-tuning, 2024. URL https://arxiv. org/abs/2402.13669 .Jian Yao, Ran Cheng, Xingyu Wu, Jibin Wu, and Kay Chen Tan. Diversity-aware policy optimization for large language model reasoning, 2025. URL https://arxiv.org/abs/2505.23433 .Shunyu Yao, Dian Yu, Jeffrey Zhao, Izhak Shafran, Thomas L. Griffiths, Yuan Cao, and Karthik Narasimhan. Tree of Thoughts: Deliberate Problem Solving with Large Language Models. In Advances in Neural Information Processing Systems , 2023. URL https://arxiv.org/abs/2305.10601 .Tianzhu Ye, Li Dong, Xun Wu, Shaohan Huang, and Furu Wei. On-policy context distillation for language models. arXiv preprint arXiv:2602.12275 , 2026. URL https://arxiv.org/abs/2602.12275 .Huaye Zeng, Dongfu Jiang, Haozhe Wang, Ping Nie, Xiaotong Chen, and Wenhu Chen. ACECODER: Acing coder RL via automated test-case synthesis. In Wanxiang Che, Joyce Nabende, Ekaterina Shutova, and Mohammad Taher Pilehvar, editors, Proceedings of the 63rd Annual Meeting of the Association for Computational Linguistics (Volume 1: Long Papers) , pages 12023–12040, Vienna, Austria, July 2025. Association for Computational Linguistics. ISBN 979-8-89176-251-0. doi: 10.18653/v1/2025.acl-long. 587. URL https://aclanthology.org/2025.acl-long.587/ .Shengyu Zhang, Linfeng Dong, Xiaoya Li, Sen Zhang, Xiaofei Sun, Shuhe Wang, Jiwei Li, Runyi Hu, Tianwei Zhang, Fei Wu, and Guoyin Wang. Instruction Tuning for Large Language Models: A Survey. 
+
+arXiv preprint arXiv:2308.10792 , 2023. URL https://arxiv.org/abs/2308.10792 .Tianjun Zhang, Shishir G. Patil, Naman Jain, Sheng Shen, Matei Zaharia, Ion Stoica, and Joseph E. Gonza-lez. RAFT: Adapting language model to domain specific RAG, 2024. URL https://arxiv.org/ abs/2403.10131 .Shiwan Zhao, Zhihu Wang, Xuyang Zhao, Jiaming Zhou, Caiyue Xu, Chenfei Liu, Liting Zhang, Yuhang Jia, Yanzhe Zhang, Hualong Yu, Zichen Xu, Qicheng Li, and Yong Qin. Large language model post-training: A unified view of off-policy and on-policy learning. arXiv preprint arXiv:2604.07941 , 2026a. URL https://arxiv.org/abs/2604.07941 .16 Siyan Zhao, Zhihui Xie, Mengchen Liu, Jing Huang, Guan Pang, Feiyu Chen, and Aditya Grover. Self-Distilled Reasoner: On-Policy Self-Distillation for Large Language Models. In International Conference on Machine Learning , 2026b. URL https://arxiv.org/abs/2601.18734 .Wayne Xin Zhao, Kun Zhou, Junyi Li, Tianyi Tang, Xiaolei Wang, Yupeng Hou, Yingqian Min, Beichen Zhang, Junjie Zhang, Zican Dong, Yifan Du, Chen Yang, Yushuo Chen, Zhipeng Chen, Jinhao Jiang, Ruiyang Ren, Yifan Li, Xinyu Tang, Zikang Liu, Peiyu Liu, Jian-Yun Nie, and Ji-Rong Wen. A Survey of Large Language Models. arXiv preprint arXiv:2303.18223 , 2023. URL https://arxiv.org/ abs/2303.18223 .Kejian Zhu, Zhuoran Jin, Shangqing Tu, Hongbang Yuan, Yushi Bai, Kang Liu, Juanzi Li, and Jun Zhao. SFT conflicts, RL coexists: A theoretical and empirical analysis of multi-task learning for LLMs. arXiv preprint arXiv:2608.03573 , 2026. URL https://arxiv.org/abs/2608.03573 .Xinyu Zhu, Mengzhou Xia, Zhepei Wei, Wei-Lin Chen, Danqi Chen, and Yu Meng. The Surprising Effec-tiveness of Negative Reinforcement in LLM Reasoning. In Advances in Neural Information Processing Systems , volume 38, 2025. URL https://arxiv.org/abs/2506.01347 .17 Table of Contents 
+
+1 Introduction 1
+
+1.1 Related work . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 3
+
+2 Problem Setup 3
+
+2.1 Continual learning on CoT graph . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 32.2 Pre-training and fine-tuning . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 5
+
+3 Main results 6
+
+3.1 Single-task learnability . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 73.2 Continual learning and catastrophic forgetting . . . . . . . . . . . . . . . . . . . . . . . . . 83.3 A theoretical implication for pre-training diversity . . . . . . . . . . . . . . . . . . . . . . . 9
+
+4 Numerical experiments 10 5 Conclusion 11 Appendix A Additional related work 20 Appendix B Realizability and proofs 20 
+
+B.1 Realizability on routing-compatible layered DAGs . . . . . . . . . . . . . . . . . . . . . . . 20 
+
+Proposition B.1. Realizability on layered DAGs . . . . . . . . . . . . . . . . . . . . . . . . . . . . 21 
+
+Lemma 1. Positive routing with boundary coverage . . . . . . . . . . . . . . . . . . . . . . . . 22 Lemma 2. Boundary kernels with small transition probabilities . . . . . . . . . . . . . . . . . . 22 Lemma 3. Simultaneous finite softmax realization . . . . . . . . . . . . . . . . . . . . . . . . . 22 
+
+B.2 Gradient of the SD loss . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 23 
+
+Lemma 4. Gradient of the SD loss . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 23 
+
+Lemma 5. The one-state stop-gradient identity . . . . . . . . . . . . . . . . . . . . . . . . . . . 24 Lemma 6. Cancellation of inactive hints . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 24 
+
+B.3 Learning hint-supported inter-cluster transitions . . . . . . . . . . . . . . . . . . . . . . . . 26 
+
+Proposition 2. Learning hint-supported transitions . . . . . . . . . . . . . . . . . . . . . . . . . . 26 
+
+Lemma 4. Gradient of the SD loss . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 23 Lemma 7. Local updates and invariant interior transitions . . . . . . . . . . . . . . . . . . . . . 27 Lemma 8. Error from weighted update counts . . . . . . . . . . . . . . . . . . . . . . . . . . . 28 Lemma 9. Update opportunities from retained coverage . . . . . . . . . . . . . . . . . . . . . . 28 Lemma 10. Simultaneous learning with finite mini-batches . . . . . . . . . . . . . . . . . . . . 29 
+
+B.4 Single-task rollout accuracy under SD . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 30 
+
+Theorem 1. Single-task learning under SD . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 31 
+
+Proposition 2. Learning hint-supported transitions . . . . . . . . . . . . . . . . . . . . . . . . . 26 Lemma 7. Local updates and invariant interior transitions . . . . . . . . . . . . . . . . . . . . . 27 Lemma 11. From edge accuracy to rollout accuracy . . . . . . . . . . . . . . . . . . . . . . . . 29 
+
+18 B.5 Single-task learning under SFT . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 31 
+
+Theorem 2. Single-task learning under SFT . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 39 
+
+Lemma 12. Sampled SFT gradient and update support . . . . . . . . . . . . . . . . . . . . . . . 32 Lemma 13. Convex potential, drift, and support error . . . . . . . . . . . . . . . . . . . . . . . 33 Lemma 14. A finite comparator . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 34 Lemma 15. Conditional mini-batch noise . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 36 Lemma 16. Smoothness and the initial transient . . . . . . . . . . . . . . . . . . . . . . . . . . 37 Lemma 17. A finite-comparator last-iterate bound . . . . . . . . . . . . . . . . . . . . . . . . . 37 Lemma 18. Polynomial step-size sums . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 38 Lemma 19. Simultaneous successor-set learning . . . . . . . . . . . . . . . . . . . . . . . . . . 39 
+
+B.6 Retention under continual SD . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 40 
+
+Theorem 3. No forgetting under SD . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 41 
+
+Proposition 2. Learning hint-supported transitions . . . . . . . . . . . . . . . . . . . . . . . . . 26 Lemma 11. From edge accuracy to rollout accuracy . . . . . . . . . . . . . . . . . . . . . . . . 29 Lemma 20. Preservation across tasks . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 40 
+
+B.7 Catastrophic forgetting under SFT . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 41 
+
+Theorem 4. Catastrophic forgetting under SFT . . . . . . . . . . . . . . . . . . . . . . . . . . . . 46 
+
+Lemma 19. Simultaneous successor-set learning . . . . . . . . . . . . . . . . . . . . . . . . . . 39 Lemma 21. Support separation and source overlap . . . . . . . . . . . . . . . . . . . . . . . . . 43 Lemma 22. Preservation of non-conflicted path mass . . . . . . . . . . . . . . . . . . . . . . . . 44 Lemma 23. Exact transfer between task inputs . . . . . . . . . . . . . . . . . . . . . . . . . . . 45 Lemma 24. From successor suppression to old-path mass . . . . . . . . . . . . . . . . . . . . . 46 
+
+Remark 1. The old-path concentration profile . . . . . . . . . . . . . . . . . . . . . . . . . . . . 47 
+
+B.8 Pre-training and intermediate restartability . . . . . . . . . . . . . . . . . . . . . . . . . . . 47 
+
+Proposition 3. Uniform restartability . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 47 
+
+Lemma 10. Simultaneous learning with finite mini-batches . . . . . . . . . . . . . . . . . . . . 29 Lemma 11. From edge accuracy to rollout accuracy . . . . . . . . . . . . . . . . . . . . . . . . 29 Lemma 25. From training length to effective drift . . . . . . . . . . . . . . . . . . . . . . . . . 48 
+
+Proposition 1. Delayed restartability at a rare entrance . . . . . . . . . . . . . . . . . . . . . . . 51 
+
+Lemma 9. Update opportunities from retained coverage . . . . . . . . . . . . . . . . . . . . . . 28 Lemma 10. Simultaneous learning with finite mini-batches . . . . . . . . . . . . . . . . . . . . 29 Lemma 11. From edge accuracy to rollout accuracy . . . . . . . . . . . . . . . . . . . . . . . . 29 Lemma 25. From training length to effective drift . . . . . . . . . . . . . . . . . . . . . . . . . 48 Lemma 26. Control of visitation growth . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 49 Lemma 27. Nonvisitation throughout adaptive training . . . . . . . . . . . . . . . . . . . . . . . 49 Lemma 28. An unvisited downstream cluster remains unlearned . . . . . . . . . . . . . . . . . . 50 
+
+Remark 3. Separation of training times . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 51 
+
+Proposition 3. Uniform restartability . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 47 Proposition 1. Delayed restartability at a rare entrance . . . . . . . . . . . . . . . . . . . . . . . 51 
+
+Remark 4. The scale of initial rarity . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 51 
+
+Lemma 29. The coarse rarity scale . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 52 
+
+Remark 5. Correct paths bypassing the rare entrance . . . . . . . . . . . . . . . . . . . . . . . . 52 
+
+Proposition 1. Delayed restartability at a rare entrance . . . . . . . . . . . . . . . . . . . . . . . 51 
+
+Appendix C Numerical experiment 52 
+
+C.1 Experiment settings . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 53 C.2 Experiment results . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 54 19 A Additional related work 
+
+In this section, we discuss additional related work. 
+
+On-policy versus off-policy learning. A central focus of this paragraph is the preservation of previously acquired capabilities. Continual SFT can degrade existing knowledge and reasoning abilities through catas-trophic forgetting (Luo et al., 2023). Recent comparisons report that RL often preserves prior capabilities better than SFT at comparable new-task performance (Lai et al., 2025; Shenfeld et al., 2026b; Chen et al., 2025). Controlled experiments further identify on-policy sampling as an important contributor to this reten-tion advantage (Chen et al., 2025). Zhu et al. (2026) attribute the contrasting forgetting behavior of SFT and RL to inter-task interference: SFT exhibits substantial conflicts during sequential training, whereas RL in-duces less interferences that allow multiple task capabilities to coexist. From a complementary distributional perspective, Shenfeld et al. (2026b) argue that standard SFT fits external demonstrations without explicitly accounting for proximity to the base model, whereas on-policy updates are biased toward solutions closer to the initial policy, helping explain their reduced forgetting. Building on Zhu et al. (2026)’s task-interference perspective, we develop more theoretical analysis of how SFT and on-policy SD differ in learning new tasks and preserving previously acquired capabilities. 
+
+CoT reasoning as graph search. Graph reasoning is a broadly accepted approach for analyzing the rea-soning capabilities of language models. Sanford et al. (2024) characterize Transformer expressivity on graph reasoning tasks in terms of depth, width, and additional computation tokens, and empirically evaluate their theoretical predictions on GraphQA. Bachmann and Nagarajan (2024) use path-star graphs to demon-strate how teacher-forced next-token prediction can favor shortcuts that hinder learning to plan. Kim et al. (2025) model CoT as a metastable Markov process on clustered graphs and establish benefits of search, RL, and distillation for crossing rare inter-cluster transitions. Wei and Kim (2026) study backtracking in graph pathfinding and prove an exponential inference-time advantage of RLVR over SFT when SFT is trained only on golden shortest paths without negative examples. Our work uses a CoT graph model to analyze how SFT and self-distillation affect the retention of what they learned. 
+
+# B Realizability and proofs 
+
+The proofs are organized as sketches, supporting lemmas, and main proofs. Algorithm 1 describes the SD and SFT training procedures. 
+
+B.1 Realizability on routing-compatible layered DAGs 
+
+We consider layered DAGs satisfying the support conditions below. For this graph family, the proposition following the description shows that Assumption 2 can be realized by a finite pre-trained parameter W(0) .For u ∈ V , write N (u) := {v ∈ V : ( u, v ) ∈ E}. Suppose that G is a finite layered DAG, meaning that 
+
+V = V0 ˙∪ · · · ˙∪ VH , (u, v ) ∈ E, u ∈ Vh, v ∈ Vh′ =⇒ h < h ′. (24) We call such a graph routing-compatible for the task family if the following conditions hold: 20 Algorithm 1 Sequential SD and SFT in the reasoning-graph model 
+
+Require: method ∈ { SD, SFT }
+
+Require: W(0) , B, {nℓ}Lℓ=1 , {ηj }j≥1, ϵrel ∈ (0 , 1)  
+
+> 1:
+
+W ← W(0)  
+
+> 2:
+
+for ℓ = 1 , . . . , L do  
+
+> 3:
+
+for j = 1 , . . . , n ℓ do  
+
+> 4:
+
+for b = 1 , . . . , B do  
+
+> 5:
+
+Sample y(b) ∼ πW(· | xℓ) and γ(b) ∼ Unif( Pℓ). 
+
+> 6:
+
+if method = SFT then  
+
+> 7:
+
+y∗(b) ← γ(b) 
+
+> 8:
+
+else  
+
+> 9:
+
+Construct c(b) from all inter-cluster transitions in γ(b). 
+
+> 10:
+
+Construct πW(· | xℓ, c (b)). 
+
+> 11:
+
+end if  
+
+> 12:
+
+end for  
+
+> 13:
+
+W ← W − ηj ∇WLmethod (W; Dℓ) 
+
+> 14:
+
+end for  
+
+> 15:
+
+end for  
+
+> 16:
+
+return W
+
+1. Every boundary node has at least one same-cluster successor: 
+
+Rk(u) := N (u) ∩ Ck̸ = ∅, u ∈ ∂C k. (25) These later-layer nodes provide support for the residual probability mass of a finite softmax distribu-tion; they are not thereby declared relevant starts. 2. Every relevant start belongs to the interior of its cluster, and for every task Dℓ, every non-terminal cluster Ck with ∂⋆ℓ Ck̸ = ∅, and every relevant start s in Ck,
+
+∂⋆ℓ Ck ⊆ N (s) ⊆ ∂C k. (26) The numbers of layers, clusters, nodes, valid boundaries, and residual successors are arbitrary within this graph family. 
+
+Proposition B.1 (Realizability on routing-compatible layered DAGs) . Suppose that G is a routing-compatible layered DAG in the sense of Equations 24–26. Under the full-rank condition on (x1, . . . , x L) in the problem setup, fix ϵ1 ∈ (0 , 1) and ϵ2 > 0 such that 
+
+(K − 1) ϵ2 ≤ 12 . (27) 
+
+Then there exists a finite W(0) ∈ Rd×| E| satisfying every clause of Assumption 2 simultaneously for all task inputs x1, . . . , x L.
+
+Sketch of proof of Proposition B.1. 
+
+• Construct positive within-cluster routing kernels with small invalid-boundary probability and uniform coverage of valid boundaries (Lemma 1). 21 • Construct normalized boundary kernels assigning the prescribed small probability to every inter-cluster edge (Lemma 2). • Realize all task-wise kernels simultaneously with one finite softmax parameter (Lemma 3). 
+
+Lemma 1 (A positive routing kernel with boundary coverage) . Under Equation 26, there is a strictly positive kernel at every relevant start for which the first boundary is reached in one step, the invalid-boundary probability is at most ϵ1, and each valid boundary has probability at least 1/(2 M ).Proof. Fix a task Dℓ, a non-terminal cluster Ck with ∂⋆ℓ Ck̸ = ∅, and a relevant start s in Ck. Define 
+
+Iℓ,k (s) := N (s) \ ∂⋆ℓ Ck. (28) By Equation 26, every outgoing neighbor of s is a boundary node and every valid boundary is an outgoing neighbor. Prescribe the transition kernel at s by 
+
+Pℓ(v | s) := 
+
+
+
+1(1 + ϵ1)|∂⋆ℓ Ck| , v ∈ ∂⋆ℓ Ck, Iℓ,k (s)̸ = ∅,ϵ1
+
+(1 + ϵ1)|Iℓ,k (s)| , v ∈ Iℓ,k (s), Iℓ,k (s)̸ = ∅,
+
+1
+
+|∂⋆ℓ Ck| , v ∈ ∂⋆ℓ Ck, Iℓ,k (s) = ∅.
+
+(29) This is a strictly positive probability distribution on N (s). Because N (s) ⊆ ∂C k, the first boundary is reached in exactly one step, and hence 
+
+PPℓ
+
+ U sℓ,k /∈ ∂⋆ℓ Ck | Y0 = s, x ℓ
+
+ ≤ ϵ1
+
+1 + ϵ1
+
+≤ ϵ1, (30) 
+
+PPℓ
+
+ U sℓ,k = u | Y0 = s, x ℓ
+
+ ≥ 1(1 + ϵ1)|∂⋆ℓ Ck| ≥ 12M (31) for every u ∈ ∂⋆ℓ Ck. Thus the first-boundary hitting time is almost surely finite, the routing error is O(ϵ1),and every valid boundary receives probability Ω(1 /M ), uniformly over all relevant starts. 
+
+Lemma 2 (Boundary kernels with small inter-cluster probabilities) . Under Equation 25 and Equation 27, each boundary admits a strictly positive normalized kernel assigning exactly ϵ2 to every inter-cluster edge. Proof. We next prescribe the kernel at boundary nodes. For u ∈ ∂C k, let 
+
+dout  
+
+> u,k
+
+:= |N (u) \ Ck|. (32) For every task input, set 
+
+Pℓ(v | u) := 
+
+
+
+ϵ2, v ∈ N (u) \ Ck,
+
+1 − dout  
+
+> u,k
+
+ϵ2
+
+|Rk(u)| , v ∈ Rk(u).
+
+(33) The graph convention in the problem setup gives dout  
+
+> u,k
+
+≤ K − 1. Therefore Equation 27, together with Equation 25, makes Equation 33 a strictly positive probability distribution. 
+
+Lemma 3 (Simultaneous finite softmax realization) . Every family of strictly positive task-wise transition kernels Pℓ on the given edge support is realized by one finite W(0) when the task-input matrix has full column rank. 
+
+22 Proof. For each task input, assign any strictly positive probability distribution to the outgoing edges of each remaining node whose kernel has not yet been specified. No kernel is needed at a terminal node with no outgoing edge. We now realize all these task-wise kernels with a single finite parameter matrix. Let 
+
+X := 
+
+
+
+x⊤
+
+> 1
+
+...
+
+x⊤
+
+> L
+
+ ∈ RL×d. (34) The full-rank input condition gives rank( X) = L, so XX ⊤ is invertible. For every (u, v ) ∈ E, define 
+
+ℓu,v := 
+
+
+
+log P1(v | u)
+
+...
+
+log PL(v | u)
+
+ , W(0) eu,v := X⊤(XX ⊤)−1ℓu,v . (35) All prescribed edge probabilities are strictly positive, so W(0) is finite, and 
+
+x⊤ 
+
+> ℓ
+
+W(0) eu,v = log Pℓ(v | u). (36) Since Pℓ(· | u) is normalized over N (u), the softmax predictor satisfies 
+
+πW(0) (v | u, x ℓ) = exp(log Pℓ(v | u)) 
+
+P  
+
+> w∈N (u)
+
+exp(log Pℓ(w | u)) = Pℓ(v | u). (37) 
+
+Main proof of Proposition B.1. 
+
+Proof. Lemmas 1 and 2 specify compatible kernels, since relevant starts are interior nodes. Lemma 3 realizes them simultaneously. Finally, Equation 24 implies that every transition strictly increases the layer index. Equations 30, 31, and 33 verify Assumption 2. 
+
+Scope of the graph conditions. The support conditions above give a concrete finite-parameter realization of Assumption 2. However, our learning and forgetting results apply more broadly under their respective as-sumptions. Equation 25 ensures normalization when inter-cluster transitions are rare. Equation 26 simplifies the construction by ensuring that the first boundary is reached in one step. More generally, the within-cluster routing conditions allow multiple steps, provided boundary hitting is almost surely finite and the bounds on invalid-boundary probability and valid-boundary coverage in Equations 4 and 5 hold uniformly over relevant starts. 
+
+B.2 Gradient of the SD loss 
+
+Lemma 4 (Gradient of the SD loss) .
+
+∇WLSD (W; Dℓ) = log ϵrel 
+
+B
+
+> B
+
+X
+
+> b=1
+> I(b)
+
+X
+
+> i=1
+
+1{τ (b) 
+
+> i
+
+< T (b)}πW(v(b) 
+
+> i
+
+| u(b) 
+
+> i
+
+, x (b) 
+
+> ℓ
+
+) (38) 
+
+· x(b)
+
+> ℓ
+
+eu(b) 
+
+> i,v (b)
+> i
+
+− X  
+
+> v∈N (u(b)
+> i)
+
+πW(v | u(b) 
+
+> i
+
+, x (b) 
+
+> ℓ
+
+)eu(b) 
+
+> i,v
+
+
+
+> ⊤
+
+(39) 23 Sketch of proof of Lemma 4. 
+
+• Differentiate the one-state stop-gradient KL and show that successor-independent teacher factors con-tribute zero gradient (Lemma 5). • Identify the active hint factor and show that the local gradient vanishes away from hint-source states (Lemma 6). • Sum the local gradients over visited states and average over the mini-batch to obtain the stated sparse gradient formula (Lemma 4). 
+
+Lemma 5 (The one-state stop-gradient identity) . For pt(v) = πW(v | yt, x ℓ) and the stop-gradient teacher 
+
+qt, the KL and softmax derivatives satisfy Equation 42–Equation 43. In particular, a teacher factor inde-pendent of the proposed successor contributes zero gradient. Proof. For one batch element and one time t < T , set 
+
+u := yt, ht := ( y0, . . . , y t), pt(v) := πW(v | u, x ℓ), qt(v) := πW(v | ht, x ℓ, c ).
+
+With 
+
+χW(c | ht, v, x ℓ) := 
+
+> I
+
+Y
+
+> i=1
+
+χW(ci | ht, v, x ℓ), (40) 
+
+qt(v) = χW(c | ht, v, x ℓ)pt(v)
+
+P  
+
+> z∈N (u)
+
+χW(c | ht, z, x ℓ)pt(z) , (41) we have 
+
+∇WDKL (pt ∥ SG( qt)) = X 
+
+> v∈N (u)
+
+∇Wpt(v) log pt(v)
+
+qt(v) , (42) 
+
+∇Wpt(v) = pt(v)xℓ
+
+eu,v − X 
+
+> z∈N (u)
+
+pt(z)eu,z 
+
+
+
+> ⊤
+
+, (43) 
+
+X 
+
+> v∈N (u)
+
+∇Wpt(v) = 0 . (44) 
+
+Lemma 6 (Cancellation of inactive hints) . With the hint in Equation 9, the one-state gradient vanishes unless t = τi < T for a hint edge (ui, v i). At such a time it equals log( ϵrel )∇WπW(vi | ui, x ℓ).Proof. By Lemma 5, it suffices to identify the successor-dependent hint factor. For each hint edge ci,
+
+χW(ci | ht, v, x ℓ) ∝
+
+
+
+1, τi = t, v = vi,ϵrel , τi = t, v ̸ = vi,
+
+1, τi < t, y τi+1 = vi,ϵrel , τi < t, y τi+1 ̸ = vi,ZW,i (xℓ), τi > t, 
+
+24 where 
+
+ZW,i (xℓ) = πW(vi | ui, x ℓ) + ϵrel (1 − πW(vi | ui, x ℓ)) .
+
+Hence, if 
+
+t / ∈ { τ1, . . . , τ I },
+
+then 
+
+χW(c | ht, v, x ℓ) ≡ const. for v =⇒ qt(v) = pt(v) =⇒ ∇WDKL (pt ∥ SG( qt)) = 0 .
+
+If t = τi < T , node-simplicity of the sampled teacher path gives τi′̸ = t for i′̸ = i, and 
+
+Zt := pt(vi) + ϵrel (1 − pt(vi)) ,qt(v) = 
+
+(
+
+pt(v)/Z t, v = vi,ϵrel pt(v)/Z t, v̸ = vi.
+
+Thus 
+
+∇WDKL (pt ∥ SG( qt)) = X
+
+> v
+
+∇Wpt(v) log Zt − (log ϵrel ) X 
+
+> v̸=vi
+
+∇Wpt(v)= (log ϵrel )∇Wpt(vi)= (log ϵrel )pt(vi)xℓ
+
+eui,v i − X 
+
+> v∈N (ui)
+
+pt(v)eui,v 
+
+
+
+> ⊤
+
+.
+
+Main proof of Lemma 4. 
+
+Proof. Apply Lemma 6 to each visited state. Node simplicity permits each hint source to contribute at most once. Averaging over the B paths gives 
+
+∇WLSD (W; Dℓ) = log ϵrel 
+
+B
+
+> B
+
+X
+
+> b=1
+> I(b)
+
+X
+
+> i=1
+
+1{τ (b) 
+
+> i
+
+< T (b)}πW(v(b) 
+
+> i
+
+| u(b) 
+
+> i
+
+, x (b) 
+
+> ℓ
+
+)
+
+· x(b)
+
+> ℓ
+
+eu(b) 
+
+> i,v (b)
+> i
+
+− X  
+
+> v∈N (u(b)
+> i)
+
+πW(v | u(b) 
+
+> i
+
+, x (b) 
+
+> ℓ
+
+)eu(b) 
+
+> i,v
+
+
+
+> ⊤
+
+.
+
+25 B.3 Learning hint-supported inter-cluster transitions 
+
+We introduce the notation required for the following statement. Fix a task Dℓ, and consider n consecutive SD updates on this task starting from W(0) . Let Nℓ := |Eℓ|, and enumerate the elements of Eℓ as em =(um, v m), m ∈ { 1, . . . , N ℓ}. Assumption 1 and the definition of M imply Nℓ ≤ PKk=1 |∂⋆ℓ Ck| ≤ KM .Let Sℓ,k ⊆ ˚Ck be the set of relevant starts in Ck: the task start yℓ, 0 when it belongs to Ck, an endpoint in Ck
+
+of a correct inter-cluster transition entering Ck. For s ∈ S ℓ,k , write U sℓ,k for the first boundary node reached by the rollout started from s, and define 
+
+λℓ := min      
+
+> k:∂⋆ℓCk̸=∅
+> s∈S ℓ,k , u ∈∂⋆ℓCk
+
+PW(0) 
+
+ U sℓ,k = u | s, x ℓ
+
+ . (45) Assumption 2 implies the explicit, K-uniform bound λℓ ≥ croute /M > 0. Lemma 4 shows that SD updates only edges whose sources are hint-source boundary nodes. Hence all transitions whose sources are interior nodes remain unchanged, and the first-boundary distribution in Equation 45 is preserved during SD training. For each em, fix a shortest sequence Qm = ( Ck0 , . . . , C kLm ) in the cluster-level graph induced by Eℓ,from the cluster containing yℓ, 0 to the cluster containing um. The sequence can be chosen without repeated clusters, and therefore Lm ≤ K − 1. By Assumption 2, every correct inter-cluster edge has pretrained probability at least cint ϵ2. We therefore use the K-explicit lower bound 
+
+ρℓ,K,M := 1
+
+|P ℓ|
+
+ croute 
+
+M
+
+K
+
+(cint ϵ2)K−1 = cK
+
+> route
+
+cK−1int ϵK−12
+
+M K |P ℓ| . (46) Under Equation 6, every path in Pℓ is sampled with probability exactly 1/|P ℓ|. The conditional indepen-dence properties used below are exactly those specified in the fine-tuning setup above. Let {ηj }j≥1 be a diminishing positive step-size sequence, and let δ ∈ (0 , 1) . Define the finite-sample effective drift by 
+
+D(K) 
+
+> ℓ,n
+
+(δ) := 
+
+ρℓ,K,M nX
+
+> j=1
+
+ηj −
+
+vuut log( KM/δ )2B
+
+> n
+
+X
+
+> j=1
+
+η2
+
+> j
+
+
+
+> +
+
+. (47) 
+
+Proposition 2 (Learning hint-supported inter-cluster transitions) . Suppose Assumptions 1 and 2 hold and 
+
+0 < ϵ 2 ≤ 1. With probability at least 1 − δ, simultaneously for every (um, v m) ∈ Eℓ,
+
+πW(n) (vm | um, x ℓ) ≥ 1 − O
+
+
+
+ϵ2 + ϵ22
+
+
+
+log 1
+
+ϵrel 
+
+
+
+D(K) 
+
+> ℓ,n
+
+(δ)
+
+−1!
+
+, (48) 
+
+where [a]+ := max {a, 0}. If in addition ηj = Θ( j−ν ) for some ν ∈ [0 , 1) , then for sufficiently large n the drift term dominates the fluctuation term and 
+
+πW(n) (vm | um, x ℓ) ≥ 1 − O
+
+
+
+ϵ2 + ϵ22
+
+
+
+log 1
+
+ϵrel 
+
+
+
+ρℓ,K,M n1−ν
+
+−1!
+
+. (49) 
+
+The learning term inside the brackets has the explicit M, K dependence 
+
+ϵ22ρℓ,K,M n1−ν = cK
+
+> route
+
+cK−1int 
+
+M K |P ℓ| ϵK+1 2 n1−ν .
+
+26 Sketch of proof of Proposition 2. 
+
+• Show that local SD updates increase correct logit gaps and preserve the interior transition kernel (Lemma 7). • Use retained boundary coverage to lower-bound the probability of an update opportunity for each correct edge (Lemma 9). • Control the weighted update counts simultaneously using conditional mini-batch concentration (Lemma 10). • Convert the weighted update counts into transition-error bounds through the odds estimate (Lemma 8). 
+
+Shared notation and constants. The local update and odds estimates below apply under either Assump-tions 1 and 2 or Assumptions 1 and 3. Unless stated otherwise, the SD lemmas concern training on the fixed task alone. Throughout the SD lemmas, Cbad ϵ1 bounds the initial invalid-boundary probability and cint ϵ2
+
+bounds every initial correct inter-cluster probability from below. The constants are positive and uniform; we may take cint ≤ 1 and croute /M ≤ 1. For the rare-entrance case, let em = ( um, v m) be the edge in Assumption 3, so um = u∗. The first-boundary lower bound is retained at all other correct boundaries; 
+
+croute and ρℓ,K,M use only this retained lower bound in the rare case. Let Fj−1 be the training history before iteration j. Define 
+
+τ (b,j ) 
+
+> i
+
+= inf {t ≥ 0 : y(b,j ) 
+
+> t
+
+= ui}, I(b,j ) 
+
+> i
+
+= 1{ei ∈ c(b,j )}1{τ (b,j ) 
+
+> i
+
+< T (b,j )},
+
+n(j) 
+
+> i
+
+=
+
+> B
+
+X
+
+> b=1
+
+I(b,j ) 
+
+> i
+
+, p(j) 
+
+> i
+
+= p(j) 
+
+> ui,v i
+
+,p(j) 
+
+> u,v
+
+= πW(j) (v | u, x ℓ), z(j) 
+
+> u,v
+
+= x⊤ 
+
+> ℓ
+
+W(j)eu,v ,r(j) 
+
+> i
+
+= (1 − p(j) 
+
+> i
+
+)/p (j) 
+
+> i
+
+, ai,j = ηj
+
+B log(1 /ϵ rel )n(j) 
+
+> i
+
+p(j−1)  
+
+> i
+
+.
+
+The symbols eu,v denote one-hot edge features; ei denotes a graph edge. Assumption 1 gives distinct sources 
+
+ui and Nℓ = P 
+
+> h
+
+|∂⋆ℓ Ch| ≤ KM .
+
+Lemma 7 (Local update and invariant interior transitions) . For every training history and every outgoing edge of ui,
+
+W(j)eui,v = W(j−1) eui,v + ai,j (1{v = vi} − p(j−1)  
+
+> ui,v
+
+)xℓ. (50) 
+
+Only columns whose sources occur in Eℓ can change. Moreover, 
+
+p(j) 
+
+> i
+
+≥ p(j−1)  
+
+> i
+
+, p(j)
+
+> ui,v
+
+p(j)
+
+> i
+
+≤ p(j−1) 
+
+> ui,v
+
+p(j−1) 
+
+> i
+
+. (51) 
+
+First-boundary hitting distributions from relevant starts remain equal to their initial values. Proof. Lemma 4 gives the visited-source contribution 
+
+(log ϵrel )p(j−1)  
+
+> i
+
+xℓ
+
+eui,v i − X 
+
+> v∈N (ui)
+
+p(j−1)  
+
+> ui,v
+
+eui,v 
+
+
+
+> ⊤
+
+.
+
+27 The hint’s normalization term vanishes because P 
+
+> v
+
+∇pui,v = 0 . At other sources the hinted and unhinted distributions agree, giving zero gradient. Uniqueness, node simplicity, and mini-batch averaging yield Equa-tion 50. For v̸ = vi, the correct-minus-incorrect logit gap increases by 
+
+ai,j ∥xℓ∥22(1 − p(j−1)  
+
+> i
+
++ p(j−1)  
+
+> ui,v
+
+) ≥ 0.
+
+Exponentiating proves the ratio inequality, and summing the incorrect-to-correct ratios proves monotonicity of p(j) 
+
+> i
+
+. Interior sources never occur in hints, so all transitions before the first boundary are unchanged. This also preserves boundary-hitting properness. 
+
+Lemma 8 (Error from weighted update counts) . For every history and every i,
+
+1 − p(n) 
+
+> i
+
+≤
+
+1 + c2int ϵ22 log(1 /ϵ rel ) 1
+
+B
+
+> n
+
+X
+
+> j=1
+
+ηj n(j)
+
+> i
+
+
+
+> −1
+
+. (52) 
+
+If p(0)  
+
+> i
+
+< 1, the stronger estimate is 
+
+r(n) 
+
+> i
+
+≤
+
+(r(0)  
+
+> i
+
+)−1 + ∥xℓ∥22(p(0)  
+
+> i
+
+)2 log(1 /ϵ rel ) 1
+
+B
+
+> n
+
+X
+
+> j=1
+
+ηj n(j)
+
+> i
+
+
+
+> −1
+
+. (53) 
+
+Proof. If p(0)  
+
+> i
+
+= 1 , the assertion is immediate. Otherwise the logit-gap estimate above gives r(j) 
+
+> i
+
+≤
+
+r(j−1)  
+
+> i
+
+exp[ −ai,j ∥xℓ∥22(1 − p(j−1)  
+
+> i
+
+)] . Since r(j−1)  
+
+> i
+
+≤ r(0)  
+
+> i
+
+and p(j−1)  
+
+> i
+
+(1 − p(j−1)  
+
+> i
+
+) ≥ r(j−1)  
+
+> i
+
+/(1 + r(0)  
+
+> i
+
+)2,the inequality et ≥ 1 + t implies 
+
+1
+
+r(j)
+
+> i
+
+≥ 1
+
+r(j−1) 
+
+> i
+
++ ηj
+
+B ∥xℓ∥22(p(0)  
+
+> i
+
+)2 log(1 /ϵ rel )n(j) 
+
+> i
+
+.
+
+Telescoping proves Equation 53. For the error bound, use p(0)  
+
+> i
+
+≥ cint ϵ2 and ∥xℓ∥22 ≥ 1, and write 1 − p(n) 
+
+> i
+
+=(1 + 1 /r (n) 
+
+> i
+
+)−1.
+
+Lemma 9 (Update opportunities from retained coverage) . Under Assumptions 1 and 2, every ei ∈ Eℓ
+
+satisfies 
+
+E[I(b,j ) 
+
+> i
+
+| F j−1] ≥ ρℓ,K,M . (54) 
+
+Under Assumptions 1 and 3, the same holds for every ei̸ = em whose source cluster is reachable from the original-start cluster in the cluster graph induced by Eℓ \ { em}.Proof. Fix an edge in the specified set. Choose a shortest sequence of clusters leading to its source cluster, using correct inter-cluster edges (excluding em in the second case). The sequence has no repeated cluster and at most K − 1 transitions. Specify one such edge between each adjacent pair, and finally specify boundary 
+
+ui in the last cluster. In the second case all specified boundary sources differ from um, since its unique correct edge is em. Also, the sequence cannot enter Ck by Assumption 3. Every internal segment begins at a relevant start. Its probability of first reaching the specified boundary is at least croute /M , by retained coverage and Lemma 7. At each required crossing the correct edge probability is at least cint ϵ2, by monotonicity. Apply the Markov property successively at these boundary and entry times. There are at most K internal segments and K − 1 crossings, so 
+
+P(τ (b,j ) 
+
+> i
+
+< T (b,j ) | F j−1) ≥ (croute /M )K (cint ϵ2)K−1.
+
+28 Both lower-bound factors can be taken at most one. Since ei ∈ Eℓ, at least one correct path contains ei, so the uniform hint contains it with probability at least 1/|P ℓ|. The stipulated conditional independence of hint and student gives Equation 54. 
+
+Lemma 10 (Simultaneous learning with finite mini-batches) . For the applicable edge set in Lemma 9, with probability at least 1 − δ, every such edge satisfies 
+
+1
+
+B
+
+> n
+
+X
+
+> j=1
+
+ηj n(j) 
+
+> i
+
+≥ D(K) 
+
+> ℓ,n
+
+(δ). (55) 
+
+Combining this event with Lemma 8 gives simultaneous error bounds for all these edges. Proof. For a fixed i, conditional mini-batch independence and Hoeffding’s lemma give, for t > 0,
+
+E
+
+"
+
+exp 
+
+(
+
+− tη j
+
+B
+
+> B
+
+X
+
+> b=1
+
+(I(b,j ) 
+
+> i
+
+− E[I(b,j ) 
+
+> i
+
+| F j−1]) 
+
+)
+
+Fj−1
+
+#
+
+≤ exp t2η2
+
+> j
+
+8B
+
+!
+
+.
+
+Iterating this bound over j gives the exponent t2 P 
+
+> j
+
+η2 
+
+> j
+
+/(8 B) for the full sum. Exponential Markov and optimization over t imply 
+
+P
+
+ 1
+
+B
+
+> n
+
+X
+
+> j=1
+
+ηjBX
+
+> b=1
+
+[I(b,j ) 
+
+> i
+
+− E[I(b,j ) 
+
+> i
+
+| F j−1]] < −
+
+vuut log( KM/δ )2B
+
+> n
+
+X
+
+> j=1
+
+η2
+
+> j
+
+ ≤ δKM .
+
+Use Lemma 9 and union-bound over at most KM edges. Nonnegativity of the weighted counts permits taking the positive part, giving Equation 55. Lemma 8 gives the error bound. If the edge set is empty, the simultaneous assertion is vacuous. 
+
+Lemma 11 (Converting edge accuracy to rollout accuracy) . Under Assumptions 1 and 2, consider any predictor whose interior kernel equals the pretrained kernel, and denote its edge probabilities by p(n) 
+
+> i
+
+. Then every relevant start s ∈ S ℓ,h satisfies 
+
+1 − πW(n) (yT ∈ ˜Cℓ | y0 = s, x ℓ) ≤ Cbad (1 + Nℓ)ϵ1 +
+
+> Nℓ
+
+X
+
+> i=1
+
+(1 − p(n) 
+
+> i
+
+). (56) 
+
+Under Assumptions 1 and 3, if the edges specified in Lemma 9 have error at most ϵ1, then 
+
+1 − πW(n) (yT ∈ ˜Cℓ | yℓ, 0, x ℓ)
+
+≤ Cbad (1 + KM )ϵ1 + KM ϵ 1 + πW(n) (∃t < T : yt = um | yℓ, 0, x ℓ). (57) 
+
+The first inequality is deterministic and does not require the predictor to have been trained on the fixed task alone. Proof. For Equation 56, follow a rollout until reaching the target or the first invalid boundary or incorrect choice at a valid boundary. Before these events, each internal segment starts at a relevant start and is followed by a correct inter-cluster edge. Conditional on the history up to each segment’s start, the invalid-boundary probability is at most Cbad ϵ1. By node simplicity there are at most 1 + Nℓ segments and each correct source is visited at most once. Summing conditional probabilities, including the events that the segments 29 actually start, gives respectively Cbad (1 + Nℓ)ϵ1 and P
+
+> i
+
+(1 − p(n) 
+
+> i
+
+). An incorrect choice includes choosing an intra-cluster edge at a valid boundary. These events cover failure: any reached nonterminal cluster has a correct exit, because the arriving correct edge lies on a correct path with a remaining suffix. The analogous statement holds for the original start. Properness makes each internal segment finite. If the target were never reached while both errors were avoided, one would traverse more than Nℓ distinct correct sources, contradicting node simplicity. For a start already in the target the conclusion is immediate. For Equation 57, start from yℓ, 0 and stop additionally upon visiting um. Before that visit every current cluster is reachable via Eℓ \ { em}, so each encountered correct boundary other than um belongs to the learned set in Lemma 9. Its choice error is at most ϵ1. The invalid-boundary term is unchanged, and the extra stopping event is bounded by the unconditional evaluation visitation probability displayed in Equation 57. The same properness argument covers failure. 
+
+Main proof of Proposition 2. 
+
+Proof. Lemmas 9 and 10 give B−1 P 
+
+> j
+
+ηj n(j) 
+
+> i
+
+≥ D(K) 
+
+> ℓ,n
+
+(δ) simultaneously for all i, with probability at least 
+
+1 − δ. If p(0)  
+
+> i
+
+= 1 , the transition is already correct with probability one. Otherwise, (r(0)  
+
+> i
+
+)−1 = p(0)  
+
+> i
+
+/(1 −
+
+p(0)  
+
+> i
+
+) ≥ cint ϵ2 and (p(0)  
+
+> i
+
+)2 ≥ c2int ϵ22. The stronger estimate in Lemma 8, together with 1−p(n) 
+
+> i
+
+≤ r(n) 
+
+> i
+
+, proves Equation 48. For fixed 0 ≤ ν < 1, Pnj=1 ηj = Θ( n1−ν ), whereas (Pnj=1 η2 
+
+> j
+
+)1/2 is respectively O(n1/2−ν ),
+
+O(plog( en )) , or O(1) as ν < 1/2, ν = 1 /2, or ν > 1/2. Thus the fluctuation is smaller than the drift for sufficiently large n, which proves Equation 49. 
+
+B.4 Single-task rollout accuracy under SD 
+
+Theorem 1 (Single-task learning under SD) . Fix a task Dℓ and let the stepsize ηj = Θ( j−ν ) for some 
+
+ν ∈ [0 , 1/2) . Suppose Assumptions 1 and 2 hold and ϵ1 is sufficiently small. Define 
+
+ξ(K) 
+
+> ℓ,n
+
+(δ) := 
+
+ϵ2 + ϵ22
+
+
+
+log 1
+
+ϵrel 
+
+ "
+
+e−Θ( K log 1 
+
+> ϵ2)
+
+n1−ν
+
+M K |P ℓ| −
+
+r log( KM/δ )
+
+B n1/2−ν
+
+#+
+
+> −1
+
+. (11) 
+
+Then, with probability at least 1 − δ,
+
+πW(n)
+
+
+
+yT ∈ ˜Cℓ | yℓ, 0, x ℓ
+
+
+
+≥ 1 − O(KM ϵ 1) − O
+
+
+
+KM ξ (K) 
+
+> ℓ,n
+
+(δ)
+
+
+
+. (12) 
+
+Sketch of proof of Theorem 1. 
+
+• Bound the errors of all correct inter-cluster transitions on one common training event (Proposition 2). • Show that the interior transition kernel retains its pre-trained routing guarantees (Lemma 7). • Bound rollout failure by the probabilities of invalid-boundary encounters and incorrect transition choices (Lemma 11). 30 Main proof of Theorem 1. 
+
+Proof. Proposition 2 gives an event of probability at least 1 − δ on which 1 − p(n) 
+
+> i
+
+≤ Ctr ξ(K) 
+
+> ℓ,n
+
+(δ) for every 
+
+i. Lemma 7 preserves the interior kernel. Apply Lemma 11 with s = yℓ, 0 to obtain 
+
+1 − πW(n) (yT ∈ ˜Cℓ | yℓ, 0, x ℓ) ≤ Cbad (1 + Nℓ)ϵ1 + NℓCtr ξ(K) 
+
+> ℓ,n
+
+(δ)= O(KM ϵ 1) + O(KM ξ (K) 
+
+> ℓ,n
+
+(δ)) .
+
+This proves Equation 12 on that same event. In the regime where the learning term dominates, substitution of Equation 46 gives 
+
+KM ξ (K) 
+
+> ℓ,n
+
+(δ) = O KM K+1 |P ℓ|
+
+cK
+
+> route
+
+cK−1int ϵK+1 2 n1−ν log(1 /ϵ rel )
+
+!
+
+.
+
+B.5 Single-task learning under SFT 
+
+Set 
+
+mν := min {ν, 1 − ν}.
+
+We prove the stronger batch-explicit bound 
+
+min 
+
+> u∈U ℓ
+
+πW(n)SFT 
+
+(Aℓ(u) | u, x ℓ) ≥ 1 − Cℓ|P ℓ|
+
+ 1
+
+n + log 2(e + n|P ℓ|)
+
+n1−ν + (1 + 2 log(2 /δ )) log( en )
+
+B n mν
+
+
+
+, (58) where Cℓ is independent of n, B, δ .Let Γ be one teacher path. Define 
+
+ωℓ,u := E[Nu(Γ)] , rℓ,u (v) := E[Nu,v (Γ)] 
+
+ωℓ,u 
+
+, v ∈ A ℓ(u). (59) Then 
+
+ωℓ,u ≥ 1
+
+|P ℓ| , rℓ,u (v) > 0. (60) 
+
+Theorem 2 (Single-task learning under SFT) . Fix δ ∈ (0 , 1) . Suppose the stepsize ηj = Θ( j−ν ) for some 
+
+ν ∈ (0 , 1/2) and W(0) SFT = W(0) . Then, with probability at least 1 − δ,
+
+min 
+
+> u∈U ℓ
+
+πW(n)SFT 
+
+(Aℓ(u) | u, x ℓ) ≥ 1 − ˜O
+
+
+
+|P ℓ|
+
+ 1
+
+n1−ν + log( e/δ )
+
+Bn ν
+
+ 
+
+. (13) 
+
+Here Uℓ is the set of nodes appearing in the correct paths except for the terminal, and Aℓ(u) is the set of their correct successors from u. ˜O(·) hides logarithmic factors in n and |P ℓ|.
+
+31 Sketch of proof of Theorem 2. 
+
+• Derive the sampled SFT gradient and identify a convex potential whose gradient is its conditional expectation (Lemmas 12 and 13). • Construct a finite comparator with small potential and a controlled distance from the initial parameter (Lemma 14). • Verify the conditional mini-batch noise and smoothness bounds, including the bounded initial tran-sient (Lemmas 15 and 16). • Apply the finite-comparator last-iterate bound and evaluate the polynomial step-size sums (Lem-mas 17 and 18). • Convert the resulting potential bound into successor-set accuracy simultaneously at every teacher source (Lemmas 13 and 19). At iteration j,
+
+L(j)SFT (W) := − 1
+
+B
+
+> B
+
+X 
+
+> b=1
+> T(b,j )−1
+
+X
+
+> t=0
+
+log πW(y∗(b,j ) 
+
+> t+1
+
+| y∗(b,j ) 
+
+> t
+
+, x ℓ), (61) 
+
+gj := ∇WL(j)SFT (W(j−1) SFT ),
+
+W(j)SFT := W(j−1) SFT − ηj gj . (62) 
+
+Lemma 12 (Exact sampled SFT gradient and update support) . The mini-batch update Equation 62 has gradient Equation 63, whose Frobenius norm is at most Gℓ = p2d(|V | − 1) . Every update lies in span {xℓ}
+
+within each source block, and only sources in Uℓ can change. Proof. Direct differentiation gives 
+
+gj = 1
+
+B
+
+> B
+
+X
+
+> b=1
+
+X
+
+> u∈U ℓ
+
+xℓ Nu(Γ (b) 
+
+> j
+
+) X 
+
+> v∈N (u)
+
+πW(j−1) SFT 
+
+(v | u, x ℓ)eu,v − X
+
+> v∈A ℓ(u)
+
+Nu,v (Γ (b) 
+
+> j
+
+)eu,v 
+
+!⊤
+
+. (63) For one path Γ, let h(Γ; W) denote the corresponding single-path gradient. If vΓ(u) is the successor of the visited source u, then 
+
+X 
+
+> v∈N (u)
+
+πW(v | u, x ℓ)eu,v − eu,v Γ(u)
+
+> 22
+
+= X 
+
+> v∈N (u)
+
+πW(v | u, x ℓ)2 + 1 − 2πW(vΓ(u) | u, x ℓ)
+
+≤ 2.
+
+Since the source-node edge blocks are disjoint, 
+
+∥h(Γ; W)∥2 
+
+> F
+
+≤ 2∥xℓ∥22(|Γ| − 1) ≤ 2d(|V | − 1) .
+
+Hence 
+
+∥gj ∥F ≤ Gℓ = p2d(|V | − 1) . (64) 32 Define 
+
+Pℓ,u (W) := πW(Aℓ(u) | u, x ℓ),
+
+and 
+
+Fℓ(W) := X
+
+> u∈U ℓ
+
+ωℓ,u 
+
+
+
+DKL 
+
+
+
+rℓ,u 
+
+πW(· | u, x ℓ)
+
+Pℓ,u (W)
+
+
+
+− log Pℓ,u (W)
+
+
+
+. (65) 
+
+Lemma 13 (Convex potential, unbiased drift, and support error) . The potential Fℓ in Equation 65 is non-negative and convex, the sampled gradient satisfies Equation 67, and max u∈U ℓ [1 − Pℓ,u (W)] ≤ |P ℓ|Fℓ(W)
+
+for every finite W.Proof. For every u,
+
+DKL 
+
+
+
+rℓ,u 
+
+πW
+
+Pℓ,u 
+
+
+
+− log Pℓ,u 
+
+= X
+
+> v∈A ℓ(u)
+
+rℓ,u (v) log rℓ,u (v) − X
+
+> v∈A ℓ(u)
+
+rℓ,u (v) log πW(v | u, x ℓ).
+
+Therefore 
+
+Fℓ(W) = C′ 
+
+> ℓ
+
+− X
+
+> u∈U ℓ
+
+X
+
+> v∈A ℓ(u)
+
+E[Nu,v (Γ)] log πW(v | u, x ℓ), (66) so Fℓ is convex. We next verify the conditional-drift identity explicitly. Let Fj−1 be the sigma-field gener-ated by all training randomness up to iteration j − 1. Conditional on Fj−1, the parameter W(j−1) SFT is fixed, while Γ(1)  
+
+> j
+
+, . . . , Γ(B) 
+
+> j
+
+are conditionally independent and each is uniformly distributed on Pℓ. Therefore, for every u ∈ U ℓ, v ∈ A ℓ(u), and b ∈ { 1, . . . , B },
+
+E
+
+h
+
+Nu(Γ (b) 
+
+> j
+
+) | F j−1
+
+i
+
+= E[Nu(Γ)] = ωℓ,u , by conditional uniform sampling ,
+
+E
+
+h
+
+Nu,v (Γ (b) 
+
+> j
+
+) | F j−1
+
+i
+
+= E[Nu,v (Γ)] = ωℓ,u rℓ,u (v), by Equation 59 .
+
+Moreover, for every correct teacher path Γ,
+
+Nu(Γ) = X
+
+> v∈A ℓ(u)
+
+Nu,v (Γ) , each source occurrence has one correct successor .
+
+Taking expectations gives 
+
+ωℓ,u = X
+
+> v∈A ℓ(u)
+
+E[Nu,v (Γ)] .
+
+Now apply conditional expectation to Equation 63. Write Wj−1 := W(j−1) SFT only within the following calculation. Since Wj−1 is Fj−1-measurable, the softmax probabilities are fixed under the conditional expectation. Substituting the two conditional-expectation identities above into Equation 63 gives 
+
+E[gj | F j−1] = 1
+
+B
+
+> B
+
+X
+
+> b=1
+
+X
+
+> u∈U ℓ
+
+xℓ ωℓ,u 
+
+X 
+
+> z∈N (u)
+
+πWj−1 (z | u, x ℓ)eu,z − X
+
+> v∈A ℓ(u)
+
+E[Nu,v (Γ)] eu,v 
+
+!⊤
+
+= X
+
+> u∈U ℓ
+
+xℓ ωℓ,u 
+
+X 
+
+> z∈N (u)
+
+πWj−1 (z | u, x ℓ)eu,z − X
+
+> v∈A ℓ(u)
+
+E[Nu,v (Γ)] eu,v 
+
+!⊤
+
+.
+
+33 The second equality holds because the summand no longer depends on b, so the factor B−1 cancels with the sum over the B mini-batch elements. We next differentiate the potential. Equation 66 gives 
+
+∇Fℓ(W) = − X
+
+> u∈U ℓ
+
+X
+
+> v∈A ℓ(u)
+
+E[Nu,v (Γ)] ∇W log πW(v | u, x ℓ),
+
+because C′ 
+
+> ℓ
+
+is independent of W. For the softmax predictor, 
+
+−∇ W log πW(v | u, x ℓ) = xℓ
+
+ X 
+
+> z∈N (u)
+
+πW(z | u, x ℓ)eu,z − eu,v 
+
+
+
+> ⊤
+
+.
+
+Substituting this identity and collecting the terms with the same source u yields 
+
+∇Fℓ(W) = X
+
+> u∈U ℓ
+
+xℓ ωℓ,u 
+
+X 
+
+> z∈N (u)
+
+πW(z | u, x ℓ)eu,z 
+
+− X
+
+> v∈A ℓ(u)
+
+E[Nu,v (Γ)] eu,v 
+
+!⊤
+
+.
+
+Here we used ωℓ,u = P 
+
+> v∈A ℓ(u)
+
+E[Nu,v (Γ)] , which follows from the preceding path-count identity. Evalu-ating this identity at W = W(j−1) SFT proves 
+
+E[gj | F j−1] = ∇Fℓ(W(j−1) SFT ). (67) Using 
+
+DKL (·∥· ) ≥ 0, − log z ≥ 1 − z, 
+
+we obtain, for every u,
+
+Fℓ(W) ≥ ωℓ,u [− log Pℓ,u (W)] ≥ 1
+
+|P ℓ| [1 − Pℓ,u (W)] .
+
+Thus 
+
+max 
+
+> u∈U ℓ
+
+[1 − Pℓ,u (W)] ≤ |P ℓ|Fℓ(W). (68) 
+
+Lemma 14 (A finite comparator approaching the optimal support) . For every R > 0, there is a finite WR
+
+satisfying Fℓ(WR) ≤ C0e−R and ∥WR − W(0) ∥2F ≤ C1(1 + R + log |P ℓ|)2, with constants independent of R, n, B, δ .Proof. For R > 0, set 
+
+z(R) 
+
+> u,v
+
+=
+
+(
+
+R + log rℓ,u (v), v ∈ A ℓ(u),
+
+0, v / ∈ A ℓ(u). (69) 34 Let 
+
+m− 
+
+> ℓ,u
+
+:= |N (u) \ A ℓ(u)|.
+
+Then 
+
+X
+
+> v∈A ℓ(u)
+
+ez(R) 
+
+> u,v
+
+= eR,
+
+X
+
+> v / ∈A ℓ(u)
+
+ez(R) 
+
+> u,v
+
+= m−
+
+> ℓ,u
+
+,Pℓ,u (WR) = eR
+
+eR + m−
+
+> ℓ,u
+
+= 11 + m−
+
+> ℓ,u
+
+e−R ,πWR (v | u, x ℓ)
+
+Pℓ,u (WR) = rℓ,u (v), v ∈ A ℓ(u).
+
+Hence 
+
+Fℓ(WR) = X
+
+> u∈U ℓ
+
+ωℓ,u log(1 + m−
+
+> ℓ,u
+
+e−R)
+
+≤ e−R X
+
+> u∈U ℓ
+
+ωℓ,u m− 
+
+> ℓ,u
+
+≤ | E|e−R =: C0e−R. (70) Set 
+
+z(0)  
+
+> u,v
+
+:= x⊤ 
+
+> ℓ
+
+W(0) eu,v ,
+
+and, for u ∈ U ℓ, v ∈ N (u),
+
+WReu,v := W(0) eu,v + z(R) 
+
+> u,v
+
+− z(0) 
+
+> u,v
+
+∥xℓ∥22
+
+xℓ,
+
+with all other columns unchanged. Then 
+
+x⊤ 
+
+> ℓ
+
+WReu,v = z(R) 
+
+> u,v
+
+,
+
+∥WR − W(0) ∥2 
+
+> F
+
+= 1
+
+∥xℓ∥22
+
+X
+
+> u∈U ℓ
+
+X 
+
+> v∈N (u)
+
+|z(R) 
+
+> u,v
+
+− z(0) 
+
+> u,v
+
+|2.
+
+Since 
+
+∥xℓ∥22 ≥ 1,rℓ,u (v) ≥ 1
+
+|P ℓ| =⇒ |z(R) 
+
+> u,v
+
+| ≤ R + log |P ℓ|,Zℓ, 0 := max  
+
+> u∈U ℓ
+> v∈N (u)
+
+|z(0) 
+
+> u,v
+
+| < ∞,
+
+we obtain 
+
+∥WR − W(0) ∥2 
+
+> F
+
+≤ | E|(R + log |P ℓ| + Zℓ, 0)2 ≤ C1(1 + R + log |P ℓ|)2. (71) 35 Write 
+
+gj = 1
+
+B
+
+> B
+
+X
+
+> b=1
+
+h(b) 
+
+> j
+
+, ζj := gj − ∇ Fℓ(W(j−1) SFT ),
+
+where 
+
+h(b) 
+
+> j
+
+:= h(Γ (b) 
+
+> j
+
+; W(j−1) SFT ),
+
+ξ(b) 
+
+> j
+
+:= h(b) 
+
+> j
+
+− E[h(b) 
+
+> j
+
+| F j−1].
+
+Then 
+
+ζj = 1
+
+B
+
+> B
+
+X
+
+> b=1
+
+ξ(b) 
+
+> j
+
+, E[ζj | F j−1] = 0 .
+
+Lemma 15 (Conditional mini-batch noise) . The centered noise ζj has conditional mean zero and variance at most G2 
+
+> ℓ
+
+/B . There is σ2 
+
+> ℓ,B
+
+= OG(B−1) such that Equation 73 holds for 0 ≤ λ ≤ σ−2 
+
+> ℓ,B
+
+.Proof. Conditional independence gives 
+
+E[∥ζj ∥2 
+
+> F
+
+| F j−1] = 1
+
+B2
+
+> B
+
+X
+
+> b=1
+
+E[∥ξ(b) 
+
+> j
+
+∥2 
+
+> F
+
+| F j−1] ≤ G2
+
+> ℓ
+
+B . (72) Let D := d|E|. Since 
+
+∥ξ(b) 
+
+> j
+
+∥F ≤ 2Gℓ,
+
+coordinate-wise Hoeffding gives, for every t > 0,
+
+P (∥ζj ∥F ≥ t | F j−1) ≤ 2D exp 
+
+
+
+− Bt 2
+
+8DG 2
+
+> ℓ
+
+
+
+.
+
+Hence, for a constant cD > 0 depending only on D,
+
+σ2 
+
+> ℓ,B
+
+:= cDG2
+
+> ℓ
+
+B ,
+
+E
+
+"
+
+exp ∥ζj ∥2
+
+> F
+
+σ2
+
+> ℓ,B
+
+!
+
+Fj−1
+
+#
+
+≤ e. 
+
+For 0 ≤ λ ≤ σ−2 
+
+> ℓ,B
+
+, put θ := λσ 2 
+
+> ℓ,B
+
+∈ [0 , 1] . Then 
+
+E
+
+h
+
+eλ∥ζj ∥2 
+
+> F
+
+Fj−1
+
+i
+
+= E
+
+
+
+e∥ζj ∥2 
+
+> F/σ 2
+> ℓ,B
+
+θ
+
+Fj−1
+
+
+
+≤
+
+
+
+E
+
+h
+
+e∥ζj ∥2  
+
+> F/σ 2
+> ℓ,B
+
+Fj−1
+
+i θ
+
+≤ eλσ 2 
+
+> ℓ,B
+
+, (73) and 
+
+σ2 
+
+> ℓ,B
+
+= OG(B−1).
+
+36 Lemma 16 (Smoothness and a bounded initial transient) . The potential is Lℓ-smooth with Lℓ ≤ d. For 
+
+0 < ν < 1, there is a deterministic j0, independent of n, B, δ , after which ηj ≤ 1/(2 Lℓ). The finite comparator of Lemma 14 satisfies Equation 75 uniformly over the training history before j0.Proof. For a perturbation H, let 
+
+au(H) := x⊤ 
+
+> ℓ
+
+He u, ·, pu := πW(· | u, x ℓ).
+
+From Equation (66), 
+
+∇2Fℓ(W)[ H, H ] = X
+
+> u∈U ℓ
+
+ωℓ,u au(H)⊤ 
+
+Diag( pu) − pup⊤
+
+> u
+
+
+
+au(H)
+
+≤ X
+
+> u∈U ℓ
+
+ωℓ,u ∥au(H)∥22 ≤ ∥ xℓ∥22∥H∥2 
+
+> F
+
+≤ d∥H∥2
+
+> F
+
+.
+
+Thus 
+
+Lℓ ≤ d. (74) Since ηj = Θ( j−ν ), there exists a fixed j0 such that 
+
+ηj ≤ 12Lℓ
+
+, j ≥ j0.
+
+For n < j 0, Equation (58) is made trivial by enlarging Cℓ. Hence assume n ≥ j0. Also, 
+
+∥W(j0−1) SFT − WR∥F ≤ ∥ W(0) − WR∥F + Gℓj0−1X
+
+> j=1
+
+ηj ,
+
+so 
+
+∥W(j0−1) SFT − WR∥2 
+
+> F
+
+≤ C2(1 + R + log |P ℓ|)2. (75) 
+
+Lemma 17 (A finite-comparator last-iterate bound) . For every deterministic finite comparator WR and 
+
+n ≥ j0, the bound Equation 78 holds with probability at least 1 − δ. Its constants are independent of 
+
+n, B, δ, R .Proof. We next verify explicitly that the last-iterate argument does not require Fℓ to attain its infimum at a finite parameter. Fix the finite comparator WR constructed above. Equation 62 gives 
+
+2ηj
+
+D
+
+gj , W(j−1) SFT − WR
+
+E
+
+= ∥W(j−1) SFT − WR∥2 
+
+> F
+
+− ∥ W(j)SFT − WR∥2 
+
+> F
+
++ η2 
+
+> j
+
+∥gj ∥2
+
+> F
+
+. (76) Moreover, convexity of Fℓ and the definition of ζj imply 
+
+Fℓ(W(j−1) SFT ) − Fℓ(WR) ≤
+
+D
+
+∇Fℓ(W(j−1) SFT ), W(j−1) SFT − WR
+
+E
+
+=
+
+D
+
+gj , W(j−1) SFT − WR
+
+E
+
+−
+
+D
+
+ζj , W(j−1) SFT − WR
+
+E
+
+. (77) 37 Equations 76 and 77 are the comparator-dependent one-step relations used in the Euclidean convex spe-cialization of Lemma 4.3 of Liu and Zhou (2024). The subsequent weighted telescoping and martingale argument uses the reference point only through these relations and the finite initial Euclidean distance. Therefore, using Equation 73, the same argument applies with this arbitrary finite comparator WR and does not require a finite minimizer of Fℓ.Specializing that argument to 
+
+ψ(W) := 12 ∥W∥2
+
+> F
+
+, μf = μh = M = 0 , γj = ηj ,
+
+thus gives, for every finite WR, with probability at least 1 − δ,
+
+Fℓ(W(n)SFT ) − Fℓ(WR) ≤ C3
+
+"
+
+∥W(j0−1) SFT − WR∥2
+
+> F
+
+Pnj=j0 ηj
+
++ σ2
+
+> ℓ,B
+
+
+
+1 + 2 log 2
+
+δ
+
+ nX
+
+> j=j0
+
+η2
+
+> j
+
+Pns=j ηs
+
+#
+
+. (78) 
+
+Lemma 18 (Polynomial step-size sums) . For fixed 0 < ν < 1 and ηj = Θ( j−ν ), Pnj=j0 ηj = Θ( n1−ν ) for sufficiently large n and the weighted noise sum satisfies Equation 79. Proof. 
+
+> n
+
+X
+
+> j=j0
+
+ηj = Θ( n1−ν ).
+
+Moreover, with 
+
+Sn := 
+
+> n
+
+X
+
+> j=j0
+
+η2
+
+> j
+
+Pns=j ηs
+
+= S(1)  
+
+> n
+
++ S(2)  
+
+> n
+
+,
+
+where 
+
+S(1)  
+
+> n
+
+:= 
+
+> ⌊n/ 2⌋
+
+X
+
+> j=j0
+
+η2
+
+> j
+
+Pns=j ηs
+
+, S(2)  
+
+> n
+
+:= 
+
+> n
+
+X
+
+> j=⌊n/ 2⌋+1
+
+η2
+
+> j
+
+Pns=j ηs
+
+,
+
+we have 
+
+S(1)  
+
+> n
+
+≤ Cn1−ν
+
+> ⌊n/ 2⌋
+
+X
+
+> j=1
+
+j−2ν
+
+=
+
+
+
+O(n−ν ), 0 < ν < 1/2,O(log( en )n−1/2), ν = 1 /2,O(n−(1 −ν)), 1/2 < ν < 1,
+
+and, for k = n − j + 1 ,
+
+S(2)  
+
+> n
+
+≤ Cn −ν
+
+> ⌈n/ 2⌉
+
+X
+
+> k=1
+
+1
+
+k = O(n−ν log( en )) .
+
+38 Therefore 
+
+Sn = O
+
+ log( en )
+
+nmν
+
+
+
+. (79) 
+
+Lemma 19 (Simultaneous SFT successor-set learning) . For any finite initial parameter and fixed n ≥ 1, the batch-explicit bound Equation 58 holds with probability at least 1 − δ. No pretrained coverage condition is needed for this assertion. Proof. Apply Lemmas 14–18. Combining Equations (70), (73), (75), (78), and (79), 
+
+Fℓ(W(n)SFT ) ≤ C4
+
+
+
+e−R + (1 + R + log |P ℓ|)2
+
+n1−ν + (1 + 2 log(2 /δ )) log( en )
+
+B n mν
+
+
+
+.
+
+Choose 
+
+R := log( e + n|P ℓ|). (80) Then 
+
+e−R = 1
+
+e + n|P ℓ| ≤ 1
+
+n , 1 + R + log |P ℓ| ≤ 3 log( e + n|P ℓ|).
+
+Hence 
+
+Fℓ(W(n)SFT ) ≤ C5
+
+ 1
+
+n + log 2(e + n|P ℓ|)
+
+n1−ν + (1 + 2 log(2 /δ )) log( en )
+
+B n mν
+
+
+
+. (81) Lemma 13 converts this potential bound into Equation 58. The same scalar event controls every source, so no additional union bound is required. 
+
+Main proof of Theorem 2. 
+
+Proof. By Lemma 19, Equation 58 holds with probability at least 1 − δ. Since 0 < ν < 1/2, we have 
+
+mν = ν. For n ≥ 1 and δ ∈ (0 , 1) ,
+
+1
+
+n ≤ 1
+
+n1−ν , 1 + 2 log 2
+
+δ = O
+
+
+
+log eδ
+
+
+
+,
+
+where the implied constant is independent of n, B, and δ. Absorbing the factors log 2(e+n|P ℓ|) and log( en )
+
+into ˜O, the three-term bound in Equation 58 gives Equation 13, retaining the stated dependence on B and 
+
+δ.39 B.6 Retention under continual SD 
+
+Theorem 3 (No forgetting under SD) . Let W[s]SD denote the parameter after sequentially training D1, . . . , Ds
+
+by SD. Fix ℓ ∈ { 1, . . . , L }, and let nℓ be the number of SD updates used for Dℓ. Suppose Assumptions 1 and 2 hold for all tasks, and the stepsize ηj = Θ( j−ν ) for some ν ∈ [0 , 1/2) . Then, after any numbers of subsequent SD updates on Dℓ+1 , . . . , DL, with probability at least 1 − δ,
+
+πW[L]SD 
+
+
+
+yT ∈ ˜Cℓ | yℓ, 0, x ℓ
+
+
+
+≥ 1 − O(KM ϵ 1) − O
+
+
+
+KM ξ (K) 
+
+> ℓ,n ℓ
+
+(δ)
+
+
+
+. (14) 
+
+Moreover, every correct transition learned for task Dℓ satisfies 
+
+πW[L]SD 
+
+(v | u, x ℓ) ≥ πW[ℓ]SD 
+
+(v | u, x ℓ), (u, v ) ∈ Eℓ. (15) 
+
+Sketch of proof of Theorem 3. 
+
+• Show that updates on other tasks preserve interior transitions and do not decrease correct transition probabilities, including before the target task is learned (Lemma 20). • Apply the transition-learning argument conditionally on preceding-task training, using the preserved initialization bounds (Proposition 2 and Lemma 20). • Preserve the learned transition bounds throughout all subsequent-task updates (Lemma 20). • Convert the final transition bounds into old-task rollout accuracy on the same training event (Lemma 11). 
+
+Lemma 20 (Preservation of correct transitions across tasks) . Under Assumption 1 and the nonnegative task inputs, an SD update on any other task preserves all interior-source logits and does not decrease any correct transition probability for task r. Therefore, after any sequence of SD updates, each correct task-r transition is at least its pretrained probability. Proof. Lemma 4 gives, for u ∈ ˚Ck,
+
+πW+ (· | u, x r) = πW(· | u, x r).
+
+Fix a correct old transition (u, v ) ∈ Er. If a later update has no hint-source at u, all logits at u are unchanged. Otherwise, let (u, q ) be a correct transition for the later task that contributes to the update at u, so that 
+
+W+ = W + γs,u xs
+
+eu,q − X 
+
+> z∈N (u)
+
+πW(z | u, x s)eu,z 
+
+
+
+> ⊤
+
+, γs,u ≥ 0.
+
+If ⟨xr, x s⟩ = 0 , then, for every z ∈ N (u),
+
+x⊤ 
+
+> r
+
+(W+ − W)eu,z = 0 .
+
+Hence all task-r logits, and therefore the entire transition distribution at u, are unchanged, irrespective of whether q = v.If ⟨xr, x s⟩ > 0, Assumption 1 gives q = v. For w̸ = v,
+
+x⊤ 
+
+> r
+
+W+(eu,v − eu,w ) − x⊤ 
+
+> r
+
+W(eu,v − eu,w )= γs,u ⟨xr, x s⟩ [1 − πW(v | u, x s) + πW(w | u, x s)] ≥ 0,
+
+40 Hence 
+
+πW+ (v | u, x r) ≥ πW(v | u, x r),
+
+Applying these two cases to every later-task contribution and every subsequent SD update gives the exact monotonicity 
+
+πW[L]SD 
+
+(v | u, x r) ≥ πW[r]SD 
+
+(v | u, x r), (u, v ) ∈ Er.
+
+The proof uses no ordering property of r and s, so it also applies to updates before task r is learned. Iteration from W(0) proves the final assertion. 
+
+Main proof of Theorem 3. 
+
+Proof. Apply Lemma 20 to the tasks preceding ℓ. At the start of task ℓ, its interior kernel is still pretrained and its correct transition probabilities are at least cint ϵ2. The proof of Proposition 2, using Lemmas 8–10, therefore applies conditionally on the preceding history with the same uniform constants. After integrating out that history, an event of probability at least 1−δ gives 1−pi ≤ Ctr ξ(K) 
+
+> ℓ,n ℓ
+
+(δ) at task completion. Lemma 20 preserves all these inequalities during every later task. On that same event, Lemma 11 applied to the final predictor gives 
+
+1 − πW[L]SD 
+
+(yT ∈ ˜Cℓ | yℓ, 0, x ℓ) ≤ Cbad (1 + Nℓ)ϵ1 + NℓCtr ξ(K) 
+
+> ℓ,n ℓ
+
+(δ).
+
+Since Nℓ ≤ KM , this is Equation 14. The edgewise assertion is exactly Lemma 20. 
+
+B.7 Catastrophic forgetting under SFT 
+
+Notation for Theorem 4. For a path γ = ( u0, . . . , u T ), set 
+
+Src( γ) := {u0, . . . , u T −1}.
+
+Define 
+
+Unew := [
+
+> Γ∈P new
+
+Src(Γ) , (82) 
+
+Anew (u) := {v : ∃Γ ∈ P new such that (u, v ) ∈ Γ} , u ∈ U new . (83) The conflicted old correct paths and their fraction are 
+
+Cold := {γ = ( u0, . . . , u T ) ∈ P old : ∃t < T, u t ∈ U new , u t+1 /∈ A new (ut)} , (84) 
+
+θ := |C old ||P old | . (85) 41 Let 
+
+P old pre (γ) := πW(0) new 
+
+(Y0: T = γ | Y0 = yold ,0, x old ), (86) 
+
+ppre old := πW(0) new 
+
+
+
+YT ∈ ˜Cold | Y0 = yold ,0, x old 
+
+
+
+= X
+
+> γ∈P old
+
+P old pre (γ), (87) 
+
+Rpre := X
+
+> γ∈P old \C old
+
+P old pre (γ), (88) 
+
+Mold := |P old |.
+
+The second equality in Equation 87 follows because the acyclic nature of the DAG makes every student rollout node-simple and Pold contains every node-simple path ending in ˜Cold . For s ∈ [0 , 1] , define 
+
+Cold (s) := max 
+
+> S⊆P old
+> |S|≤⌊ sM old ⌋
+
+X
+
+> γ∈S
+
+P old pre (γ). (89) Set 
+
+λ := ⟨xold , x new ⟩∥xnew ∥22
+
+> 0, mν := min {ν, 1 − ν}. (90) For u ∈ U new and v ∈ N (u), define 
+
+bu,v := x⊤
+
+> old
+
+W(0) new eu,v − λx ⊤
+
+> new
+
+W(0) new eu,v , (91) 
+
+bmin (u) := min   
+
+> w∈N (u)
+
+bu,w ,
+
+∆map := max 
+
+> u∈U new
+
+
+
+max   
+
+> v∈N (u)
+
+bu,v − bmin (u)
+
+
+
+, (92) 
+
+Cmap := e∆map = max 
+
+> u∈U new
+
+max   
+
+> v∈N (u)
+
+ebu,v −bmin (u). (93) Let Cnew be the constant from the batch-explicit bound of Lemma 19 applied to Dnew from W(0) new , and define 
+
+¯ϵn(δ) := Cnew |P new |
+
+ 1
+
+n + log 2(e + n|P new |)
+
+n1−ν + (1 + 2 log(2 /δ )) log( en )
+
+Bn mν
+
+
+
+. (94) Finally, define the relative largest and smallest old-path masses by 
+
+κold max := Mold 
+
+ppre old 
+
+max 
+
+> γ∈P old
+
+P old pre (γ), κold min := Mold 
+
+ppre old 
+
+min 
+
+> γ∈P old
+
+P old pre (γ). (95) Write 
+
+W(j) := W(j)new .
+
+For an old path γ = ( u0, . . . , u T ), set 
+
+P old  
+
+> j
+
+(γ) := πW(j) (Y0: T = γ | Y0 = yold ,0, x old ).
+
+42 Theorem 4 (Catastrophic forgetting under SFT) . Fix δ ∈ (0 , 1) and set λ := ⟨xold ,x new ⟩∥xnew ∥22
+
+> 0. Suppose 
+
+ηj = Θ( j−ν ) for some ν ∈ (0 , 1/2) . Then, for arbitrary pre-new-task old-path masses, with probability at least 1 − δ,
+
+Π( W(n)new ) ≤ Cold (1 − θ)
+
+| {z }
+
+> upper bound on surviving knowledge
+
++ eO θ|P old ||P new |λ
+
+ 1 + B−1 log(1 /δ )
+
+nν
+
+λ!
+
+, (16) 
+
+Π( W(0) new ) − Cold (θ) ≤ Π( W(n)new ), (17) 
+
+where Π( W) = πW(YT ∈ ˜Cold | Y0 = yold ,0, x old ) and 
+
+Cold (ϕ) := max 
+
+> P⊆P old
+> |P|≤ ϕ|P old |
+
+X
+
+> γ∈P
+
+πW(0) new 
+
+(Y0: T = γ | Y0 = yold ,0, x old ). (18) 
+
+˜O(·) hides logarithmic factors in n and |P new |.
+
+Sketch of proof of Theorem 4. 
+
+• Characterize conflicted old paths by their overlap with new-task source nodes (Lemma 21). • Show that new-task SFT preserves every non-conflicted old-path mass exactly (Lemma 22). • Bound the probability of unsupported successors under the new-task input (Lemma 19). • Transfer successor suppression from the new-task input to the old-task input using the exact logit relation (Lemma 23). • Sum the preserved and suppressed path masses to obtain the old-task retention bounds (Lemmas 22 and 24). 
+
+Lemma 21 (Support separation equals source overlap) . Under the disjoint terminal-cluster assumptions, an old correct path belongs to Cold if and only if its source set intersects Unew . Thus Equation 96 and Equation 97 hold. Proof. Let 
+
+Sold := {γ ∈ P old : Src( γ) ∩ U new ̸ = ∅} .
+
+By Equation 84, 
+
+Cold ⊆ S old .
+
+Conversely, fix 
+
+γ = ( u0, . . . , u T ) ∈ S old 
+
+and let 
+
+t⋆ := max {t < T : ut ∈ U new }.
+
+43 Suppose 
+
+ut⋆+1 ∈ A new (ut⋆ ).
+
+Then there exists Γ ∈ P new containing (ut⋆ , u t⋆+1 ). If ut⋆+1 is not the final node of Γ, then 
+
+ut⋆+1 ∈ U new ,
+
+contradicting the maximality of t⋆. If ut⋆+1 is the final node of Γ, then 
+
+ut⋆+1 ∈ eCnew .
+
+Since eCnew has no outgoing inter-cluster transition and 
+
+eCold ∩ eCnew = ∅,
+
+the old correct path γ cannot subsequently reach eCold , again a contradiction. Therefore 
+
+ut⋆+1 /∈ A new (ut⋆ ),
+
+so γ ∈ C old . Hence 
+
+Cold = {γ ∈ P old : Src( γ) ∩ U new ̸ = ∅} . (96) Consequently, 
+
+γ / ∈ C old =⇒ Src( γ) ∩ U new = ∅. (97) 
+
+Lemma 22 (Exact preservation of non-conflicted path mass) . For every training history and γ /∈ C old ,
+
+P old  
+
+> n
+
+(γ) = P old pre (γ). Moreover, ppre old − Cold (θ) ≤ Rpre ≤ Cold (1 − θ).Proof. Lemma 12 changes only edge columns whose source node lies in Unew . Thus Equation 97 gives, for every γ / ∈ C old ,
+
+P old  
+
+> n
+
+(γ) = P old 0 (γ) = P old pre (γ). (98) Consequently, 
+
+X
+
+> γ / ∈C old
+
+P old  
+
+> n
+
+(γ) = Rpre . (99) Since |P old \ C old | = (1 − θ)Mold , the concentration profile gives 
+
+Rpre ≤ Cold (1 − θ). (100) Also, |C old | = θM old implies 
+
+X
+
+> γ∈C old
+
+P old pre (γ) ≤ Cold (θ), (101) and therefore 
+
+Rpre = ppre old − X
+
+> γ∈C old
+
+P old pre (γ) ≥ ppre old − Cold (θ). (102) Since all path probabilities are nonnegative, Equations 99 and 102 prove the late-phase lower bound. 44 Lemma 23 (Exact transfer between task inputs) . For every training history, source u ∈ U new , successor v,and iteration j, the probability identity Equation 104 holds. In particular, 
+
+πW(j) (v | u, x old ) ≤ Cmap πW(j) (v | u, x new )λ.
+
+Proof. For u ∈ U new and v ∈ N (u), define 
+
+z(j) 
+
+> i,u,v
+
+:= x⊤ 
+
+> i
+
+W(j)eu,v , i ∈ { old , new }.
+
+Every update of the column eu,v during new-task SFT lies in span {xnew }. Hence 
+
+z(j)old ,u,v − z(j−1) old ,u,v = λ
+
+
+
+z(j)new ,u,v − z(j−1) new ,u,v 
+
+
+
+,
+
+and Equation 91 gives 
+
+z(j)old ,u,v = bu,v + λz (j)new ,u,v . (103) Writing 
+
+p(j) 
+
+> u,v
+
+:= πW(j) (v | u, x new ),
+
+Equation 103 implies 
+
+πW(j) (v | u, x old ) = ebu,v (p(j)
+
+> u,v
+
+)λ
+
+X 
+
+> w∈N (u)
+
+ebu,w (p(j)
+
+> u,w
+
+)λ . (104) Since xold , x new ∈ { 0, 1}d,
+
+0 < λ ≤ 1, X 
+
+> w∈N (u)
+
+(p(j)
+
+> u,w
+
+)λ ≥ X 
+
+> w∈N (u)
+
+p(j) 
+
+> u,w
+
+= 1 .
+
+Therefore the denominator in Equation 104 satisfies 
+
+X 
+
+> w∈N (u)
+
+ebu,w (p(j)
+
+> u,w
+
+)λ ≥ ebmin (u) X 
+
+> w∈N (u)
+
+(p(j)
+
+> u,w
+
+)λ ≥ ebmin (u). (105) For i ∈ { old , new }, put 
+
+p(0)  
+
+> i,u,v
+
+:= πW(0) new 
+
+(v | u, x i).
+
+For every u ∈ U new and v, w ∈ N (u),
+
+ebu,v −bu,w = p(0) old ,u,v 
+
+p(0) old ,u,w 
+
+p(0) new ,u,w 
+
+p(0) new ,u,v 
+
+!λ
+
+. (106) Consequently, 
+
+Cmap = e∆map = max 
+
+> u∈U new
+
+max  
+
+> v,w ∈N (u)
+
+p(0) old ,u,v 
+
+p(0) old ,u,w 
+
+p(0) new ,u,w 
+
+p(0) new ,u,v 
+
+!λ
+
+. (107) Combining Equations 104 and 105, 
+
+πW(j) (v | u, x old ) ≤ ebu,v −bmin (u)(p(j)
+
+> u,v
+
+)λ ≤ Cmap (p(j)
+
+> u,v
+
+)λ. (108) 45 Lemma 24 (From successor suppression to total old-path mass) . Fix any training history satisfying Equa-tion 113. Then 
+
+Rpre ≤ Π( W(n)) ≤ Rpre + Cmap θM old ¯ϵn(δ′)λ.
+
+Here the premise is a deterministic property of the fixed history; it is supplied with high probability by Lemma 19. Proof. For every γ = ( u0, . . . , u T ) ∈ C old , Equation 84 gives an index tγ < T such that 
+
+utγ ∈ U new , utγ +1 /∈ A new (utγ ).
+
+Thus Lemma 23 yields 
+
+P old  
+
+> n
+
+(γ) ≤ Cmap ¯ϵn(δ′)λ. (109) Since |C old | = θM old ,
+
+X
+
+> γ∈C old
+
+P old  
+
+> n
+
+(γ) ≤ Cmap θM old ¯ϵn(δ′)λ. (110) Because the student rollout is node-simple and Pold contains all node-simple correct paths, its terminal-cluster probability is exactly 
+
+πW(n)
+
+
+
+YT ∈ ˜Cold | Y0 = yold ,0, x old 
+
+
+
+= X
+
+> γ∈P old
+
+P old  
+
+> n
+
+(γ). (111) Together with Equation 99, this gives 
+
+Rpre ≤ πW(n)
+
+
+
+YT ∈ ˜Cold | Y0 = yold ,0, x old 
+
+
+
+≤ Rpre + Cmap θM old ¯ϵn(δ′)λ. (112) 
+
+Main proof of Theorem 4. 
+
+Proof. Fix δ′ ∈ (0 , 1) . Apply Lemma 19 to Dnew with initial point W(0) new . With probability at least 1 − δ′,
+
+max 
+
+> u∈U new
+
+[1 − πW(n) (Anew (u) | u, x new )] ≤ ¯ϵn(δ′), (113) where ¯ϵn(δ′) is defined in Equation 94 and satisfies 
+
+¯ϵn(δ′) = eOG, W(0) new 
+
+
+
+|P new |
+
+ 1
+
+n1−ν + log(1 /δ ′)
+
+Bn mν
+
+ 
+
+−→ 0.
+
+By Lemmas 23 and 24, this event also gives Equation 112. Since ν ∈ (0 , 1/2) , Equation 94 implies 
+
+Cmap θM old ¯ϵn(δ′)λ = eO Cmap θM old Cλ
+
+> new
+
+|P new |λ
+
+ 1 + B−1 log(1 /δ ′)
+
+nν
+
+λ!
+
+. (114) For the late-phase statement, take δ′ = δ and combine Equations 112, 100, and 102. If θ = 0 , Equations 96 and 98 give 
+
+πW(n)
+
+
+
+YT ∈ ˜Cold | Y0 = yold ,0, x old 
+
+
+
+= ppre old . (115) 46 Remark 1 (Explicit representation of Cold (ϕ)). Let κold max and κold min be the largest and smallest old-path masses normalized by their average mass, as defined in Appendix B.7. Then 
+
+Cold (ϕ) ≤ Π( W(0) new ) min 
+
+n
+
+κold max ϕ, 1 − κold min + κold min ϕ
+
+o
+
+. (19) 
+
+Sketch of proof of Remark 1. 
+
+• Bound the mass of the largest admissible subset using the largest individual old-path mass. • Obtain a second bound by subtracting the smallest omitted masses from the total, and combine the two bounds. 
+
+Main proof of Remark 1. 
+
+Proof. Let 
+
+pold (1) ≥ · · · ≥ pold (Mold )
+
+be the ordered values of {P old pre (γ) : γ ∈ P old }. For ϕ ∈ [0 , 1] , put q = ⌊ϕM old ⌋. Then 
+
+Cold (ϕ) = 
+
+> q
+
+X
+
+> i=1
+
+pold (i) ≤ q max 
+
+> γ∈P old
+
+P old pre (γ) ≤ ppre old κold max ϕ. (116) Moreover, Mold − q ≥ (1 − ϕ)Mold , so 
+
+Cold (ϕ) = ppre old −
+
+> Mold
+
+X
+
+> i=q+1
+
+pold (i) ≤ ppre old 
+
+h
+
+1 − κold min (1 − ϕ)
+
+i
+
+. (117) Combining Equations 116 and 117 gives 
+
+Cold (ϕ) ≤ ppre old min 
+
+n
+
+κold max ϕ, 1 − κold min + κold min ϕ
+
+o
+
+. (118) 
+
+B.8 Pre-training and intermediate restartability 
+
+Proposition 3 (Uniform restartability) . Suppose Assumptions 1 and 2 hold, ηj = Θ( j−ν ) for fixed 0 ≤ ν < 
+
+1/2, and 0 < ϵ 1, ϵ 2, δ, ϵ rel < 1. If n satisfies Equation 20 with a sufficiently large uniform constant, then with probability at least 1 − δ over training, 
+
+inf   
+
+> h:Sℓ,h ̸=∅
+
+inf 
+
+> s∈S ℓ,h
+
+πW(n) (yT ∈ ˜Cℓ | y0 = s, x ℓ) ≥ 1 − O(KM ϵ 1), (119) 
+
+where Sℓ,h is the set of relevant starts in Ch.
+
+47 Proposition 1 (Restart failure beyond a rare entrance) . Suppose Assumptions 1 and 3 hold, ηj = Θ( j−ν )
+
+for fixed ν ∈ [0 , 1/2) , and 0 < ϵ 1, ϵ 2, ϵ rel , δ < 1. If 
+
+n = Ω 
+
+max 
+
+(
+
+log(2 KM/δ )
+
+Bρ 2
+
+> ℓ,K,M
+
+,
+
+"
+
+ϵ−11 − 1
+
+ϵ22 log(1 /ϵ rel )ρℓ,K,M 
+
+#1/(1 −ν) , (20) 
+
+M ′ = Ω 1
+
+ϵ|Eℓ|
+
+> 2
+
+max 
+
+ 1
+
+KM ϵ 1
+
+, Bn δ
+
+!
+
+, (21) 
+
+with sufficiently large uniform constants, then, with probability at least 1 − δ, no training rollout visits u∗,and jointly 
+
+πW(n) (yT ∈ ˜Cℓ | yℓ, 0, x ℓ) = 1 − O(KM ϵ 1) (Misleading high accuracy ), (22) 
+
+sup 
+
+> s∈S ℓ,k
+
+πW(n) (yT ∈ ˜Cℓ | y0 = s, x ℓ) = O(M ϵ 2) (Restart failure ). (23) 
+
+Here Sℓ,k contains the relevant starts in Ck and ρℓ,K,M is specified in Appendix B.3. 
+
+Sketch of proofs of Propositions 3 and 1. 
+
+• Show that the stated training length implies the effective-drift bound required for transition learning (Lemma 25). • Under full coverage, learn all correct transitions on a common event and convert their accuracy into successful reasoning from every relevant start (Lemmas 10 and 11). • Under the rare-entrance condition, bound the increase in visitation probability throughout training (Lemma 26). • Use this visitation bound to establish nonvisitation across all adaptively generated training rollouts (Lemma 27). • Learn the transitions reachable without the rare entrance and bound the final error from the original start (Lemmas 9, 10, and 11). • Show that nonvisitation leaves the downstream cluster unchanged and bounds its restart accuracy (Lemma 28). • Intersect the learning and nonvisitation events to obtain the joint original-start and restart guarantees (Proposition 1). 
+
+Lemma 25 (The stated training length implies the drift condition) . Under the learning-rate conditions of Proposition 3, Equation 20 with a sufficiently large uniform constant implies 
+
+D(K) 
+
+> ℓ,n
+
+(δ/ 2) ≥ ϵ−11 − 1
+
+c2int ϵ22 log(1 /ϵ rel ) . (120) 
+
+Proof. For fixed 0 ≤ ν < 1/2 and uniform learning-rate constants, 
+
+> n
+
+X
+
+> j=1
+
+ηj = Θ( n1−ν ),
+
+> n
+
+X
+
+> j=1
+
+η2 
+
+> j
+
+= Θ( n1−2ν ).
+
+48 The ratio of the square-root term in Equation 47 to its positive drift term is 
+
+O
+
+s log(2 KM/δ )
+
+Bρ 2 
+
+> ℓ,K,M
+
+n
+
+!
+
+.
+
+The first term of the maximum in Equation 20, with a sufficiently large constant, makes this ratio at most one half. Consequently the effective drift is Ω( ρℓ,K,M n1−ν ). The second term in that maximum, again with a sufficiently large constant, makes this lower bound at least the right-hand side of Equation 120. This proves the implication. 
+
+Lemma 26 (Control of the increase in visitation) . Let N = Nℓ = |Eℓ|, the total number of correct inter-cluster edges of the task, be fixed. Under the retained initialization condition, for every training history and iteration j,
+
+πW(j) (∃t < T : yt = um | yℓ, 0, x ℓ)
+
+≤ πW(0) (∃t < T : yt = um | yℓ, 0, x ℓ) c−N
+
+> int
+
+ϵN
+
+> 2
+
+. (121) 
+
+Proof. Iterating the second inequality of Equation 51 from 1 to j gives 
+
+p(j)
+
+> ui,v
+
+p(0) 
+
+> ui,v
+
+≤ p(j)
+
+> i
+
+p(0) 
+
+> i
+
+≤ 1
+
+p(0) 
+
+> i
+
+(( ui, v ) ∈ E).
+
+This applies to every outgoing edge at an updated source, including intra-cluster edges. At other sources the ratio is one. Factor the probability of a complete rollout into its one-step Markov probabilities, using the same stopping rule for both predictors. Each updated source occurs at most once by node simplicity. Sources that do not occur can be included because p(j) 
+
+> i
+
+/p (0)  
+
+> i
+
+≥ 1. Consequently, 
+
+πW(j) (y0: T | yℓ, 0, x ℓ) ≤ πW(0) (y0: T | yℓ, 0, x ℓ)
+
+> Nℓ
+
+Y
+
+> i=1
+
+p(j)
+
+> i
+
+p(0) 
+
+> i
+
+. (122) The retained initialization condition gives p(0)  
+
+> i
+
+≥ cint ϵ2, and hence 
+
+> Nℓ
+
+Y
+
+> i=1
+
+1
+
+p(0) 
+
+> i
+
+≤ c−N 
+
+> int
+
+ϵ−N 
+
+> 2
+
+. (123) Sum Equation 122 over the node-simple rollouts that visit um before stopping, and use p(j) 
+
+> i
+
+≤ 1 together with Equation 123. 
+
+Lemma 27 (Nonvisitation throughout adaptive training) . Under Assumption 3, 
+
+P
+
+
+
+> n
+
+X
+
+> j=1
+> B
+
+X
+
+> b=1
+
+1{τ (b,j ) 
+
+> m
+
+< T (b,j )} > 0
+
+
+
+≤ Bn π W(0) (∃t < T : yt = um | yℓ, 0, x ℓ) c−N
+
+> int
+
+ϵN
+
+> 2
+
+= O
+
+ Bn M ′ϵN
+
+> 2
+
+
+
+. (124) 49 Proof. Conditional on Fj−1, the student rollout has law πW(j−1) . Lemma 26 therefore gives 
+
+E[1{τ (b,j ) 
+
+> m
+
+< T (b,j )} | F j−1]= πW(j−1) (∃t < T : yt = um | yℓ, 0, x ℓ)
+
+≤ πW(0) (∃t < T : yt = um | yℓ, 0, x ℓ) c−N
+
+> int
+
+ϵN
+
+> 2
+
+.
+
+Here T (b,j ) is the random length of that sampled rollout. Take total expectations and sum over b, j . The probability of a positive visit count is at most its expectation, proving the claim. 
+
+Lemma 28 (An unvisited downstream cluster remains unlearned) . Under Assumptions 1 and 3, if no training rollout visits um, then W(n)eu,v = W(0) eu,v for every u ∈ Ck and (u, v ) ∈ E, and Equation 23 holds. Proof. Every training rollout starts outside Ck. Its only entrance is em, so nonvisitation of um implies nonvisitation of all of Ck. Lemma 7, iterated over the training steps, therefore leaves all columns with source in Ck unchanged, even if a hint contains an edge inside Ck.Success from s ∈ S ℓ,k requires leaving Ck̸ = ˜Cℓ. Since s is a relevant start, a correct path from yℓ, 0 has a prefix ending at s. Concatenating this prefix with any successful continuation from s gives a correct path: a repeated vertex would create a directed cycle. Consequently, the first exit of a successful continuation belongs to Eℓ. By Assumption 1, at most one such exit leaves each u ∈ ∂⋆ℓ Ck, so there are at most 
+
+|∂⋆ℓ Ck| ≤ M such edges. For each (u, v ) ∈ Eℓ with u ∈ Ck, the Markov property gives 
+
+EW(n)
+
+"X
+
+> t<T
+
+1{yt = u, y t+1 = v} | y0 = s, x ℓ
+
+#
+
+= πW(n) (v | u, x ℓ)EW(n)
+
+"X
+
+> t<T
+
+1{yt = u} | y0 = s, x ℓ
+
+#
+
+≤ πW(0) (v | u, x ℓ).
+
+The last step uses parameter preservation and node simplicity. A union bound over these correct exit edges and the retained initialization condition yield 
+
+πW(n) (yT ∈ ˜Cℓ | y0 = s, x ℓ)
+
+≤ X
+
+> (u,v )∈Eℓ
+> u∈Ck
+
+πW(0) (v | u, x ℓ) = O(|∂⋆ℓ Ck|ϵ2) = O(M ϵ 2).
+
+The bound is uniform over s ∈ S ℓ,k , proving Equation 23. 
+
+Main proofs of Propositions 3 and 1. 
+
+Proof of Proposition 3. Lemma 25 first gives Equation 120 from the stated condition on n. By Lemma 10 with failure budget δ/ 2 and Equation 120, all Nℓ correct edges have error at most ϵ1 with probability at least 
+
+1 − δ/ 2. Fix any such training history. Lemma 11 gives, for every relevant start, 
+
+1 − πW(n) (yT ∈ ˜Cℓ | y0 = s, x ℓ) ≤ [Cbad (1 + Nℓ) + Nℓ]ϵ1 ≤ (1 + 2 Cbad )KM ϵ 1.
+
+The same history works for every s, so no additional probabilistic union bound is needed. This is stronger than the stated confidence 1 − δ.50 Proof of Proposition 1. The common condition on n implies Equation 120 by Lemma 25. Hold N = Nℓ =
+
+|Eℓ| fixed. Let C/M ′ be the initial visitation bound in Assumption 3, and take the uniform constant in Equation 21 to be at least 2Cc −N 
+
+> int
+
+. Then Equation 21 and initial rarity imply 
+
+πW(0) (∃t < T : yt = um | yℓ, 0, x ℓ) c−N
+
+> int
+
+ϵN
+
+> 2
+
+≤ min 
+
+
+
+KM ϵ 1, δ
+
+2Bn 
+
+
+
+. (125) Lemma 27 makes the probability that any training rollout visits um at most δ/ 2. Independently of whether nonvisitation holds, Lemma 10 with failure budget δ/ 2 and Equation 120 give error at most ϵ1 for all edges specified in Lemma 9, except on a set of probability at most δ/ 2. A union bound gives both conclusions jointly with probability at least 1 − δ; the two events need not be independent. Fix a history in their intersection. Lemma 26 and Equation 125 bound the final evaluation visitation proba-bility by KM ϵ 1. In Equation 57 this yields 
+
+1 − πW(n) (yT ∈ ˜Cℓ | yℓ, 0, x ℓ) ≤ [Cbad (1 + KM ) + 2 KM ]ϵ1 ≤ (2 + 2 Cbad )KM ϵ 1.
+
+Lemma 28 gives the restart upper bound on that same history. This proves all three assertions, including the nonvisit event, within confidence 1 − δ.
+
+Remark 3 (Separation of training times) . Under Assumptions 1 and 2, the model trained by SD can re-sume from any relevant start for a training length satisfying Equation 20 (Proposition 3 in Appendix B.8). Holding other quantities fixed, the nonvisit horizon grows linearly with M ′. If the nonvisit horizon grows asymptotically faster than the sufficient learning scale, there is a range of training lengths for which the two settings exhibit different restart behavior. Under the full-coverage condition, the trained model can reason successfully from every relevant start, whereas under the rare-entrance condition, the cluster beyond the rare entrance remains unlearned. 
+
+Sketch of proof of Remark 3. Express the rare-entrance budget as a nonvisitation horizon and compare it with the sufficient training length for uniform restartability (Propositions 1 and 3). 
+
+Main proof of Remark 3. 
+
+Proof. With N = Nℓ = |Eℓ| fixed and the constant choice in the proof of Proposition 1, rearranging Equation 21 gives 
+
+M ′ = Ω 
+
+ 1
+
+KM ϵ 1
+
+ϵ−N
+
+> 2
+
+
+
+, n = O
+
+ δM ′
+
+B ϵN
+
+> 2
+
+
+
+. (126) Thus the allowed nonvisit horizon grows linearly in M ′ with other quantities fixed. In addition to the first condition, if that horizon is ω of the sufficient learning scale in Equation 20, their ratio diverges. The comparison uses common bounds on the other problem parameters and confidence 1 − δ in each setting at each fixed chosen horizon. 
+
+Remark 4 (The scale of initial rarity) . The sufficient conditions of Proposition 1 imply M ′ = Ω( M 2 log M ),so M ′ grows asymptotically faster than M .
+
+51 Sketch of proof of Remark 4. Derive the minimum batch budget imposed by the learning condition and substitute it into the rarity requirement to obtain the coarse rarity scale (Lemma 29). 
+
+Lemma 29 (The coarse rarity scale) . The sufficient conditions Equation 20 and Equation 21 imply M ′ =Ω( M 2 log M ) as M → ∞ .Proof. Since ϵ1 < 1, Equation 120 forces the drift to be positive. Squaring its defining strict inequality gives 
+
+ρ 2
+
+> ℓ,K,M
+
+
+
+> n
+
+X
+
+> j=1
+
+ηj
+
+
+
+> 2
+
+> log(2 KM/δ )2B
+
+> n
+
+X
+
+> j=1
+
+η2 
+
+> j
+
+.
+
+Cauchy–Schwarz, (P 
+
+> j
+
+ηj )2 ≤ n P 
+
+> j
+
+η2 
+
+> j
+
+, gives 
+
+Bn > log(2 KM/δ )2ρ 2
+
+> ℓ,K,M
+
+. (127) Substitution in Equation 21 gives 
+
+M ′ = Ω 
+
+h
+
+ϵ−N
+
+> 2
+
+i log(2 KM/δ )
+
+δρ 2
+
+> ℓ,K,M
+
+!
+
+. (128) Since ρℓ,K,M ≤ croute /M and ϵ−N 
+
+> 2
+
+≥ 1, for M → ∞ this implies 
+
+M ′ = Ω( M 2 log M ), M ′/M → ∞ . (129) The fuller budget Equation 21 remains required for Proposition 1. 
+
+Main proof of Remark 4. 
+
+Proof. Lemma 29 gives the claimed scale M ′ = Ω( M 2 log M ). This coarse implication does not replace the full budget Equation 21 required for Proposition 1. 
+
+Remark 5 (Correct paths bypassing the rare entrance) . On the event in the proof of Proposition 1, Equa-tions 121 and 125 bound the final visitation probability of u∗ = um by KM ϵ 1. Subtracting this probability from the original-start accuracy bound proved above gives 
+
+πW(n)
+
+
+
+yT ∈ ˜Cℓ, y t̸ = u∗ ∀ 0 ≤ t < T yℓ, 0, x ℓ
+
+
+
+≥ 1 − (3 + 2 Cbad )KM ϵ 1.
+
+For (3 + 2 Cbad )KM ϵ 1 < 1, this probability is positive, so a correct path avoiding u∗ exists. By the unique-entrance condition in Assumption 3, such a path also bypasses Ck.
+
+# C Numerical experiment 
+
+Code, configuration files, saved results, and reproduction instructions are provided in the GitHub repository listed in the Reproducibility statement. The objective of this experiment is to compare finite-mini-batch training with the retention guarantees and population references associated with Theorems 3 and 4. Concrete numerical settings are listed below. 52 C.1 Experiment settings 
+
+Graph construction and initialization We instantiate the layered DAG constructed in Appendix B.1. The graph parameters and the choices used to construct W(0) are summarized separately in Tables 1 and 2. All tasks use the same graph and all seeds use the same deterministic initialization. Table 1: Graph parameters.                      
+
+> Parameter Value Tasks L4
+> Clusters K13
+> Node layers (H+ 1) 5
+> Nodes |V|123
+> Directed edges |E|214
+> Correct paths |P ℓ|10 per task Maximum valid boundaries M10
+> Boundary nodes P
+> k|∂C k|53
+
+Table 2: Initialization parameters.                 
+
+> Parameter Value Routing error parameter ϵ10.02
+> Inter-cluster probability ϵ20.04
+> Input dimension d36
+> Task-specific input coordinates 4-D one-hot Input squared norm ∥xℓ∥2233
+> Residual successors |Rk(u)|1
+> Each start-to-entry probability 1/10
+> Boundary residual mass 0.92 or 0.88
+
+At a task start, |∂⋆ℓ Ck| = 10 and Iℓ,k (s) = ∅, so Equation 29 assigns probability 1/10 to each entry boundary. At a relevant shared router, |∂⋆ℓ Ck| = 1 and the remaining successors form Iℓ,k (s); the correct exit receives probability 1/(1 + ϵ1) and each other exit receives ϵ1/((1 + ϵ1)|Iℓ,k (s)|). For task inputs not using that router, its outgoing distribution is uniform. At every boundary, Equation 33 assigns probability 
+
+ϵ2 to each inter-cluster edge and probability 1 − dout  
+
+> u,k
+
+ϵ2 to its unique same-cluster successor. There are 51 
+
+boundaries with inter-cluster outdegree 2 and 2 with outdegree 3. With K = 13 and ϵ2 = 0 .04 , the sufficient condition in Appendix B.1 holds since (K − 1) ϵ2 = 0 .48 < 1/2.The input matrix is X = [ 14×32 I4], where the first block has all entries equal to one. Thus XX ⊤ has diagonal entries 33 and off-diagonal entries 32 and is invertible. We use Equation 35 directly: 
+
+W(0) eu,v = X⊤(XX ⊤)−1ℓu,v , ℓu,v =  log P1(v | u), . . . , log P4(v | u)⊤. (130) The hint parameter ϵrel = 0 .1 is used during SD training, not to construct W(0) .
+
+Pairwise and cumulative conflict rates. Tables 3 and 4 report conflict rates, with rows denoting evaluated old tasks and columns denoting the tasks being learned. The pairwise rate θ compares only the row task and the column task. The cumulative rate θtotal is the fraction of the row task’s correct paths that conflict with at least one task learned after it, up to and including the column task. Thus, θtotal is computed from a union of conflict-path sets: overlapping paths are counted only once, and the pairwise rates are not added. Diagonal entries are set to zero; entries below the diagonal are omitted. Table 3: Pairwise conflict rate θ.              
+
+> Old / New Task 1 Task 2 Task 3 Task 4 Task 1 00.40.60.6
+> Task 2 00.90.9
+> Task 3 00.7
+> Task 4 0
+
+Table 4: Cumulative conflict rate θtotal .              
+
+> Old / New Task 1 Task 2 Task 3 Task 4 Task 1 00.40.71.0
+> Task 2 00.90.9
+> Task 3 00.7
+> Task 4 0
+
+For example, Task 1 has pairwise conflict rates 0.4 and 0.6 with Tasks 2 and 3, respectively, whereas their cumulative conflict rate is 0.7. In the plots, the term labeled “Limit” uses Cold (1 − θtotal ), with the concen-53 tration profile from Equation 89 constructed from the old task’s correct-path probabilities at the end of its own training. This profile is held fixed throughout subsequent-task training, while θtotal is updated to reflect the cumulative conflict. Thus the plotted term uses the cumulative rate, rather than the pairwise θ, and is computed separately for each seed before averaging. The label refers to this concentration-profile term, not necessarily to the exact limiting correct generation probability. 
+
+Training and evaluation We train four tasks sequentially with 2 × 10 6 gradient updates per task, using mini-batches of size B = 32 and seeds 0, . . . , 9 for each method. The step size is ηj = 11 −1j−0.01 , where j
+
+starts at 1 for each task. The factor 11 −1 = 3 /∥xℓ∥22 controls the update magnitude, while j−0.01 provides a slow decay over successive updates. Plots show the mean correct generation probability and the minimum– maximum range across the ten seeds. Each probability is evaluated by summing the probabilities of all ten correct paths. For SD, the graph-specific population learning lower bound is shown during own-task training. At its end, the plot switches to the conditional retention lower bound anchored at the observed endpoint for each seed. The population learning curve is evaluated at B → ∞ for the stability. 
+
+Graph-specific evaluation of constants. We tighten intermediate bounds in the Appendix proofs using the experimental graph, without altering the theorem statements. For Theorem 3, we use edge-specific hint and visitation probabilities in the odds bound and sum correct-path probabilities instead of applying the coarse coupling union bound. For Theorem 4, we evaluate the source-wise optimization and cross-task probability-transfer bounds using the actual visitation frequencies, logit offsets, and unchanged path factors. These refinements retain the underlying inequalities while avoiding worst-case estimates over the general graph family. The SD learning and SFT upper reference curves are evaluated in the population limit 
+
+B → ∞ . The SFT conditional lower and SD retention bounds are instead evaluated at the observed phase endpoints, separately for each seed. 
+
+C.2 Experiment results 
+
+Table 5 reports the correct-generation probabilities after all four tasks have been learned. SFT reaches a mean probability above 0.999997 at the end of each task’s own training, but its final means on Tasks 1–3 fall to 0.002799 , 0.100312 , and 0.304232 , respectively. SD attains approximately 0.980386 on every task and preserves its own-training endpoint through the final task for every seed, to stored numerical precision. The final seed-to-seed range for SD is below 1.2 × 10 −8 for each task. Table 5: Final correct-generation probabilities after all four tasks. Entries are means [minimum, maximum] over ten seeds, rounded to six decimal places.                   
+
+> Task SFT SD Task 1 0.002799 [0 .002701 ,0.002955] 0.980386 [0 .980386 ,0.980386]
+> Task 2 0.100312 [0 .065468 ,0.149365] 0.980386 [0 .980386 ,0.980386]
+> Task 3 0.304232 [0 .263488 ,0.334231] 0.980386 [0 .980386 ,0.980386]
+> Task 4 0.999998 [0 .999998 ,0.999998] 0.980386 [0 .980386 ,0.980386]
+
+All saved evaluations satisfy the applicable SFT conditional lower and SD retention bounds, within nu-merical tolerance. The SFT trajectories also remain below the population upper references at the saved evaluations. For SD, 12 of 12 ,400 saved learning evaluations lie below the population learning reference, with a maximum shortfall of 7.83 × 10 −6. This distinction is consistent with using B = 32 for training: the 
+
+B → ∞ learning reference does not guarantee finite-mini-batch accuracy. 54 Figures 3 and 4 show the training dynamics for SD and SFT, respectively. 0.0 0.2 0.4 0.6 0.8 1.0 
+
+> Correct generation probability
+
+SD: Task 1 SD: Task 2     
+
+> 02468
+
+Total gradient updates £10 6
+
+> 0.0 0.2 0.4 0.6 0.8 1.0
+> Correct generation probability
+
+SD: Task 3     
+
+> 02468
+
+Total gradient updates £10 6
+
+SD: Task 4 
+
+SD Training Curves with Theorem 1 and 3 Bounds 
+
+Mean (band: min/max) SD learning (Thm. 1) SD retention (Thm. 3) 
+
+Figure 3: Training dynamics under SD for Tasks 1–4. The population learning lower reference is plotted during own-task training. At its end, the conditional retention lower bound is anchored at the observed endpoint and applies throughout subsequent-task training. 0.0 0.2 0.4 0.6 0.8 1.0 
+
+> Correct generation probability
+
+SFT: Task 1 SFT: Task 2     
+
+> 02468
+
+Total gradient updates £10 6
+
+> 0.0 0.2 0.4 0.6 0.8 1.0
+> Correct generation probability
+
+SFT: Task 3     
+
+> 02468
+
+Total gradient updates £10 6
+
+SFT: Task 4 
+
+SFT Learning and Forgetting: Theorems 2 and 4   
+
+> Learning and upper curves: population references; empirical training: B= 32
+
+Mean (band: min/max) SFT learning (Thm. 2) SFT lower (Thm. 4) SFT upper (Thm. 4) Limit: ℭold (1 ¡ μtotal ) (Rem. 2) 
+
+Figure 4: Training dynamics under SFT for Tasks 1–4. Black curves show conditional retention lower bounds and upper references. The concentration-profile term Cold (1 − θtotal ) reflects the cumulative conflict and, for Task 1, the accumulation of forgetting across subsequent tasks. 55

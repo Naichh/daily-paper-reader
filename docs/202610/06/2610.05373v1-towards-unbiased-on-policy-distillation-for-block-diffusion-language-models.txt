@@ -1,0 +1,363 @@
+Title: Towards Unbiased On-Policy Distillation for Block Diffusion Language Models
+
+URL Source: https://arxiv.org/pdf/2610.05373v1
+
+Published Time: Tue, 06 Oct 2026 02:12:50 GMT
+
+Number of Pages: 13
+
+Markdown Content:
+# TOWARDS UNBIASED ON-P OLICY DISTILLATION FOR 
+
+# BLOCK DIFFUSION LANGUAGE MODELS 
+
+Zaiquan Yang 1 Fei Wei 2 Yong Wang 2 Yudong Han 3 Yiyu Li 1
+
+Zhuofan Zong 4 Gerhard Petrus Hancke 1 Xiangxiang Chu 2 Rynson WH Lau 5 
+
+> 1
+
+City University of Hong Kong 2 Alibaba Group  
+
+> 3
+
+Beijing Institute of Technology 4 The Chinese University of Hong Kong  
+
+> 5
+
+City University of Hong Kong (Dongguan) 
+
+## ABSTRACT 
+
+On-policy distillation (OPD) has emerged as an effective post-training paradigm for language models, with recent efforts extending it to block diffusion language models (BDLMs). However, existing studies focus almost exclusively on small block sizes, leaving distillation into student models with larger blocks underex-plored. In this work, we investigate this regime and reveal two critical opti-mization biases that induce severe training instability. First, mismatched block boundaries between teacher and student cause context misalignment , providing distorted supervisory signals that misguide student decoding. Second, even un-der aligned contexts, an intrinsic optimization bias in OPD, where the student tends to rapidly absorb high-support signals while lagging on low-support updates, drives a premature confidence surge that traps weaker students in catastrophic overconfidence collapse. To resolve these, we propose Un-OPD , an unbiased on-policy distillation framework with two novelties for stabilizing BDLM training. First, Un-OPD introduces a boundary-aware step filtering strategy that eliminates context-misaligned decoding steps. Second, Un-OPD proposes moderating opti-mization intensity at high-support positions via a support-rebalanced confidence calibration, thereby bypassing overconfidence collapse. Beyond stability, we also introduce a rollout reuse mechanism to reduce rollout generation overhead. Ex-tensive experiments on math reasoning and code generation benchmarks show that Un-OPD consistently stabilizes training and delivers superior performance while reducing wall-clock training time by approximately half. 
+
+## 1 INTRODUCTION 
+
+Diffusion large language models (dLLMs) have recently emerged as a compelling alternative to autoregressive (AR) models (Achiam et al., 2023; Hui et al., 2024; Yang et al., 2025) by generating multiple tokens in parallel through iterative denoising (Nie et al., 2025; Ye et al., 2025). For example, some open-source models like LLaDA (Nie et al., 2025) and Dream (Ye et al., 2025) maintain a long sequence of mask tokens and iteratively reveal tokens through parallel denoising steps. To inherit the advantages of AR models, particularly KV caching compatibility (Kwon et al., 2023; Ni et al., 2026) and flexible sequence extension, recent dLLM works have advanced toward block diffusion large language models (BDLMs) (Arriola et al., 2025; Cheng et al., 2026; Tian et al., 2025; Wu et al., 2026b; Bie et al., 2025; 2026). By decomposing a sequence into consecutive blocks, BDLMs perform global reasoning autoregressively across blocks while generating tokens via parallel diffusion within each block, achieving a superior quality–latency trade-off. Following the success of post-training in AR models, particularly reinforcement learning with ver-ifiable rewards (RLVR) (Shao et al., 2024; Yu et al., 2026), reinforcement learning (RL) has been actively adapted to enhance the reasoning capabilities of dLLMs (Pan et al., 2026a; Zhao et al., 2026; Wang et al., 2026b; Ou et al., 2026; Ma et al., 2026; Ni et al., 2026). Specifically, to by-pass the intractable conditional likelihood estimation inherent in diffusion denoising, pioneering efforts introduce mean-field surrogates (Zhao et al., 2026; Tang et al., 2026) or tree-structured pol-icy updates (Pan et al., 2026a). Nevertheless, these approaches either rely on coarse outcome-based 1arXiv:2610.05373v1 [cs.CL] 4 Oct 2026 rewards leading to inaccurate and sparse credit assignment across multi-step denoising trajecto-ries (Shao et al., 2026; Zhao et al., 2026), or incur substantial inference overhead to acquire finer-grained reward signals (Pan et al., 2026a). Recently, on-policy distillation (OPD) (Hou et al., 2026; Yang et al., 2026b) has emerged as another promising post-training paradigm. By aligning the stu-dent with teacher predictions along its own rollout trajectories, OPD provides dense, token-level supervision. Recent studies (Hou et al., 2026; Yang et al., 2026b; Fu et al., 2026) demonstrate that OPD outperforms previous RLVR algorithms on language models in terms of both optimization stability and sample efficiency. Despite extensive progress in AR models, OPD for dLLMs remains at an early stage. dOPSD (Dat et al., 2026) extends self-distillation to full-sequence denoising models such as LLaDA (Nie et al., 2025) using predictions from later states with more revealed tokens to supervise earlier states. This design is less applicable to BDLMs, where later states reveal context only within the current block. TOPD (Ren et al., 2026) extends OPD to BDLMs by distilling along the student’s denoising trajec-tories, but it focuses exclusively on small block sizes, leaving distillation into students with larger blocks, which offer inherently greater parallel decoding potential, largely underexplored. In this work, we investigate scaling OPD to BDLMs with larger block sizes. We use small-block BDLMs as teachers because they provide higher-quality generations, and distill them into students with vary-ing block sizes. Our work uncovers two underlying optimization biases that impede the effective distillation of BDLMs: (1) Context misalignment. When denoising within a larger block, the student receives bi-ased supervision because the teacher cannot access its authentic decoding states across mismatched boundaries. Such signals tend to be overly aggressive or excessively conservative, disrupting the student’s confidence-driven decisions. (2) Biased learning dynamics. During OPD, the student prioritizes tokens with strong teacher support over weakly supported ones, causing confidence to prematurely surge and then fall back. This spurious surge drives fragile students into low-quality decoding regimes that are difficult to rectify. To address these two problems, we propose Un-OPD 
+
+(Unbiased On-Policy Distillation), a simple framework for scaling OPD to BDLMs with larger block sizes. Specifically, we first restrict OPD to decoding states with context alignment, ensuring impar-tial teacher supervision signals. We then quantify teacher support to distinguish strongly supported positions and rebalance the teacher support by moderating the update intensity, preventing over-confidence collapse. Beyond stability, we further introduce a rollout reuse mechanism that reuses sampled trajectories for reducing rollout generation overhead. In summary, the main contributions of this work are as follows: • We pioneer the study of OPD on BDLMs with varying block sizes, identifying two underlying optimization bottlenecks: context misalignment arising from mismatched block sizes and biased learning dynamics inherent to standard OPD. • We propose Un-OPD , an unbiased OPD framework that integrates context-aligned step selection and support-rebalanced confidence calibration to stabilize the training dynamics. We also intro-duce a rollout reuse mechanism to reduce rollout overhead during training. • We conduct a comprehensive evaluation across various block sizes and demonstrate that Un-OPD achieves superior performance over counterparts, alongside greater training efficiency. 
+
+## 2 RELATED WORK 
+
+Block Diffusion Language Models. dLLMs (Nie et al., 2025; Zhu et al., 2025; Ye et al., 2025) offer an alternative to autoregressive LLMs (Yang et al., 2025; Achiam et al., 2023) through iterative discrete denoising, with recent gains from scaling data and model size. LLaDA (Nie et al., 2025; Zhu et al., 2025) trains from scratch via masking and unmasking, whereas Dream (Ye et al., 2025) adapts pretrained autoregressive models. Full-sequence dLLMs, however, struggle to combine coherent chain-of-thought reasoning with efficient inference mechanisms such as KV caching (Kwon et al., 2023; Ni et al., 2026). Block diffusion language models (BDLMs) (Arriola et al., 2025; Cheng et al., 2026; Tian et al., 2025; Wu et al., 2026b; Bie et al., 2025; 2026) address this trade-off by generating blocks autoregressively and denoising tokens in parallel within each block. Typically adapted from autoregressive models, BDLMs aim to retain their reasoning capabilities while enabling parallel intra-block generation. 2On-Policy Distillation. By aligning student-generated rollouts with per-token teacher predictions, on-policy distillation (OPD) (Hou et al., 2026; Yang et al., 2026b; Gu et al., 2026; Fu et al., 2026; Xie et al., 2026; Xu et al., 2026; Zhang et al., 2026; Jin et al., 2026; Wang et al., 2026a; Xing et al., 2026) has demonstrated superior post-training efficiency compared to GRPO-style optimiza-tion (Shao et al., 2024; Yu et al., 2026; Gao et al., 2025; Tan et al., 2025) and off-policy coun-terparts (Wang et al., 2023; Ren & Sutherland, 2025; Wu et al., 2026a). To extract more reliable teacher supervision, several works (Zhang et al., 2026; Wang et al., 2026a; Xu et al., 2026; Xie et al., 2026; Zheng et al., 2026) focus optimization on student rollout prefixes. In parallel, on-policy self-distillation (OPSD) (Lu et al., 2026; Yang et al., 2026a; Pan et al., 2026b; Yuan et al., 2026) uses the same model as the teacher, conditioned on privileged context such as ground-truth answers. TOPD (Ren et al., 2026) extends OPD to BDLMs (Cheng et al., 2026) with small block sizes. We investigate instability at larger student block sizes and address context misalignment and biased optimization dynamics. 
+
+Efficient RLVR via Rollout Replay. To improve data efficiency in RLVR, recent works incorpo-rate rollout replay into GRPO-style optimization, curbing policy drift via on/off-policy interleav-ing (Zhang et al., 2025; Zhan et al., 2026; Li et al., 2025), quality filtering (Zhang et al., 2025; Wang et al., 2025), or importance-sampling corrections (Mao et al., 2026). However, these methods require delicate heuristics to manage staleness and off-policy bias. In contrast, we extend rollout replay to OPD, which exhibits fundamentally higher tolerance to trajectory staleness. This allows Un-OPD to employ an aggressive replay schedule that substantially reduces rollout generation overhead without the complexity of trace filtering or data mixing. 
+
+## 3 METHOD 
+
+We propose Un-OPD , a framework that scales OPD to BDLMs with large block sizes by integrating two recipes: context-aligned distillation and support-rebalanced distillation. Our design is driven by two key sources of training instability: context misalignment arising from mismatched block boundaries and biased learning dynamics inherent to standard OPD. In this section, we first provide the preliminaries in Sec. 3.1. Next, Sec. 3.2 analyzes context misalignment and introduces context-aligned distillation. Then, Sec. 3.3 investigates the biased learning dynamics of OPD and introduces our support rebalance strategy. Finally, Sec. 3.4 unifies these components into the overall Un-OPD training framework while introducing rollout reuse to reduce trajectory-sampling overhead. 3.1 PRELIMINARIES 
+
+On-policy distillation. On-policy distillation (OPD) trains a student policy πθ on its own rollouts using token-level supervision from a fixed teacher policy πT. Given a prompt q ∼ D , the student generates a response τ = ( o1, . . . , o |τ |) where |τ | is the length of the trajectory. Let ci denote the conditioning context at which token oi is predicted, including the prompt and the visible decoding state. In the reverse-KL formulation considered here, the student minimizes 
+
+LOPD (θ) = Eq∼D , τ ∼πθ (·| q)
+
+ 1
+
+|τ | 
+
+> |τ|
+
+X
+
+> i=1
+
+DKL (πθ (· | ci) ∥ πT(· | ci)) 
+
+ , (1) where sampled rollout contexts are held fixed during each optimization update. The reverse KL at position i is computed over the vocabulary V:
+
+Li = X
+
+> v∈V
+
+πθ (v | ci)log πθ (v | ci) − log πT(v | ci). (2) 
+
+Trace-aligned OPD for block diffusion language models (BDLMs). BDLMs generate sequences in a semi-autoregressive fashion: they proceed block by block, iteratively revealing tokens within the current block while conditioning on all preceding, fully generated blocks. Following TOPD (Ren et al., 2026) and TraceRL (Wang et al., 2026b) (a GRPO-based method for block diffusion language models), we tailor OPD to this decoding paradigm by supervising the student directly along its on-policy denoising trajectory. Specifically, given a prompt q, the student samples an execution trace 
+
+ξ = ( s0, a 0, s 1, . . . , a K−1, s K), where sk denotes the intermediate decoding state (with partially 3Unmasked 
+
+> Unmasked
+> Current
+> Mask
+> 1
+
+s
+
+> 2
+
+s
+
+> 3
+
+s
+
+> 4
+
+s
+
+> teacher block context
+> student block context
+
+教师多看 
+
+教师少看 
+
+教师少看 
+
+相同 
+
+> Cteacher block context
+> teacher block context
+> teacher block context
+> teacher block context
+> Long reasoning trajectory
+> Student block context
+> Teacher block context Teacher block context
+
+(a) (b) 
+
+Fig. 1: Context misalignment and its effects on OPD. (a) The student denoises an 8-token block, while the teacher provides supervision within 4-token blocks. Contexts are misaligned at states s1–
+
+s3 and aligned at s4. (b) Box plots show distributions of teacher support ρ (blue) and post-OPD top-1 probability change (orange) for context regimes G1, G2, and G3. The diamonds mark mean values. unmasked tokens), ak = {(i, x i)} represents the set of token decisions committed at step k, and sK
+
+is the finalized sequence. For each committed position (i, x i) ∈ ak, we evaluate πT(· | q, s k, i ) and 
+
+πθ (· | q, s k, i ) and minimize their reverse-KL divergence. 3.2 CONTEXT ALIGNED DISTILLATION 
+
+Understanding context misalignment. Unlike autoregressive teacher–student pairs with identical causal contexts, BDLMs with different block sizes can have misaligned visible contexts even under trace-aligned OPD. Fig. 1(a) illustrates this mismatch for teacher and student block sizes of 4 and 8.The student undergoes four commit steps within its 8-token block (yielding states s1–s4), whereas the teacher’s span is split into two 4-token blocks by the red dashed boundary. Consequently, their contexts align only at s4, while s1–s3 suffer from distinct mismatches: at s1, the teacher conditions on the fully generated left-block context that remains noisy to the student, whereas at s2 and s3, the student accesses unmasked context from the right-block that lies strictly beyond the teacher’s first block boundary. 
+
+Optimization bias under context misalignment. To probe how context misalignment affects stu-dent optimization, we pair an SDAR-4B-b8 student with a TraDo-8B-b4 teacher and categorize decoding states into three regimes: G1 (student sees more context such as s2, s 3), G2 (teacher sees more such as s1), and G3 (contexts are aligned such as s4). Let hi = arg max v pS,i (v) denote the student’s top-1 token at position i. We quantify the teacher support ρi = pT,i (hi)/p S,i (hi),where ρi > 1 and ρi < 1 denote stronger and weaker teacher support for the student’s top-1 pre-diction, respectively. In Fig. 1(b), the blue box plots show the teacher support distributions across the three state groups, while the orange box plots show the distributions of changes in the student’s top-1 probability after training with OPD exclusively on each group. The teacher support skews predominantly below 1.0 in G1 and above 1.0 in G2, whereas G3 remains well-balanced. The confi-dence change mirrors this pattern: G1 yields negligible confidence change, G2 causes a sharp surge, and G3 produces a moderate rise. These results demonstrate that context asymmetry systematically biases teacher supervision signals on the student rollout tokens in two opposite directions: • Under-supportive supervision signals. With less visible context than the student, the teacher tends to underestimate the student’s valid rollouts relative to aligned contexts, which leaves the student at risk of failing to reinforce confidence in correct predictions through OPD. • Over-supportive supervision signals. With more visible context than the student, the teacher tends to provide overly aggressive support relative to aligned contexts, which puts the student at risk of becoming overconfident in incorrect predictions through OPD. 
+
+Context aligned step selection. Let sT,k and sS,k denote the teacher and student block states at step k. To mitigate context-induced bias, we retain only decisions committed at steps with aligned visible contexts: 
+
+Aalign = (k, i ) : ( i, x i) ∈ ak, 0 ≤ k < K, s T,k = sS,k . (3) 4Here, (k, i ) denotes position i committed at step k. Averaging the reverse KL over these positions gives the context-aligned OPD objective: 
+
+Laligned -OPD = 1
+
+|A align |
+
+X
+
+> (k,i )∈A align
+
+DKL (πθ (· | q, s S,k , i ) ∥ πT(· | q, s T,k , i )) . (4) 3.3 SUPPORT -R EBALANCED DISTILLATION 
+
+Though we have identified and mitigated context-induced bias in Sec. 3.2, training remains sub-optimal. Crucially, we observe that another bias, the internal optimization dynamics of OPD, also compromises BDLM training stability. In this part, we first present empirical observations of this behavior in OPD, then provide a theoretical grounding, and finally introduce a simple yet effective solution. 
+
+Biased optimization dynamics in OPD. Since top-1 token confidence critically dictates decoding decisions in BDLMs, we begin by examining the evolution of the student’s average top-1 confidence throughout the entire OPD training process. As illustrated in Fig. 2, decoding confidence of the student model exhibits a distinct two-stage pattern throughout training: a rapid surge during the early phase, followed by a slight decline during later training. To dissect the underlying mechanism behind this phenomenon, we leverage the previously defined teacher support ρi in Sec. 3.2 given its tight correlation with confidence shifts, and divide the supervised positions into two distinct groups: 
+
+I+ = {i : ρi > 1} and I− = {i : ρi < 1}. Empirically, updates from I+ tend to increase the student's decoding confidence, whereas updates from I− tend to decrease it. 
+
+Fig. 2: Evolution of student mean top-1 confidence (blue) alongside subset fractions of I+ (orange) and 
+
+I− (green). The shaded area denotes the overconfi-dence collapse zone. As shown in Fig. 2, we reveal that the fraction of high-support positions steadily decreases, while that of low-support po-sitions rises before eventually plateauing. We hypothesize that this early confidence surge stems from an asymmetric learning dynamic: the student rapidly internalizes 
+
+supervisory signals from high-support po-sitions ( I+), whereas updates from low-support positions ( I−) suffer from an op-timization lag . We term this learning asymmetry the intrinsic optimization bias of OPD. Consequently, as the student’s confi-dence is prematurely driven up, the rollout policy becomes increasingly prone to sam-pling tokens beyond the teacher’s support region, which in turn produces more low-support positions which ultimately dominate training and trigger a subsequent pullback in confi-dence. 
+
+Theoretical grounding. To theoretically characterize this optimization bias, we examine the reverse-KL gradient update to the logit of the student’s top-1 prediction hi. Let ai = pS,i (hi) and 
+
+bi = pT,i (hi), such that ρi = bi/a i. We denote by Dtail  
+
+> i
+
+≥ 0 the reverse-KL divergence between the renormalized tail distributions of the student and teacher over all non-top-1 tokens ( v̸ = hi). 
+
+Proposition 1 (Asymmetric top-1 logit updates under reverse-KL) . For a fixed context and a teacher distribution with positive token probabilities, a reverse-KL gradient descent step with learning rate 
+
+η > 0 directly on the student’s softmax logits yields 
+
+∆zS,i (hi) = ηa i(1 − ai)
+
+
+
+log bi(1 − ai)
+
+ai(1 − bi) + Dtail 
+
+> i
+
+
+
+. (5) Proposition 1 shows that the nonnegative tail term Dtail  
+
+> i
+
+reinforces upward logit updates for ρi > 1,but can weaken or reverse downward updates for ρi < 1. This local logit-level analysis provides a mechanism consistent with the observed asymmetry, although actual training dynamics also depend on the overall training data distribution. 5Support-rebalanced confidence calibration. Due to this optimization bias, OPD is not a free lunch for BDLMs. When weaker students are guided by a strong teacher, a premature surge in confidence readily pushes them into a degenerate generation regime (Fig. 2). Consequently, such students slip into a catastrophic overconfidence zone, failing to recover even in later training stages to a confi-dence regime commensurate with their actual capacity. Here, we propose calibrating the supervision signals specifically at high-support positions. In implementation, we temper the teacher target by interpolating its logits with the student’s detached logits for each i ∈ I +, thereby moderating update intensity at high-support positions. Let I denote the set of supervised token positions and λ ∈ [0 , 1] 
+
+be the teacher interpolation weight at high-support positions. The calibrated teacher target and the resulting reverse-KL objective are defined as: 
+
+ezT,i (v) = 1 − (1 − λ)1{i∈I +}
+
+zT,i (v) + (1 − λ)1{i∈I +} sg[ zS,i (v)] ,
+
+Lλ = 1
+
+|I| 
+
+X
+
+> i∈I
+
+DKL (pS,i ∥ softmax( ezT,i )) . (6) Here, 1{i∈I +} indicates a high-support position and sg[ ·] denotes stop-gradient. At these positions, the teacher and detached student logits receive weights λ and 1 − λ, respectively; smaller λ yields stronger calibration. Low-support positions retain the original teacher target. 3.4 OVERALL FRAMEWORK 
+
+Overall objective. Unifying the two training recipes, we can obtain the unbiased OPD framework for BDLMs, whose overall objective minimizes the reverse-KL divergence over aligned decisions in 
+
+Aalign using the calibrated teacher target: 
+
+LUn -OPD (θ) = Eq,ξ 
+
+ 1
+
+|A align |
+
+X
+
+> (k,i )∈A align
+
+DKL (pS,k,i ∥ softmax( ezT,k,i )) 
+
+ , (7) where pS,k,i = πθ (· | q, s S,k , i ) and ezT,k,i is the calibrated target from Eq. 6. When λ = 1 , Eq. 7 recovers context-aligned OPD (Eq. 4), while λ < 1 calibrates the teacher target at high-support positions to curb premature confidence inflation. 
+
+Rollout reuse. We notice that OPD is inherently better suited for trajectory reuse compared to RLVR. In OPD, historical rollouts serve merely as conditioning states rather than frozen discrete actions or stale scalar rewards as in RLVR. Across multiple optimization steps on the same rollout batch, we recompute the student distributions under the current policy, while the frozen teacher distributions over the fixed states remain unchanged. The calibrated targets and distillation gradients are recomputed accordingly. Consequently, the primary discrepancy in OPD replay arises solely from state distribution mismatch between the sampling policy and the updated student. Unlike RLVR, which suffers from volatile importance sampling and reward clipping over historical rollouts, OPD suffers from substantially milder off-policy degradation. This insight motivates our rollout reuse mechanism, which performs multiple updates per rollout to effectively reduce the heavy cost of rollout sampling. 
+
+## 4 EXPERIMENTS 
+
+In this section, we conduct comprehensive experiments across BDLMs with varying block sizes to evaluate the effectiveness of Un-OPD. We first detail the experimental configurations in Sec. 4.1, then assess how the proposed Un-OPD improves performance across different benchmarks in Sec. 4.2. Finally, we provide an ablation study about the core recipes of Un-OPD in Sec. 4.3. 4.1 EXPERIMENTAL SETTINGS 
+
+Baselines and Benchmarks. To comprehensively evaluate the scalability and robustness of Un-OPD, we employ SDAR-4B and SDAR-1.7B (Cheng et al., 2026) with varying block sizes (b ∈ { 4, 8}) as student BDLMs, paired with a default TraDo-8B (Wang et al., 2026b) as teacher (b = 4). We evaluate the models on standard benchmarks for mathematical reasoning ( e.g., 
+
+6Tab. 1: Performance comparison on math and code generation benchmarks. We report accuracy (%) with gains over the base model computed by direct subtraction. With the teacher block size fixed at 4, student block sizes of 8 and 4 correspond to asymmetric and symmetric configurations, respectively. The best results in each group are boldfaced and underlined. 
+
+Method Mathematical Reasoning Code Generation GSM8K MATH500 AMC2023 Olympiad Avg. MBPP HumanEval Avg. 
+
+Student Model: SDAR-4B-b8 
+
+Base 88.9 66.3 42.5 29.2 56.7 53.5 67.9 60.7 + SFT 88 .1−0.8 65 .4−0.9 40 .3−2.2 27 .9−1.3 55 .4−1.3 51 .7−1.8 65 .5−2.4 58 .6−2.1
+
++ TraceRL 89 .5+0 .6 69 .4+3 .1 46.8 +4 .3 30 .0+0 .8 58 .9+2 .2 54 .1+0 .6 68 .9+1 .0 61 .5+0 .8
+
++ TOPD 88 .4−0.5 67 .1+0 .8 43 .6+1 .1 30 .8+1 .6 57 .5+0 .8 52 .3−1.2 65 .1−2.8 58 .7−2.0
+
++ Un-OPD (Ours) 90.0 +1 .1 70.1 +3 .8 45 .8+3 .3 32.8 +3 .6 59.7 +3 .0 55.6 +2 .1 71.1 +3 .2 63 .4+2 .7
+
+Student Model: SDAR-1.7B-b8 
+
+Base 74.8 51.9 25.9 17.3 42.5 41.2 52.4 46.8 + SFT 73 .4−1.4 50 .1−1.8 23 .3−2.6 15 .7−1.6 40 .6−1.9 40 .5−0.7 53 .5+1 .1 47 .0+0 .2
+
++ TraceRL 75.6 +0 .8 53 .0+1 .1 27.8 +1 .9 18 .3+1 .0 43 .7+1 .2 43.5 +2 .3 54 .4+2 .0 49.0 +2 .2
+
++ TOPD 74 .4−0.4 50 .9−1.0 25 .5−0.4 17 .2−0.1 42 .0−0.5 40 .1−1.1 50 .9−1.5 45 .5−1.3
+
++ Un-OPD (Ours) 75 .3+0 .5 54.9 +3 .0 27 .7+1 .8 18.6 +1 .3 44.1 +1 .6 42 .4+1 .2 55.6 +3 .2 49 .0+2 .2
+
+Student Model: SDAR-4B-b4 
+
+Base 88.1 66.5 43.1 29.5 56.8 50.8 65.2 58.0 + SFT 89.8 +1 .7 67 .4+0 .9 40 .2−2.9 31 .7+2 .2 57 .3+0 .5 54 .8+4 .0 71.3 +6 .1 63 .1+5 .1
+
++ TraceRL 87 .1−1.0 70 .4+3 .9 44 .2+1 .1 30 .7+1 .2 58 .1+1 .3 56 .4+5 .6 71 .2+6 .0 63 .8+5 .8
+
++ TOPD 89 .7+1 .6 70 .8+4 .3 45 .0+1 .9 32 .9+3 .4 59 .6+2 .8 56 .8+6 .0 70 .8+5 .6 63 .8+5 .8
+
++ Un-OPD (Ours) 89 .5+1 .4 72.0 +5 .5 45.4 +2 .3 33.5 +4 .0 60.1 +3 .3 57.1 +6 .3 71 .0+5 .8 64.1 +6 .1
+
+Student Model: SDAR-1.7B-b4 
+
+Base 74.4 53.2 26.7 16.8 42.8 41.2 53.0 47.1 + SFT 76 .4+2 .0 54 .2+1 .0 28 .8+2 .1 19 .5+2 .7 44 .7+1 .9 43 .9+2 .7 56 .1+3 .1 50 .0+2 .9
+
++ TraceRL 76.7 +2 .3 55 .9+2 .7 30 .6+3 .9 19 .0+2 .2 45 .6+2 .8 45 .4+4 .2 55 .9+2 .9 50 .7+3 .6
+
++ TOPD 76 .6+2 .2 57 .7+4 .5 30 .6+3 .9 21 .1+4 .3 46 .5+3 .7 43 .8+2 .6 57 .4+4 .4 50 .6+3 .5
+
++ Un-OPD (Ours) 76 .1+1 .7 58.8 +5 .6 31.5 +4 .8 21.6 +4 .8 47.0 +4 .2 46.1 +4 .9 57.9 +4 .9 52.0 +4 .9
+
+Tab. 2: Ablation of Un-OPD components on SDAR-4B-b8 and SDAR-1.7B-b8. We report accuracy (%) on three mathematical reasoning benchmarks and the corresponding training cost in GPU hours. Components are added cumulatively; subscripts show accuracy changes from the preceding row, computed by direct subtraction. 
+
+Method SDAR-4B-b8 SDAR-1.7B-b8 MATH500 AMC2023 Olympiad GPU hours MATH500 AMC2023 Olympiad GPU hours 
+
+Base 66.3 42.5 29.2 – 51.9 25.9 17.3 –+ TOPD 67 .1+0 .8 43 .6+1 .1 30 .8+1 .6 152 50 .9−1.0 25 .5−0.4 17 .2−0.1 104 
+
++ context-aligned 69 .5+2 .4 44 .5+0 .9 32 .6+1 .8 152 51 .5+0 .6 26 .7+1 .2 17 .3+0 .1 104 
+
++ support-rebalanced 70 .3+0 .8 45 .7+1 .2 33 .0+0 .4 152 54 .4+2 .9 27 .5+0 .8 18 .9+1 .6 104 
+
++ rollout reuse 70 .1−0.2 45 .8+0 .1 32 .8−0.2 72 54 .9+0 .5 27 .7+0 .2 18 .6−0.3 48 
+
+GSM8K (Cobbe et al., 2021), MATH-500 (Hendrycks et al., 2021), AMC 2023), as well as Hu-manEval (Chen et al., 2021) and MBPP (Austin et al., 2021) for code generation. To ensure fair comparisons, we evaluate against SFT , TraceRL (Wang et al., 2026b), and TOPD (Ren et al., 2026) as three primary baselines. 
+
+Implementation details. For mathematical reasoning, we follow TraceRL (Wang et al., 2026b) and use 8K math problems for post-training. For code generation, we use a curated subset of over 
+
+10 , 000 problems from AceCoder (Zeng et al., 2025). Student trajectories are collected using dy-namic decoding with a batch size of 64 prompts (one rollout per prompt). We adopt the dynamic decoding schedule with confidence threshold 0.9 and temperature 1.0 for evaluation unless other-wise specified. We report mean accuracy over four sampled responses per problem ( avg @4 ), except 7(a) SDAR-1.7B-b8. (b) SDAR-4B-b8. 
+
+Fig. 3: Training dynamics on MATH500. We compare the base model (dashed line), TOPD, Un-OPD without support rebalance, and the complete Un-OPD. Solid lines show the smoothed performance trend. for AMC 2023, where we use 16 responses per problem ( avg @16 ). All models are trained for 1,000 gradient steps on an 8-GPU NVIDIA H20 server to guarantee convergence. 4.2 MAIN RESULTS 
+
+Tab. 1 shows distillation performance when scaling to students with a larger block size (b = 8) under a teacher (b = 4). Across both student scales, Un-OPD outperforms TOPD on all six benchmarks and achieves the highest or tied-highest average accuracy in both domains. For the SDAR-4B-b8 student, Un-OPD raises average accuracy in math-ematical reasoning from 57 .5% to 59 .7% and in code generation from 58 .7% to 63 .4% .Tab. 3: Sensitivity to the interpolation coeffi-cient λ on MATH500.                
+
+> λ0.2 0.4 0.6 0.8 1.0 SDAR-1.7B-b8 53.7 54.9 54.1 52.4 50.9 SDAR-4B-b8 70.0 70.1 69.8 68.7 67.1
+
+The advantage is even more striking on the smaller 
+
+SDAR-1.7B-b8 student: while TOPD suffers from severe performance degradation and consis-tently falls below the base model, Un-OPD success-fully stabilizes training, elevating math and code averages to 44 .1% and 49 .0% . Overall, these re-sults support the effectiveness of addressing opti-mization biases when transferring knowledge into larger-block BDLMs. Moreover, for BDLMs with the same block size ( i.e., 4), Un-OPD still achieves better overall performance than TOPD. For example, the mathematical reasoning accu-racy increases from 46 .5% to 47 .0% for SDAR-1.7B-b4 , yielding a 0.5% gain. These results demonstrate that Un-OPD readily generalizes across varying block-size configurations. 4.3 ABLATION STUDY 
+
+Ablation of core components. Tab. 2 ablates our proposed components on both students (SDAR-1.7B-b8 and SDAR-4B-b8 ). Directly applying standard OPD (TOPD) yields marginal gains on SDAR-4B-b8 and even causes performance degradation on the smaller SDAR-1.7B-b8 ,confirming the deficiency of trace-aligned distillation. Introducing context-aligned distillation im-proves all three reported benchmarks on both student scales, with MATH500 gains of 2.4% for the SDAR-4B-b8 . However, context alignment alone leaves the weaker SDAR-1.7B-b8 student underperforming. Adding support-rebalanced distillation to calibrate updates at high-support po-sitions improves accuracy on all three reported benchmarks for the SDAR-1.7B-b8 student ( e.g., again of 2.9% on MATH500). Finally, the rollout reuse mechanism reduces training overhead (from 
+
+152 to 72 GPU hours for 4B) while largely preserving accuracy. These ablations validate that each component is indispensable to achieving both superior accuracy and training efficiency. Furthermore, Fig. 3 compares the training dynamics on MATH500 across both student scales. While standard TOPD suffers from severe late-stage degradation, Un-OPD maintains steady improvements throughout training. Crucially, omitting support rebalance causes the smaller SDAR-1.7B-b8 
+
+student to collapse below base accuracy and limits the gains of SDAR-4B-b8 . This confirms that 8Fig. 4: Training dynamics on MATH500 with different rollout reuse epochs N on SDAR-1.7B-b8. Solid lines show accuracy trajectories; the dashed line denotes the base model. 1.0 2.2 2.6 3.0 3.4 45 50 55 60 
+
+> MATH500 accuracy
+> TPF 1.05 2.2 compressed (10:1)
+> (%)
+> = 1.0
+> = 0.9
+> = 0.8
+> = 0.7
+> = 1.0
+> = 0.9
+> = 0.8
+> = 1.0
+> = 0.9
+> Un-OPD Base model (SDAR-1.7B-b8) TOPD
+> TPF (tokens per decoding step)
+
+Fig. 5: Accuracy versus tokens per forward pass (TPF) on MATH500 for Un-OPD and the SDAR-1.7B-b8 base model across decoding thresholds 
+
+τ .support-rebalanced calibration is essential to ensure robust convergence, particularly for capacity-constrained models. 
+
+Hyper-parameter analysis of λ and N . We examine the sensitivity of Un-OPD to the interpola-tion coefficient λ and rollout reuse epoch number N on MATH500. For λ, Tab. 3 shows that both student scales achieve their highest reported accuracy at λ = 0 .4: 54 .9% for SDAR-1.7B-b8 
+
+and 70 .1% for SDAR-4B-b8 . Increasing λ beyond 0.4 reduces accuracy on both models, support-ing a moderate calibration strength. For rollout reuse, Fig. 4 compares the training dynamics of 
+
+SDAR-1.7B-b8 under N ∈ { 1, 5, 10 , 40 }. Moderate reuse largely preserves performance: by the end of training, N = 5 and N = 10 achieve similar performance to N = 1 (the non-reused base-line). In contrast, with N = 40 , performance declines during later training, likely due to off-policy shift from overly stale rollout trajectories. Taken together, we set λ = 0 .4 and N = 10 to balance accuracy and rollout generation cost. 
+
+Analysis of tokens per forward pass (TPF). To evaluate the trade-off between reasoning accu-racy and decoding parallelism, we sweep the dynamic decoding threshold τ on MATH500 (Fig. 5). Across high-to-moderate confidence thresholds, Un-OPD consistently establishes a superior Pareto frontier over the base model, achieving up to a +3 .3% accuracy gain under conservative decod-ing ( τ = 1 .0). However, as decoding becomes overly aggressive (higher TPF), this performance advantage narrows and eventually diminishes, leaving room for further improvement. Tab. 4: Cross-domain accuracy of SDAR-4B-b8. Arrows denote training → evaluation domains. 
+
+Method Code → Math Math → Code 
+
+MATH500 AMC2023 MBPP HumanEval Base 66.3 42.5 53.5 67.9 Un-OPD 67.2 43.6 53.3 68.0 
+
+Out-of-distribution (OOD) transferability. To test cross-domain robustness, we evaluate 
+
+SDAR-4B-b8 across math and code domains (Tab. 4). After post-training on math, Un-OPD largely preserves code-generation performance, maintaining virtually identical accuracy on MBPP ( 53 .3% ) and HumanEval ( 68 .0% ). Fur-thermore, code-trained Un-OPD exhibits modest positive transfer to math reasoning, outperform-ing Base by +0 .9% on MATH500 and +1 .1% 
+
+on AMC2023. These results confirm that Un-OPD avoids out-of-domain degradation while facili-tating cross-task generalization. 
+
+## 5 CONCLUSION 
+
+In this work, we pioneer the study of scaling on-policy distillation (OPD) to block diffusion language models (BDLMs) with varying block sizes. We uncover two fundamental optimization bottlenecks: 
+
+context misalignment induced by mismatched block boundaries, and overconfidence collapse trig-gered by biased learning dynamics under reverse-KL supervision. To overcome these challenges, we introduce Un-OPD , which eliminates supervisory distortions via boundary-aware step filtering and 9recalibrates optimization intensity across token supports. In addition, we integrate a rollout reuse mechanism that roughly halves training overhead with negligible accuracy loss. Comprehensive experiments on mathematical reasoning and code generation demonstrate that Un-OPD achieves re-markable stability and superior accuracy as well as substantial efficiency. Despite these gains, the effectiveness of Un-OPD may depend on the quality and suitability of the teacher’s supervision. Fur-thermore, pushing this Pareto frontier toward ultra-high parallelism regimes presents a compelling avenue for future research. 
+
+## REFERENCES 
+
+Josh Achiam, Steven Adler, Sandhini Agarwal, Lama Ahmad, Ilge Akkaya, Florencia Leoni Ale-man, Diogo Almeida, Janko Altenschmidt, Sam Altman, Shyamal Anadkat, et al. Gpt-4 technical report. arXiv preprint arXiv:2303.08774 , 2023. Marianne Arriola, Aaron Gokaslan, Justin Chiu, Zhihan Yang, Zhixuan Qi, Jiaqi Han, Subham Sahoo, and Volodymyr Kuleshov. Block diffusion: Interpolating between autoregressive and diffusion language models. In International Conference on Learning Representations , volume 2025, pp. 50726–50753, 2025. Jacob Austin, Augustus Odena, Maxwell Nye, Maarten Bosma, Henryk Michalewski, David Dohan, Ellen Jiang, Carrie Cai, Michael Terry, Quoc Le, et al. Program synthesis with large language models. arXiv preprint arXiv:2108.07732 , 2021. Tiwei Bie, Maosong Cao, Kun Chen, Lun Du, Mingliang Gong, Zhuochen Gong, Yanmei Gu, Jiaqi Hu, Zenan Huang, Zhenzhong Lan, et al. Llada2. 0: Scaling up diffusion language models to 100b. arXiv preprint arXiv:2512.15745 , 2025. Tiwei Bie, Maosong Cao, Xiang Cao, Bingsen Chen, Fuyuan Chen, Kun Chen, Lun Du, Daozhuo Feng, Haibo Feng, Mingliang Gong, et al. Llada2. 1: Speeding up text diffusion via token editing. 
+
+arXiv preprint arXiv:2602.08676 , 2026. Mark Chen, Jerry Tworek, Heewoo Jun, Qiming Yuan, Henrique Ponde De Oliveira Pinto, Jared Kaplan, Harri Edwards, Yuri Burda, Nicholas Joseph, Greg Brockman, et al. Evaluating large language models trained on code. arXiv preprint arXiv:2107.03374 , 2021. Shuang Cheng, Yihan Bian, Dawei Liu, Yuhua Jiang, Yihao Liu, Linfeng Zhang, Qian Yao, Zhongbo Tian, Wenhai Wang, Qipeng Guo, et al. Sdar: A synergistic diffusion-autoregression paradigm for scalable sequence generation. In Findings of the Association for Computational Linguistics: ACL 2026 , pp. 22058–22075, 2026. Karl Cobbe, Vineet Kosaraju, Mohammad Bavarian, Mark Chen, Heewoo Jun, Lukasz Kaiser, Matthias Plappert, Jerry Tworek, Jacob Hilton, Reiichiro Nakano, et al. Training verifiers to solve math word problems. arXiv preprint arXiv:2110.14168 , 2021. Phuong Tuan Dat, Qi Li, and Xinchao Wang. dopsd: On-policy self-distillation for diffusion lan-guage models. arXiv preprint arXiv:2607.04428 , 2026. Yuqian Fu, Haohuan Huang, Kaiwen Jiang, Jiacai Liu, Zhuo Jiang, Yuanheng Zhu, and Dongbin Zhao. Revisiting on-policy distillation: Empirical failure modes and simple fixes. arXiv preprint arXiv:2603.25562 , 2026. Chang Gao, Chujie Zheng, Xiong-Hui Chen, Kai Dang, Shixuan Liu, Bowen Yu, An Yang, Shuai Bai, Jingren Zhou, and Junyang Lin. Soft adaptive policy optimization. arXiv preprint arXiv:2511.20347 , 2025. Naibin Gu, Chenxu Yang, Qingyi Si, Chuanyu Qin, Dingyu Yao, Peng Fu, Zheng Lin, Weip-ing Wang, Nan Duan, and Jiaqi Wang. Co-evolving policy distillation. arXiv preprint arXiv:2604.27083 , 2026. Dan Hendrycks, Collin Burns, Saurav Kadavath, Akul Arora, Steven Basart, Eric Tang, Dawn Song, and Jacob Steinhardt. Measuring mathematical problem solving with the math dataset. arXiv preprint arXiv:2103.03874 , 2021. 10 Wenjin Hou, Shangpin Peng, Weinong Wang, Zheng Ruan, Yue Zhang, Zhenglin Zhou, Mingqi Gao, Yifei Chen, Kaiqi Wang, Hongming Yang, Chengquan Zhang, Zhuotao Tian, Han Hu, Yi Yang, Fei Wu, and Hehe Fan. Uni-opd: Unifying on-policy distillation with a dual-perspective recipe. 
+
+arXiv preprint arXiv:2605.03677 , 2026. Binyuan Hui, Jian Yang, Zeyu Cui, Jiaxi Yang, Dayiheng Liu, Lei Zhang, Tianyu Liu, Jiajun Zhang, Bowen Yu, Keming Lu, et al. Qwen2. 5-coder technical report. arXiv preprint arXiv:2409.12186 ,2024. Woogyeol Jin, Taywon Min, Yongjin Yang, Dennis Wei, Yi Zhou, Swanand Ravindra Kadhe, Nathalie Baracaldo, and Kimin Lee. Entropy-aware on-policy distillation of language models. 
+
+arXiv preprint arXiv:2603.07079 , 2026. Woosuk Kwon, Zhuohan Li, Siyuan Zhuang, Ying Sheng, Lianmin Zheng, Cody Hao Yu, Joseph Gonzalez, Hao Zhang, and Ion Stoica. Efficient memory management for large language model serving with pagedattention. In Proceedings of the 29th symposium on operating systems princi-ples , pp. 611–626, 2023. Siheng Li, Zhanhui Zhou, Wai Lam, Chao Yang, and Chaochao Lu. Repo: Replay-enhanced policy optimization. arXiv preprint arXiv:2506.09340 , 2025. Zhengxi Lu, Zhiyuan Yao, Zhuowen Han, Zi-Han Wang, Jinyang Wu, Qi Gu, Xunliang Cai, Weim-ing Lu, Jun Xiao, Yueting Zhuang, et al. Self-distilled agentic reinforcement learning. arXiv preprint arXiv:2605.15155 , 2026. Tianren Ma, Mu Zhang, Yibing Wang, and Qixiang Ye. Consolidating reinforcement learning for multimodal discrete diffusion models. In International Conference on Learning Representations ,volume 2026, pp. 147950–147971, 2026. Yixiu Mao, Yun Qu, Qi Wang, Heming Zou, and Xiangyang Ji. Rlvr without ineffective samples: Group prioritized off-policy optimization for llm reasoning. arXiv preprint arXiv:2606.01281 ,2026. Zanlin Ni, Shenzhi Wang, Yang Yue, Tianyu Yu, Weilin Zhao, Yeguo Hua, Tianyi Chen, Jun Song, Cheng Yu, Bo Zheng, et al. The flexibility trap: Rethinking the value of arbitrary order in diffusion language models. arXiv preprint arXiv:2601.15165 , 2026. Shen Nie, Fengqi Zhu, Zebin You, Xiaolu Zhang, Jingyang Ou, Jun Hu, Jun Zhou, Yankai Lin, Ji-Rong Wen, and Chongxuan Li. Large language diffusion models. arXiv preprint arXiv:2502.09992 , 2025. Jingyang Ou, Jiaqi Han, Minkai Xu, Shaoxuan Xu, Jianwen Xie, Stefano Ermon, Yi Wu, and Chongxuan Li. Principled rl for diffusion llms emerges from a sequence-level perspective. In 
+
+International Conference on Learning Representations , volume 2026, pp. 4941–4966, 2026. Leyi Pan, Shuchang Tao, Yunpeng Zhai, Zheyu Fu, Liancheng Fang, Minghua He, Lingzhe Zhang, Zhaoyang Liu, Bolin Ding, Aiwei Liu, et al. d-treerpo: Towards more reliable policy optimization for diffusion language models. In Proceedings of the 64th Annual Meeting of the Association for Computational Linguistics (Volume 1: Long Papers) , pp. 21801–21822, 2026a. Leyi Pan, Shuchang Tao, Yunpeng Zhai, Lingzhe Zhang, Zhaoyang Liu, Bolin Ding, Aiwei Liu, and Lijie Wen. Rlcsd: Reinforcement learning with contrastive on-policy self-distillation. arXiv preprint arXiv:2606.11709 , 2026b. Haolin Ren, Ziyang Huang, Chenhao Yuan, and Jun Zhao. Trace-based on-policy distillation for masked diffusion language models. arXiv preprint arXiv:2607.16872 , 2026. Yi Ren and Danica Sutherland. Learning dynamics of llm finetuning. In International Conference on Learning Representations , volume 2025, pp. 70523–70563, 2025. Yawen Shao, Jie Xiao, Kai Zhu, Yu Liu, Hongchen Luo, Xueyang Fu, Yang Cao, Wei Zhai, and Zheng-Jun Zha. Back on track: Aligning rewards and states for reasoning in diffusion large language models. arXiv preprint arXiv:2606.08501 , 2026. 11 Zhihong Shao, Peiyi Wang, Qihao Zhu, Runxin Xu, Junxiao Song, Xiao Bi, Haowei Zhang, Mingchuan Zhang, YK Li, Yang Wu, et al. Deepseekmath: Pushing the limits of mathemati-cal reasoning in open language models. arXiv preprint arXiv:2402.03300 , 2024. Hongze Tan, Zihan Wang, Jianfei Pan, Jinghao Lin, Hao Wang, Yifan Wu, Tao Chen, Zhihang Zheng, Zhihao Tang, and Haihua Yang. Gtpo and grpo-s: Token and sequence-level reward shaping with policy entropy. arXiv preprint arXiv:2508.04349 , 2025. Xiaohang Tang, Rares Dolga, Sangwoong Yoon, and Ilija Bogunovic. wd1: Weighted policy opti-mization for reasoning in diffusion language models. In International Conference on Learning Representations , volume 2026, pp. 150357–150385, 2026. Yuchuan Tian, Yuchen Liang, Shuo Zhang, Yingte Shu, Guangwen Yang, Wei He, Sibo Fang, Tianyu Guo, Kai Han, Chao Xu, et al. From next-token to next-block: A principled adaptation path for diffusion llms. arXiv preprint arXiv:2512.06776 , 2025. Chen Wang, Lai Wei, Yanzhi Zhang, Chenyang Shao, Zedong Dan, Weiran Huang, Yuzhi Zhang, and Yue Wang. Eframe: Deeper reasoning via exploration-filter-replay reinforcement learning framework. arXiv preprint arXiv:2506.22200 , 2025. Jiaxuan Wang, Xuan Ouyang, Zhiyu Chen, Yulan Hu, Zheng Pan, Xin Li, and Lan-Zhe Guo. Trace: Distilling where it matters via token-routed self on-policy alignment. arXiv preprint arXiv:2605.10194 , 2026a. Yinjie Wang, Ling Yang, Bowen Li, Ye Tian, Ke Shen, and Mengdi Wang. Revolutionizing rein-forcement learning framework for diffusion large language models. In International Conference on Learning Representations , volume 2026, pp. 101476–101501, 2026b. Yizhong Wang, Yeganeh Kordi, Swaroop Mishra, Alisa Liu, Noah A Smith, Daniel Khashabi, and Hannaneh Hajishirzi. Self-instruct: Aligning language models with self-generated instructions. In 
+
+Proceedings of the 61st annual meeting of the association for computational linguistics (volume 1: long papers) , pp. 13484–13508, 2023. Yongliang Wu, Yizhou Zhou, Ziheng Zhou, Yingzhe Peng, Xinyu Ye, Xinting Hu, Wenbo Zhu, Lu Qi, Ming-Hsuan Yang, et al. On the generalization of sft: A reinforcement learning perspective with reward rectification. In International Conference on Learning Representations , volume 2026, pp. 27550–27571, 2026a. Zirui Wu, Lin Zheng, Jiacheng Ye, Shansan Gong, Xueliang Zhao, Yansong Feng, Wei Bi, and Ling-peng Kong. Dreamreasoner-8b: Block-size curriculum learning for diffusion reasoning models. 
+
+arXiv preprint arXiv:2606.19257 , 2026b. Yan Xie, Sijie Zhu, Tiansheng Wen, Bo Chen, and Yifei Wang. On the position bias of on-policy distillation. arXiv preprint arXiv:2606.22600 , 2026. Xingrun Xing, Haoqing Wang, Boyan Gao, Ziheng Li, and Yehui Tang. Trust region on-policy distillation. arXiv preprint arXiv:2606.01249 , 2026. Yuanda Xu, Hejian Sang, Zhengze Zhou, Ran He, Zhipeng Wang, and Alborz Geramifard. Tip: Token importance in on-policy distillation. arXiv preprint arXiv:2604.14084 , 2026. An Yang, Anfeng Li, Baosong Yang, Beichen Zhang, Binyuan Hui, Bo Zheng, Bowen Yu, Chang Gao, Chengen Huang, Chenxu Lv, et al. Qwen3 technical report. arXiv preprint arXiv:2505.09388 , 2025. Chenxu Yang, Chuanyu Qin, Qingyi Si, Minghui Chen, Naibin Gu, Dingyu Yao, Zheng Lin, Weip-ing Wang, Jiaqi Wang, and Nan Duan. Self-distilled rlvr. arXiv preprint arXiv:2604.03128 ,2026a. Wenkai Yang, Weijie Liu, Ruobing Xie, Kai Yang, Saiyong Yang, and Yankai Lin. Learning beyond teacher: Generalized on-policy distillation with reward extrapolation. arXiv preprint arXiv:2602.12125 , 2026b. 12 Jiacheng Ye, Zhihui Xie, Lin Zheng, Jiahui Gao, Zirui Wu, Xin Jiang, Zhenguo Li, and Lingpeng Kong. Dream 7b: Diffusion large language models. arXiv preprint arXiv:2508.15487 , 2025. Qiying Yu, Zheng Zhang, Ruofei Zhu, Yufeng Yuan, Xiaochen Zuo, Yu Yue, Weinan Dai, Tiantian Fan, Gaohong Liu, Lingjun Liu, et al. Dapo: An open-source llm reinforcement learning system at scale. Advances in Neural Information Processing Systems , 38:113222–113244, 2026. Qianhao Yuan, Jie Lou, Xing Yu, Hongyu Lin, Le Sun, Xianpei Han, and Yaojie Lu. Vision-opd: Learning to see fine details for multimodal llms via on-policy self-distillation. arXiv preprint arXiv:2605.18740 , 2026. Huaye Zeng, Dongfu Jiang, Haozhe Wang, Ping Nie, Xiaotong Chen, and Wenhu Chen. Acecoder: Acing coder rl via automated test-case synthesis. In Proceedings of the 63rd Annual Meeting of the Association for Computational Linguistics (Volume 1: Long Papers) , pp. 12023–12040, 2025. Runzhe Zhan, Yafu Li, Zhi Wang, Xiaoye Qu, Dongrui Liu, Jing Shao, Derek Wong, and Yu Cheng. Exgrpo: Learning to reason from experience. In International Conference on Learning Represen-tations , volume 2026, pp. 12810–12846, 2026. Dongxu Zhang, Zhichao Yang, Sepehr Janghorbani, Jun Han, Andrew Ressler II, Qian Qian, Gre-gory D Lyng, Sanjit Singh Batra, and Robert E Tillman. Fast and effective on-policy distillation from reasoning prefixes. In Findings of the Association for Computational Linguistics: ACL 2026 ,pp. 25553–25569, 2026. Hongzhi Zhang, Jia Fu, Jingyuan Zhang, Kai Fu, Qi Wang, Fuzheng Zhang, and Guorui Zhou. Rlep: Reinforcement learning with experience replay for llm reasoning. arXiv preprint arXiv:2507.07451 , 2025. Siyan Zhao, Devaansh Gupta, Qinqing Zheng, and Aditya Grover. d1: Scaling reasoning in diffusion large language models via reinforcement learning. Advances in Neural Information Processing Systems , 38:56729–56762, 2026. Binbin Zheng, Zijun Xie, Guanqun Zhao, Enlei Gong, Xing Ma, Xiaoliang Fu, and Zeyu Chen. Group-reflective self-distillation for agentic reinforcement learning. arXiv preprint arXiv:2607.28076 , 2026. Fengqi Zhu, Rongzhen Wang, Shen Nie, Xiaolu Zhang, Chunwei Wu, Jun Hu, Jun Zhou, Jianfei Chen, Yankai Lin, Ji-Rong Wen, et al. Llada 1.5: Variance-reduced preference optimization for large language diffusion models. arXiv preprint arXiv:2505.19223 , 2025. 13
