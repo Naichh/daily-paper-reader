@@ -6,74 +6,74 @@
 </div>
 
 ## 每次日报
-- 最新运行日期：2026-10-07
-- 运行时间：2026-10-08 00:16:28 UTC
+- 最新运行日期：2026-10-09
+- 运行时间：2026-10-09 00:45:33 UTC
 - 运行状态：成功
-- 本次总论文数：17
-- 精读区：7
-- 速读区：10
+- 本次总论文数：18
+- 精读区：14
+- 速读区：4
 
 ### 今日简报（AI）
-- 今日共生成 17 篇推荐（精读 7 篇，速读 10 篇）
-- 精读：《The Teacher Is a Direction, Not a Destination: Extrapolating RL-Induced Representation Residuals in On-Policy Distillation》（9.0/10）, 《Solving Without Stopping: On-Policy Distillation at Small Scale》（9.0/10）
-- 速读：《From Dissonance to Orchestration: Teacher Intervention in On-Policy Distillation》（8.0/10）, 《Less Data, Better Timing: Student-Curriculum Coupling for VLM On-Policy Distillation in Temporal Video Grounding》（8.0/10）, 《LEGO-OPD: Factorized Teacher Composition for Multimodal On-Policy Distillation》（8.0/10）
-- 这些结果覆盖了当下较热的方向，建议先看精读区论文的关键问题与方法。
-- 详情：[/202610/07/README](/202610/07/README)
+今日精读14篇、速读4篇，On-Policy Distillation 方向成为绝对焦点。最值得看的是两篇满分工作：OPD Before RL 用同策略蒸馏为 rubric-based RL 预热，Flash-OPD 则主攻快速蒸馏。普通读者可先读懂 OPD 的基本流程，再关注它如何与强化学习结合。
+- 详情：[/202610/09/README](/202610/09/README)
 
 ### 精读区论文标签
-1. [The Teacher Is a Direction, Not a Destination: Extrapolating RL-Induced Representation Residuals in On-Policy Distillation](/202610/07/2609.36484v1-the-teacher-is-a-direction-not-a-destination-extrapolating-rl-induced-representation-residuals-in-on-policy-distillation)  
+1. [OPD Before RL: Warm-Starting Rubric-Based RL with On-Policy Distillation](/202610/09/2610.02781v1-opd-before-rl-warm-starting-rubric-based-rl-with-on-policy-distillation)  
+   标签：评分：10.0/10、query:policy-dist
+   evidence：面向后训练的评分标准特权在线策略蒸馏
+2. [Flash-OPD: Fast On-Policy Distillation](/202610/09/2610.06105v1-flash-opd-fast-on-policy-distillation)  
+   标签：评分：10.0/10、query:policy-dist
+   evidence：基于轨迹可靠边界的快速在线策略蒸馏
+3. [GraphOPD: Graph-Augmented On-Policy Distillation for LLM Agents](/202610/09/2610.08959v1-graphopd-graph-augmented-on-policy-distillation-for-llm-agents)  
+   标签：评分：10.0/10、query:policy-dist
+   evidence：面向LLM智能体的图增强在线策略蒸馏
+4. [A Good Self-Teacher Meets the Student Where They Are: Joint On-Policy Learning and Teaching](/202610/09/2610.10447v1-a-good-self-teacher-meets-the-student-where-they-are-joint-on-policy-learning-and-teaching)  
+   标签：评分：10.0/10、query:policy-dist
+   evidence：联合在线学习与教学以提供稠密监督
+5. [ReTaCo: Residual-Target Control for On-Policy Distillation](/202610/09/2609.39275v1-retaco-residual-target-control-for-on-policy-distillation)  
    标签：评分：9.0/10、query:policy-dist
-   evidence：在策略蒸馏中外推RL诱导的表示残差
-2. [Solving Without Stopping: On-Policy Distillation at Small Scale](/202610/07/2609.37326v1-solving-without-stopping-on-policy-distillation-at-small-scale)  
+   evidence：面向在线策略蒸馏的残差目标控制
+6. [From Imitation to Reward Discovery: On-Policy Warmup for Agentic RL](/202610/09/2609.39436v1-from-imitation-to-reward-discovery-on-policy-warmup-for-agentic-rl)  
    标签：评分：9.0/10、query:policy-dist
-   evidence：在线策略蒸馏向小模型迁移推理能力的分析
-3. [Graph-Conditioned On-Policy Agent Distillation from Off-the-Shelf Teachers](/202610/07/2609.37522v2-graph-conditioned-on-policy-agent-distillation-from-off-the-shelf-teachers)  
+   evidence：在策略蒸馏预热用于智能体RLVR后训练
+7. [Learning from Evolving Errors: Adaptive Iterative Repair for On-Policy Distillation](/202610/09/2610.02700v1-learning-from-evolving-errors-adaptive-iterative-repair-for-on-policy-distillation)  
    标签：评分：9.0/10、query:policy-dist
-   evidence：面向语言智能体的在线策略蒸馏与图条件教师评分
-4. [Distill the Visual Evidence, Not Just the Answer: Cross-World On-Policy Distillation for Vision-Language Models](/202610/07/2609.38777v1-distill-the-visual-evidence-not-just-the-answer-cross-world-on-policy-distillation-for-vision-language-models)  
+   evidence：面向在线策略蒸馏的自适应迭代修复框架
+8. [E$^2$-OPSD: Taming Entropy Overshoot in On-Policy Self-Distillation](/202610/09/2610.05048v1-e2-opsd-taming-entropy-overshoot-in-on-policy-self-distillation)  
    标签：评分：9.0/10、query:policy-dist
-   evidence：面向视觉语言模型的跨世界在线策略蒸馏
-5. [ResOPD: Tail Residualization for Sparse On-Policy Distillation](/202610/07/2610.04882v1-resopd-tail-residualization-for-sparse-on-policy-distillation)  
+   evidence：分析并抑制熵过冲的在线策略自蒸馏
+9. [E$^2$-OPSD: Taming Entropy Overshoot in On-Policy Self-Distillation](/202610/09/2610.05048v2-e2-opsd-taming-entropy-overshoot-in-on-policy-self-distillation)  
    标签：评分：9.0/10、query:policy-dist
-   evidence：在线策略蒸馏，无偏反向 KL 梯度估计
-6. [On-Policy Distillation with Negative-Policy Rollouts](/202610/07/2610.07874v1-on-policy-distillation-with-negative-policy-rollouts)  
+   evidence：在策略自蒸馏的熵过冲问题
+10. [E$^2$-OPSD: Taming Entropy Overshoot in On-Policy Self-Distillation](/202610/09/2610.05048v3-e2-opsd-taming-entropy-overshoot-in-on-policy-self-distillation)  
    标签：评分：9.0/10、query:policy-dist
-   evidence：以负策略轨迹增强在线策略蒸馏的后训练方法
-7. [Rethinking Cross-Tokenizer On-Policy Distillation: From Alignment Coverage to Supervision Reliability](/202610/07/2610.08448v1-rethinking-cross-tokenizer-on-policy-distillation-from-alignment-coverage-to-supervision-reliability)  
+   evidence：在线策略自蒸馏后训练，熵过冲失效分析
+11. [MeSD: Multi-Evidence Self-Distillation for VideoLLM](/202610/09/2610.06342v1-mesd-multi-evidence-self-distillation-for-videollm)  
    标签：评分：9.0/10、query:policy-dist
-   evidence：跨分词器在线策略蒸馏的监督可靠性
+   evidence：面向VideoLLM后训练的在线自蒸馏
+12. [UP-MOPD: Update Projection in Multi-Teacher On-Policy Distillation](/202610/09/2610.08398v1-up-mopd-update-projection-in-multi-teacher-on-policy-distillation)  
+   标签：评分：9.0/10、query:policy-dist
+   evidence：多教师在线策略蒸馏中的更新投影
+13. [On-Policy Distillation Teaches New Skills but Not New Knowledge](/202610/09/2610.09639v1-on-policy-distillation-teaches-new-skills-but-not-new-knowledge)  
+   标签：评分：9.0/10、query:policy-dist
+   evidence：在策略蒸馏向学生迁移的能力分析
+14. [Composing What Each Teacher Learned: Multi-Teacher On-Policy Distillation through Teacher-Relative Shifts](/202610/09/2610.10460v1-composing-what-each-teacher-learned-multi-teacher-on-policy-distillation-through-teacher-relative-shifts)  
+   标签：评分：9.0/10、query:policy-dist
+   evidence：多教师在线策略蒸馏与教师相对偏移迁移
 
 ### 速读区论文标签
-1. [From Dissonance to Orchestration: Teacher Intervention in On-Policy Distillation](/202610/07/2609.37510v1-from-dissonance-to-orchestration-teacher-intervention-in-on-policy-distillation)  
+1. [SAPD: Step-Aligned Privileged Distillation](/202610/09/2610.09665v1-sapd-step-aligned-privileged-distillation)  
    标签：评分：8.0/10、query:policy-dist
-   evidence：在线策略蒸馏中的教师干预与按策略分歧分配指导
-2. [Less Data, Better Timing: Student-Curriculum Coupling for VLM On-Policy Distillation in Temporal Video Grounding](/202610/07/2609.40055v1-less-data-better-timing-student-curriculum-coupling-for-vlm-on-policy-distillation-in-temporal-video-grounding)  
-   标签：评分：8.0/10、query:policy-dist
-   evidence：面向视觉语言模型后训练的在线策略蒸馏
-3. [LEGO-OPD: Factorized Teacher Composition for Multimodal On-Policy Distillation](/202610/07/2610.00333v1-lego-opd-factorized-teacher-composition-for-multimodal-on-policy-distillation)  
-   标签：评分：8.0/10、query:policy-dist
-   evidence：通过因子化教师组合实现多模态在线策略蒸馏
-4. [Sharpen Without Search: On-Policy Distillation of Sequence-Level Power Distribution](/202610/07/2610.06804v1-sharpen-without-search-on-policy-distillation-of-sequence-level-power-distribution)  
-   标签：评分：8.0/10、query:policy-dist
-   evidence：序列级幂分布的在策略蒸馏
-5. [Learning What to Distill: Bilevel Top-K Token Selection for Self-Distillation in Large Language Models](/202610/07/2610.07247v1-learning-what-to-distill-bilevel-top-k-token-selection-for-self-distillation-in-large-language-models)  
-   标签：评分：8.0/10、query:policy-dist
-   evidence：用于在策略自蒸馏的双层Token选择
-6. [Does On-Policy Distillation for Safety Pose Backdoor Risks?](/202610/07/2610.07654v1-does-on-policy-distillation-for-safety-pose-backdoor-risks)  
-   标签：评分：8.0/10、query:policy-dist
-   evidence：在策略蒸馏用于安全时的后门风险
-7. [Privileged Context as Drift in On-Policy Self-Distillation](/202610/07/2610.07842v1-privileged-context-as-drift-in-on-policy-self-distillation)  
-   标签：评分：8.0/10、query:policy-dist
-   evidence：在线自蒸馏中特权上下文与策略漂移
-8. [GFD-OPD: Guidance-Folded On-Policy Distillation of Diffusion Models Across Scales](/202610/07/2609.39692v1-gfd-opd-guidance-folded-on-policy-distillation-of-diffusion-models-across-scales)  
+   evidence：面向大模型后训练的无采样蒸馏
+2. [Frame Differential On-Policy Self-Distillation for Video Reasoning](/202610/09/2609.39021v1-frame-differential-on-policy-self-distillation-for-video-reasoning)  
    标签：评分：7.0/10、query:policy-dist
-   evidence：跨尺度扩散模型的在线策略蒸馏，大模型到小模型
-9. [FastOPD: On-Policy Distillation for Lightweight VLA Deployment](/202610/07/2610.02832v1-fastopd-on-policy-distillation-for-lightweight-vla-deployment)  
+   evidence：在线自蒸馏将稠密帧证据迁移到稀疏帧策略
+3. [Divergence controls entropy in distillation](/202610/09/2610.03529v1-divergence-controls-entropy-in-distillation)  
+   标签：评分：7.0/10、query:policy-dist
+   evidence：从熵角度分析在线策略蒸馏目标
+4. [SHARPO: Segment-Level Credit Assignment for Agentic Reinforcement Learning](/202610/09/2610.00838v2-sharpo-segment-level-credit-assignment-for-agentic-reinforcement-learning)  
    标签：评分：6.0/10、query:policy-dist
-   evidence：面向轻量VLA部署的在线策略蒸馏
-10. [WASD: Wasserstein-based Knowledge Distillation for Large Language Models](/202610/07/2610.07706v1-wasd-wasserstein-based-knowledge-distillation-for-large-language-models)  
-   标签：评分：6.0/10、query:policy-dist
-   evidence：使用Wasserstein距离的大语言模型知识蒸馏
+   evidence：受在线自蒸馏启发的片段级信用分配
 
 
 <div class="dpr-home-promo-card">
